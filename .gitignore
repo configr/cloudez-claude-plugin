@@ -1,0 +1,4 @@
+test/bats/
+.cloudez/
+.DS_Store
+.claude/settings.local.json

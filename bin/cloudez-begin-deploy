@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Uso: cloudez-begin-deploy <environment> <ref> <idempotency_key> [note]
+#
+# Registra a intencao de deploy e cria o diretorio de release remoto.
+# Nao move nenhum byte — devolve o destino para o cloudez-sync.
+# Equivalente a tool MCP cloudez_begin_deploy.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+env="${1:?uso: cloudez-begin-deploy <environment> <ref> <idempotency_key> [note]}"
+ref="${2:?ref (git SHA) obrigatorio}"
+idem="${3:?idempotency_key obrigatorio}"
+note="${4:-}"
+
+site=$(site_config "$env")
+mkdir -p "$CLOUDEZ_STATE_DIR/key"
+
+# Idempotencia: a mesma chave devolve o mesmo deploy, nunca cria outro.
+key_file="$CLOUDEZ_STATE_DIR/key/$idem"
+if [ -f "$key_file" ]; then
+  load_state "$(cat "$key_file")"
+  exit 0
+fi
+
+sha7=$(printf '%s' "$ref" | cut -c1-7)
+release_id="$(date -u +%Y%m%dT%H%M%SZ)-$sha7"
+deploy_id="dpl_$(printf '%s%s' "$release_id" "$idem" | shasum | cut -c1-8)"
+
+root=$(cfg "$site" .paths.root)
+[ -n "$root" ] || die config_invalid "paths.root nao definido para o ambiente '$env'."
+release_path="$root/releases/$release_id"
+
+if ! ssh_out=$(ssh_run "$site" "mkdir -p '$release_path' '$root/releases' '$root/shared'" 2>&1); then
+  die ssh_failed "Nao foi possivel preparar o diretorio de release em $(cfg "$site" .ssh.host)." \
+    "$(jq -n --arg l "$ssh_out" '{logs: $l, retryable: true}')"
+fi
+
+jq -n \
+  --arg deploy_id "$deploy_id" \
+  --arg release_id "$release_id" \
+  --arg env "$env" \
+  --arg ref "$ref" \
+  --arg note "$note" \
+  --arg host "$(cfg "$site" .ssh.host)" \
+  --arg user "$(cfg "$site" .ssh.user)" \
+  --argjson port "$(cfg "$site" .ssh.port 22)" \
+  --arg path "$release_path/" \
+  --arg root "$root" \
+  '{
+     deploy_id: $deploy_id,
+     release_id: $release_id,
+     environment: $env,
+     ref: $ref,
+     note: $note,
+     status: "awaiting_upload",
+     rsync: {host: $host, user: $user, port: $port, path: $path},
+     paths: {root: $root}
+   }' | tee "$(state_path "$deploy_id")"
+
+printf '%s' "$deploy_id" > "$key_file"

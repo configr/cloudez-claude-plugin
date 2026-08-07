@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Uso: cloudez-finalize-deploy <deploy_id>
+#
+# Ativa a release: troca o symlink `current`, roda o hook pos-deploy e limpa
+# releases antigas. Equivalente a tool MCP cloudez_finalize_deploy.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+deploy_id="${1:?uso: cloudez-finalize-deploy <deploy_id>}"
+
+state=$(load_state "$deploy_id")
+env=$(printf '%s' "$state" | jq -r .environment)
+site=$(site_config "$env")
+
+status=$(printf '%s' "$state" | jq -r .status)
+[ "$status" = "uploaded" ] \
+  || die upload_incomplete "Deploy esta em '$status'. Rode cloudez-sync antes de finalizar."
+
+release_id=$(printf '%s' "$state" | jq -r .release_id)
+root=$(printf '%s' "$state" | jq -r .paths.root)
+keep=$(cfg "$site" .keep_releases 5)
+hook=$(cfg "$site" .hooks.post_activate)
+
+previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r basename" || true)
+
+# A troca do symlink e atomica via rename(2): `ln -s` num nome temporario e
+# `mv -T` por cima. Um `rm current && ln -s` deixaria o site fora do ar na
+# janela entre os dois comandos.
+#
+# `mv -T` e GNU coreutils. Roda no servidor (Linux), nao na maquina local —
+# num host BSD/macOS falharia, e ai o mv moveria o link PARA DENTRO de current.
+activate="set -e
+  ln -sfn '$root/releases/$release_id' '$root/.current.tmp.\$\$'
+  mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
+
+if ! out=$(ssh_run "$site" "$activate" 2>&1); then
+  die activation_failed "Falha ao ativar a release $release_id." \
+    "$(jq -n --arg l "$out" --argjson r true '{logs: $l, rollback_available: $r}')"
+fi
+
+hook_result='null'
+if [ -n "$hook" ]; then
+  if hook_out=$(ssh_run "$site" "cd '$root/current' && $hook" 2>&1); then
+    hook_result=$(jq -n --arg o "$hook_out" '{name: "post_activate", exit_code: 0, output: $o}')
+  else
+    # A release ja esta ativa mas o hook falhou — o site pode estar quebrado.
+    # Reportar com os logs e sinalizar que o rollback e possivel e o que
+    # permite a skill decidir sozinha.
+    die hook_failed "Hook pos-deploy falhou. A release $release_id esta ativa mas pode estar quebrada." \
+      "$(jq -n --arg l "$hook_out" --arg p "${previous:-}" \
+          '{logs: $l, rollback_available: true, previous_release_id: $p}')"
+  fi
+fi
+
+# Limpeza best-effort: falhar aqui nao invalida um deploy que ja deu certo.
+ssh_run "$site" \
+  "ls -1dt '$root/releases/'*/ 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -rf" \
+  >/dev/null 2>&1 || true
+
+printf '%s' "$state" \
+  | jq --arg prev "${previous:-}" --argjson hook "$hook_result" --arg url "$(cfg "$site" .health_url)" \
+      '.status = "succeeded"
+       | .previous_release_id = $prev
+       | .url = $url
+       | .hooks = (if $hook == null then [] else [$hook] end)' \
+  | tee "$(state_path "$deploy_id")"

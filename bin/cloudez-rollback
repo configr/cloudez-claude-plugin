@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Uso: cloudez-rollback <environment> [to_release_id]
+#
+# Volta o symlink `current` para uma release anterior. Sem argumento, volta para
+# a imediatamente anterior. Equivalente a tool MCP cloudez_rollback.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+env="${1:?uso: cloudez-rollback <environment> [to_release_id]}"
+target="${2:-}"
+
+site=$(site_config "$env")
+root=$(cfg "$site" .paths.root)
+
+releases=$("$(dirname "${BASH_SOURCE[0]}")/cloudez-list-releases" "$env")
+current=$(printf '%s' "$releases" | jq -r '.releases[] | select(.current) | .release_id')
+
+if [ -z "$target" ]; then
+  target=$(printf '%s' "$releases" \
+    | jq -r --arg c "$current" '[.releases[].release_id | select(. != $c)] | first // empty')
+  [ -n "$target" ] || die no_previous_release \
+    "Nao ha release anterior para voltar em '$env'." \
+    "$(printf '%s' "$releases" | jq -c '{available: [.releases[].release_id]}')"
+fi
+
+printf '%s' "$releases" | jq -e --arg t "$target" '.releases[] | select(.release_id == $t)' >/dev/null \
+  || die release_not_found "Release '$target' nao existe no servidor (pode ter sido limpa)." \
+       "$(printf '%s' "$releases" | jq -c '{available: [.releases[].release_id]}')"
+
+activate="set -e
+  ln -sfn '$root/releases/$target' '$root/.current.tmp.\$\$'
+  mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
+
+if ! out=$(ssh_run "$site" "$activate" 2>&1); then
+  die rollback_failed "Falha ao voltar para a release $target." \
+    "$(jq -n --arg l "$out" '{logs: $l}')"
+fi
+
+hook=$(cfg "$site" .hooks.post_activate)
+[ -n "$hook" ] && ssh_run "$site" "cd '$root/current' && $hook" >/dev/null 2>&1 || true
+
+jq -n --arg env "$env" --arg from "$current" --arg to "$target" --arg url "$(cfg "$site" .health_url)" \
+  '{environment: $env, status: "rolled_back",
+    from_release_id: $from, to_release_id: $to, url: $url}'

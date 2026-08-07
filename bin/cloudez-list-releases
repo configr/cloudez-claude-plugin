@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Uso: cloudez-list-releases <environment>
+#
+# Equivalente a tool MCP cloudez_list_releases.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+env="${1:?uso: cloudez-list-releases <environment>}"
+site=$(site_config "$env")
+root=$(cfg "$site" .paths.root)
+
+if ! out=$(ssh_run "$site" \
+      "current=\$(readlink '$root/current' 2>/dev/null | xargs -r basename)
+       echo \"CURRENT \$current\"
+       ls -1dt '$root/releases/'*/ 2>/dev/null | xargs -rn1 basename" 2>&1); then
+  die ssh_failed "Nao foi possivel listar as releases." \
+    "$(jq -n --arg l "$out" '{logs: $l, retryable: true}')"
+fi
+
+current=$(printf '%s\n' "$out" | awk '/^CURRENT /{print $2}')
+printf '%s\n' "$out" | tail -n +2 | jq -R -s \
+  --arg env "$env" --arg current "$current" \
+  'split("\n") | map(select(length > 0))
+   | {environment: $env,
+      releases: map({release_id: ., current: (. == $current)})}'

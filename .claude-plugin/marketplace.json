@@ -1,0 +1,17 @@
+{
+  "name": "cloudez",
+  "description": "Ferramentas de deploy para hospedagem Cloudez.",
+  "owner": {
+    "name": "Arthur Furlan",
+    "email": "arthur.furlan@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "cloudez",
+      "source": "./",
+      "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: build local, sincronização via tar sobre ssh, ativação atômica da release, verificação de saúde e rollback — com guard-rails que exigem aprovação humana para produção.",
+      "category": "deployment",
+      "tags": ["deploy", "cloudez", "ssh", "hospedagem"]
+    }
+  ]
+}

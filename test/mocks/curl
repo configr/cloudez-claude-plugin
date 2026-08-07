@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Mock de curl para o health-check. Nenhum teste toca a rede.
+#
+# Honra apenas o que cloudez-health-check usa: -o <arquivo> para o corpo e
+# -w '<code> <tempo>\n' para o resumo.
+printf 'curl %s\n' "$*" >> "${MOCK_LOG:-/dev/null}"
+
+out=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  prev="$a"
+done
+
+[ -n "$out" ] && printf '%s' "${MOCK_HTTP_BODY:-<html>ok</html>}" > "$out"
+
+if [ "${MOCK_CURL_EXIT:-0}" -ne 0 ]; then
+  exit "${MOCK_CURL_EXIT}"
+fi
+
+printf '%s %s\n' "${MOCK_HTTP_STATUS:-200}" "${MOCK_HTTP_TIME:-0.042}"

@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # A matriz nao e cerimonia. Os scripts em shell que restam rodam na maquina
+    # do desenvolvedor, que costuma ser macOS, e o servidor e Linux. As duas
+    # plataformas divergem em utilitarios que este projeto usa: `sed` (BRE com
+    # alternancia so no GNU) e `mv -T` (so no GNU coreutils). Um bug em que o
+    # guard falhava ABERTO no macOS passou despercebido por so termos testado
+    # num lugar.
+    #
+    # Windows nao esta na matriz: o launcher .cmd nao tem cobertura automatizada
+    # (veja "Limitacoes" no README). Os binarios sao compilados aqui, mas nao
+    # executados nessa plataforma.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Instalar dependências (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+
+      - name: Instalar dependências (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck jq
+
+      # test/run.sh compila antes de testar, entao a suite sempre valida o
+      # codigo-fonte atual — nunca um binario velho que ficou no repositorio.
+      #
+      # O que o CI NAO garante e que os binarios commitados correspondam ao
+      # fonte: comparar byte a byte falharia sempre que a versao do Go do CI
+      # divergisse da do desenvolvedor. Rodar ./build.sh antes de commitar
+      # continua sendo responsabilidade de quem altera cmd/.
+      - name: Rodar a suíte
+        run: ./test/run.sh --strict

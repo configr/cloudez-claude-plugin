@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Mock de ssh. Registra a invocacao e devolve saida/status controlados.
+#
+# Nao executa o comando remoto localmente de proposito: a ativacao usa `mv -T`
+# (GNU coreutils), que nao existe no macOS. Executar aqui daria falso negativo
+# na maquina do dev e falsa confianca no CI Linux. Em vez disso os testes
+# afirmam sobre o comando ENVIADO, lendo $MOCK_LOG.
+printf 'ssh %s\n' "$*" >> "${MOCK_LOG:-/dev/null}"
+
+# Quando o comando remoto e a ponta receptora do transporte, drenamos o stdin.
+# Sem isso o `tar` local encheria o buffer do pipe e travaria. A condicao evita
+# drenar nas outras invocacoes, onde stdin nao e um pipe nosso.
+case "$*" in
+  *"tar xzf -"*) cat > /dev/null 2>&1 || true ;;
+esac
+
+[ -n "${MOCK_SSH_STDOUT:-}" ] && printf '%s\n' "$MOCK_SSH_STDOUT"
+[ -n "${MOCK_SSH_STDERR:-}" ] && printf '%s\n' "$MOCK_SSH_STDERR" >&2
+exit "${MOCK_SSH_EXIT:-0}"
