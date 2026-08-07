@@ -55,10 +55,15 @@ step "estatico (shellcheck)"
 if command -v shellcheck >/dev/null 2>&1; then
   # Só arquivos de shell: bin/ e libexec/ tambem guardam launchers .cmd e
   # binarios compilados, que o shellcheck tentaria interpretar como script.
-  mapfile -t SH < <(find bin libexec test/mocks -maxdepth 1 -type f \
-    ! -name '*.cmd' ! -name '*.exe' ! -name '*-amd64' ! -name '*-arm64' | sort)
+  #
+  # find|xargs em vez de mapfile: `mapfile` e builtin do bash 4+, e o bash que o
+  # macOS traz e o 3.2. O CI pegou isso — a matriz de duas plataformas existe
+  # exatamente para esse tipo de coisa.
+  #
   # SC1091: nao seguir o source de _lib.sh/_yaml.sh (resolvido em runtime).
-  shellcheck -e SC1091 build.sh test/run.sh "${SH[@]}" || rc=1
+  find bin libexec test/mocks -maxdepth 1 -type f \
+    ! -name '*.cmd' ! -name '*.exe' ! -name '*-amd64' ! -name '*-arm64' -print0 \
+    | xargs -0 shellcheck -e SC1091 build.sh test/run.sh || rc=1
   printf 'ok\n'
 else
   missing "shellcheck"

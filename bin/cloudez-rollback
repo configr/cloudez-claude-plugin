@@ -36,8 +36,13 @@ if ! out=$(ssh_run "$site" "$activate" 2>&1); then
     "$(jq -n --arg l "$out" '{logs: $l}')"
 fi
 
+# O hook e best-effort: se falhar, o rollback ja aconteceu e o importante e
+# reportar isso, nao abortar. `if` explicito em vez de `A && B || C`, que nao e
+# if-then-else e executaria C tambem quando A fosse verdadeiro.
 hook=$(cfg "$site" .hooks.post_activate)
-[ -n "$hook" ] && ssh_run "$site" "cd '$root/current' && $hook" >/dev/null 2>&1 || true
+if [ -n "$hook" ]; then
+  ssh_run "$site" "cd '$root/current' && $hook" >/dev/null 2>&1 || true
+fi
 
 jq -n --arg env "$env" --arg from "$current" --arg to "$target" --arg url "$(cfg "$site" .health_url)" \
   '{environment: $env, status: "rolled_back",
