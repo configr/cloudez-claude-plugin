@@ -1,93 +1,32 @@
 # Configuração de deploy Cloudez.
 # Copie para `.cloudez.yaml` na raiz do projeto publicado e ajuste.
-# Lembre de adicionar `.cloudez/` ao .gitignore — é onde ficam o estado dos
-# deploys e as aprovações.
+# Lembre de adicionar `.cloudez/` ao .gitignore — é onde fica o estado dos
+# deploys.
+#
+# Cada chave dentro de `cloudez:` é um environment. O nome é livre: um projeto
+# com um destino só costuma usar `default`.
 
-# Guard-rails aplicados pelo hook PreToolUse. Estas regras o modelo não
-# contorna: são checadas fora da conversa, pelo harness.
-guard:
-  # Ambientes que exigem aprovação humana assinada antes de qualquer deploy.
-  protected_environments:
-    - production
-
-  # Branches das quais um ambiente protegido pode receber deploy.
-  allowed_branches:
-    - main
-    - master
-
-  # Validade da aprovação. Ela também é vinculada ao SHA de HEAD: commitar
-  # depois de aprovar invalida, para que uma alteração posterior não entre
-  # de carona numa aprovação já dada.
-  approval_ttl_minutes: 15
-
-  # Bloqueia deploy com working tree suja. Um deploy que não corresponde a
-  # nenhum commit deixa ninguém sabendo o que está no ar.
-  require_clean_tree: true
-
-sites:
+cloudez:
   staging:
-    site_id: meusite-staging
+    # O domínio identifica o site.
     domain: staging.meusite.com.br
 
-    # URL verificada após o deploy. Falha aqui dispara rollback.
-    health_url: https://staging.meusite.com.br/
-    health_timeout_s: 10
+    # Onde o site vive no servidor, sempre explícito. O padrão da Cloudez é
+    # `~/<domain>/www`. O document root do site no painel precisa apontar para
+    # `<root>/current` — é o symlink que o deploy troca atomicamente.
+    root: ~/staging.meusite.com.br/www
 
-    build:
-      command: npm run build
-      # Diretório cujo CONTEÚDO vai para o servidor.
-      output_dir: dist
-
+    # Temporário: estes dados vão passar a vir da API da Cloudez, pelo domínio.
     ssh:
       host: srv-12.cloudez.io
       user: deploy
       port: 22
-
-    paths:
-      # O document root do site no painel da Cloudez precisa apontar para
-      # <root>/current — é o symlink que o deploy troca atomicamente.
-      root: /home/deploy/apps/meusite-staging
-
-    rsync:
-      exclude:
-        - .git
-        - .DS_Store
-        - node_modules
-
-    hooks:
-      # Comando rodado no servidor, dentro de current/, após ativar a release.
-      # Ex.: sudo systemctl reload nginx
-      post_activate: ""
-
-    # Quantas releases manter no servidor. Define até onde o rollback alcança.
-    keep_releases: 5
 
   production:
-    site_id: meusite
     domain: meusite.com.br
-
-    health_url: https://meusite.com.br/
-    health_timeout_s: 10
-
-    build:
-      command: npm run build
-      output_dir: dist
+    root: ~/meusite.com.br/www
 
     ssh:
       host: srv-12.cloudez.io
       user: deploy
       port: 22
-
-    paths:
-      root: /home/deploy/apps/meusite
-
-    rsync:
-      exclude:
-        - .git
-        - .DS_Store
-        - node_modules
-
-    hooks:
-      post_activate: ""
-
-    keep_releases: 10

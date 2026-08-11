@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Uso: cloudez-setup <domain> <environment>
+#
+# Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
+# ainda nao existe um. Nao e um erro rodar duas vezes: com config presente ele
+# reporta e sai sem tocar no arquivo. Sobrescrever apagaria host, usuario e
+# caminho de servidor — dados que ninguem tem de cor e que nao dao para
+# adivinhar de volta.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+domain="${1:-}"
+environment="${2:-}"
+
+[ -n "$domain" ] \
+  || die missing_domain "Informe o dominio: cloudez-setup <domain> <environment>." \
+       '{"hint":"FQDN, sem protocolo nem caminho. Ex.: staging.meusite.com.br"}'
+
+# DNS nao diferencia maiuscula, mas o caminho no servidor diferencia: o dominio
+# vira `~/<domain>/www`, entao normalizar aqui evita dois diretorios para o
+# mesmo site.
+domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
+
+# FQDN e nada mais: protocolo, caminho, querystring ou porta viram erro em vez
+# de entrar na config e reaparecer como um caminho de servidor sem sentido.
+if ! printf '%s' "$domain" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$' \
+   || [ "${#domain}" -gt 253 ]; then
+  die invalid_domain "'$1' nao e um FQDN valido." \
+    '{"hint":"Use apenas o dominio: meusite.com.br. Sem https://, sem /caminho, sem ?query, sem :porta."}'
+fi
+
+[ -n "$environment" ] \
+  || die missing_environment "Informe o environment: cloudez-setup <domain> <environment>." \
+       '{"hint":"Ex.: default, staging, production. Nao ha padrao — o environment decide para onde o deploy vai."}'
+
+# O environment vira chave YAML e e interpolado no template. Restringir o
+# formato aqui e o que impede um nome com espaco ou dois-pontos de gerar um
+# arquivo quebrado que o usuario nao escreveu.
+printf '%s' "$environment" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_-]*$' \
+  || die invalid_environment "Nome de environment invalido: '$environment'." \
+       '{"hint":"Use letras, numeros, hifen ou underscore. Ex.: default, staging, production."}'
+
+# resolve_config devolve o arquivo existente, ou .cloudez.yaml como destino
+# padrao quando nao ha nenhum. Serve para as duas metades desta decisao.
+target=$(resolve_config)
+
+if [ -f "$target" ]; then
+  jq -n --arg p "$target" --arg d "$domain" --arg e "$environment" \
+    '{status: "exists", path: $p, domain: $d, environment: $e}'
+  exit 0
+fi
+
+cat > "$target" <<YAML
+# Configuração de deploy Cloudez. Preencha os TODO do bloco ssh.
+#
+# O document root do site no painel da Cloudez precisa apontar para
+# <root>/current — é o symlink que o deploy troca atomicamente.
+
+cloudez:
+  $environment:
+    # O domínio identifica o site.
+    domain: $domain
+
+    # Onde o site vive no servidor. O padrão da Cloudez é ~/<domain>/www.
+    root: ~/$domain/www
+
+    ssh:
+      host: TODO
+      user: TODO
+      port: 22
+YAML
+
+# O estado dos deploys mora em .cloudez/ e nao deveria ir para o repositorio.
+# Fazemos aqui porque e o passo que todo mundo esquece, e esquecer significa
+# commitar estado de servidor.
+gitignore="skipped"
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  if [ -f .gitignore ] && grep -q '^\.cloudez/\?$' .gitignore; then
+    gitignore="already"
+  else
+    printf '.cloudez/\n' >> .gitignore
+    gitignore="updated"
+  fi
+fi
+
+jq -n --arg p "$target" --arg d "$domain" --arg e "$environment" --arg g "$gitignore" \
+  '{status: "created", path: $p, domain: $d, environment: $e, gitignore: $g,
+    todo: ["ssh.host", "ssh.user"]}'

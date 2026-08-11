@@ -1,6 +1,6 @@
 {
   "name": "cloudez",
-  "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: build local, sincronização via tar sobre ssh, ativação atômica da release, verificação de saúde e rollback.",
+  "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: sincronização via tar sobre ssh, ativação atômica da release e rollback.",
   "version": "0.1.0",
   "author": {
     "name": "Arthur Furlan"

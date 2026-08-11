@@ -5,16 +5,14 @@
 # caminhos da stdlib (resolucao DNS, os/user) linkam contra a libc do sistema e
 # o binario deixa de ser autocontido.
 #
-# Os artefatos vao para libexec/, junto com os dois launchers. O hooks.json
-# aponta para `libexec/guard` sem extensao: no POSIX isso resolve para o script
-# sh, no Windows o PATHEXT resolve para o .cmd. E a unica forma de ter uma
-# string de comando estatica que serve nos tres sistemas.
+# Os artefatos vao para libexec/. Quem os invoca e o launcher `bin/cloudez-<cmd>`
+# (com o par .cmd para Windows), que escolhe o arquivo da plataforma atual.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 TARGETS="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
-CMDS="${1:-guard}"
+CMDS="${1:-sync}"
 
 mkdir -p libexec
 

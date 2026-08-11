@@ -5,9 +5,9 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-env="${1:?uso: cloudez-list-releases <environment>}"
-site=$(site_config "$env")
-root=$(cfg "$site" .paths.root)
+environment="${1:?uso: cloudez-list-releases <environment>}"
+site=$(site_config "$environment")
+root=$(site_root "$site" "$environment")
 
 if ! out=$(ssh_run "$site" \
       "current=\$(readlink '$root/current' 2>/dev/null | xargs -r basename)
@@ -19,7 +19,7 @@ fi
 
 current=$(printf '%s\n' "$out" | awk '/^CURRENT /{print $2}')
 printf '%s\n' "$out" | tail -n +2 | jq -R -s \
-  --arg env "$env" --arg current "$current" \
+  --arg environment "$environment" --arg current "$current" \
   'split("\n") | map(select(length > 0))
-   | {environment: $env,
+   | {environment: $environment,
       releases: map({release_id: ., current: (. == $current)})}'

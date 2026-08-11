@@ -45,7 +45,7 @@ load_config() {
   local f j rc
   f=$(resolve_config)
   [ -f "$f" ] \
-    || die config_not_found "Arquivo $f nao encontrado. Copie cloudez.example.yaml e ajuste."
+    || die config_not_found "Arquivo $f nao encontrado. Rode cloudez-setup para criar o template."
 
   j=$(yaml_to_json "$f"); rc=$?
   case "$rc" in
@@ -58,17 +58,24 @@ load_config() {
   printf '%s' "$j" | jq -e . >/dev/null 2>&1 \
     || die config_invalid "$f nao produziu uma estrutura utilizavel."
 
+  # O bloco raiz se chama `cloudez`. Checar aqui e o que transforma uma config
+  # antiga (que usava `sites:`) num erro nomeado, em vez de um site_not_found
+  # com lista de ambientes vazia — que manda o usuario procurar no lugar errado.
+  printf '%s' "$j" | jq -e 'has("cloudez")' >/dev/null 2>&1 \
+    || die config_invalid "$f nao tem o bloco 'cloudez:' no topo." \
+         '{"hint":"Cada ambiente vira uma chave dentro de cloudez:. O nome antigo era sites:."}'
+
   CLOUDEZ_CONFIG_JSON="$j"
 }
 
 # site_config <environment> -> JSON do site em stdout
 site_config() {
-  local env="$1" site
+  local environment="$1" site
   load_config
-  site=$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c --arg e "$env" '.sites[$e] // empty')
+  site=$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c --arg e "$environment" '.cloudez[$e] // empty')
   [ -n "$site" ] \
-    || die site_not_found "Ambiente '$env' nao existe em $(resolve_config)." \
-         "$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c '{hint: ("Ambientes definidos: " + (.sites | keys | join(", ")))}')"
+    || die site_not_found "Ambiente '$environment' nao existe em $(resolve_config)." \
+         "$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c '{hint: ("Ambientes definidos: " + (.cloudez | keys | join(", ")))}')"
   printf '%s' "$site"
 }
 
@@ -77,6 +84,25 @@ cfg() {
   local v
   v=$(printf '%s' "$1" | jq -r "$2 // empty")
   if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${3:-}"; fi
+}
+
+# site_root <site_json> <environment> -> caminho do site no servidor
+#
+# `root` e obrigatorio e explicito na config: para onde os arquivos vao e a
+# decisao mais destrutiva do deploy, e derivar isso de outro campo deixaria o
+# destino implicito num arquivo que alguem le com pressa.
+#
+# Um `~/` inicial e REMOVIDO, nao expandido: os comandos remotos vao entre aspas
+# simples (senao um caminho com espaco quebraria), e dentro delas o shell do
+# servidor nao expande til — sobraria um diretorio chamado `~`. Caminho relativo
+# resolve a partir do $HOME do usuario ssh, que e exatamente o que `~/` diz.
+site_root() {
+  local site="$1" environment="$2" root
+  root=$(cfg "$site" .root)
+  [ -n "$root" ] \
+    || die config_invalid "Ambiente '$environment' nao tem root definido em $(resolve_config)." \
+         '{"hint":"Ex.: root: ~/meusite.com.br/www — o deploy publica em <root>/current."}'
+  printf '%s' "${root#\~/}"
 }
 
 # ssh_run <site_json> <comando...>

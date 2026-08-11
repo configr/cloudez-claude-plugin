@@ -8,10 +8,9 @@ jobs:
   test:
     # A matriz nao e cerimonia. Os scripts em shell que restam rodam na maquina
     # do desenvolvedor, que costuma ser macOS, e o servidor e Linux. As duas
-    # plataformas divergem em utilitarios que este projeto usa: `sed` (BRE com
-    # alternancia so no GNU) e `mv -T` (so no GNU coreutils). Um bug em que o
-    # guard falhava ABERTO no macOS passou despercebido por so termos testado
-    # num lugar.
+    # plataformas divergem em utilitarios que este projeto usa: `mv -T` (so no
+    # GNU coreutils) e o bash 3.2 que o macOS ainda traz, sem `mapfile`. Os dois
+    # ja quebraram aqui por so termos testado num lugar.
     #
     # Windows nao esta na matriz: o launcher .cmd nao tem cobertura automatizada
     # (veja "Limitacoes" no README). Os binarios sao compilados aqui, mas nao

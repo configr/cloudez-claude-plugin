@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Leitura de YAML sem dependencia obrigatoria.
 #
-# Funcoes puras, sem `set -e` e sem `die`: os adaptadores em bin/ e o hook de
-# guard-rail tratam falha de config de formas opostas (os primeiros abortam, o
-# segundo libera), entao a politica fica com quem chama.
+# Funcoes puras, sem `set -e` e sem `die`: elas devolvem codigo de saida e a
+# politica sobre a falha fica com quem chama.
 #
 # A estrategia e converter YAML -> JSON uma vez e manter todo o resto em jq. Nao
 # ha parser YAML universal instalado por padrao, entao tentamos em ordem os

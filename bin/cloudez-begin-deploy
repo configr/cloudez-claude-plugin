@@ -7,12 +7,12 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-env="${1:?uso: cloudez-begin-deploy <environment> <ref> <idempotency_key> [note]}"
+environment="${1:?uso: cloudez-begin-deploy <environment> <ref> <idempotency_key> [note]}"
 ref="${2:?ref (git SHA) obrigatorio}"
 idem="${3:?idempotency_key obrigatorio}"
 note="${4:-}"
 
-site=$(site_config "$env")
+site=$(site_config "$environment")
 mkdir -p "$CLOUDEZ_STATE_DIR/key"
 
 # Idempotencia: a mesma chave devolve o mesmo deploy, nunca cria outro.
@@ -26,8 +26,7 @@ sha7=$(printf '%s' "$ref" | cut -c1-7)
 release_id="$(date -u +%Y%m%dT%H%M%SZ)-$sha7"
 deploy_id="dpl_$(printf '%s%s' "$release_id" "$idem" | shasum | cut -c1-8)"
 
-root=$(cfg "$site" .paths.root)
-[ -n "$root" ] || die config_invalid "paths.root nao definido para o ambiente '$env'."
+root=$(site_root "$site" "$environment")
 release_path="$root/releases/$release_id"
 
 if ! ssh_out=$(ssh_run "$site" "mkdir -p '$release_path' '$root/releases' '$root/shared'" 2>&1); then
@@ -38,7 +37,7 @@ fi
 jq -n \
   --arg deploy_id "$deploy_id" \
   --arg release_id "$release_id" \
-  --arg env "$env" \
+  --arg environment "$environment" \
   --arg ref "$ref" \
   --arg note "$note" \
   --arg host "$(cfg "$site" .ssh.host)" \
@@ -49,12 +48,12 @@ jq -n \
   '{
      deploy_id: $deploy_id,
      release_id: $release_id,
-     environment: $env,
+     environment: $environment,
      ref: $ref,
      note: $note,
      status: "awaiting_upload",
-     rsync: {host: $host, user: $user, port: $port, path: $path},
-     paths: {root: $root}
+     ssh: {host: $host, user: $user, port: $port, path: $path},
+     root: $root
    }' | tee "$(state_path "$deploy_id")"
 
 printf '%s' "$deploy_id" > "$key_file"

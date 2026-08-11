@@ -6,20 +6,20 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-env="${1:?uso: cloudez-rollback <environment> [to_release_id]}"
+environment="${1:?uso: cloudez-rollback <environment> [to_release_id]}"
 target="${2:-}"
 
-site=$(site_config "$env")
-root=$(cfg "$site" .paths.root)
+site=$(site_config "$environment")
+root=$(site_root "$site" "$environment")
 
-releases=$("$(dirname "${BASH_SOURCE[0]}")/cloudez-list-releases" "$env")
+releases=$("$(dirname "${BASH_SOURCE[0]}")/cloudez-list-releases" "$environment")
 current=$(printf '%s' "$releases" | jq -r '.releases[] | select(.current) | .release_id')
 
 if [ -z "$target" ]; then
   target=$(printf '%s' "$releases" \
     | jq -r --arg c "$current" '[.releases[].release_id | select(. != $c)] | first // empty')
   [ -n "$target" ] || die no_previous_release \
-    "Nao ha release anterior para voltar em '$env'." \
+    "Nao ha release anterior para voltar em '$environment'." \
     "$(printf '%s' "$releases" | jq -c '{available: [.releases[].release_id]}')"
 fi
 
@@ -36,14 +36,6 @@ if ! out=$(ssh_run "$site" "$activate" 2>&1); then
     "$(jq -n --arg l "$out" '{logs: $l}')"
 fi
 
-# O hook e best-effort: se falhar, o rollback ja aconteceu e o importante e
-# reportar isso, nao abortar. `if` explicito em vez de `A && B || C`, que nao e
-# if-then-else e executaria C tambem quando A fosse verdadeiro.
-hook=$(cfg "$site" .hooks.post_activate)
-if [ -n "$hook" ]; then
-  ssh_run "$site" "cd '$root/current' && $hook" >/dev/null 2>&1 || true
-fi
-
-jq -n --arg env "$env" --arg from "$current" --arg to "$target" --arg url "$(cfg "$site" .health_url)" \
-  '{environment: $env, status: "rolled_back",
-    from_release_id: $from, to_release_id: $to, url: $url}'
+jq -n --arg environment "$environment" --arg from "$current" --arg to "$target" \
+  '{environment: $environment, status: "rolled_back",
+    from_release_id: $from, to_release_id: $to}'

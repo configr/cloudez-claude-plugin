@@ -1,44 +1,34 @@
 ---
 name: deploy
-description: Faz deploy de um site para a Cloudez — build local, sincronização via tar sobre ssh, ativação da release com verificação de saúde e rollback automático. Use quando o usuário pedir para subir, publicar, fazer deploy ou reverter um site, ou quando pedir para verificar o estado de um deploy anterior.
+description: Faz deploy de um site para a Cloudez — sincronização via tar sobre ssh e ativação atômica da release, com rollback. Use quando o usuário pedir para subir, publicar, fazer deploy ou reverter um site, ou quando pedir para ver as releases de um deploy anterior.
 ---
 
 # Deploy para a Cloudez
 
-Argumentos recebidos: `$ARGUMENTS` — normalmente o ambiente (`staging` ou
-`production`). Vazio significa `staging`.
+Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
+a publicar. Os environments são as chaves de `cloudez:` no `.cloudez.yaml`.
 
-O deploy acontece em quatro etapas com estado entre elas: registrar a release,
-sincronizar os arquivos, ativar, verificar. Os adaptadores `cloudez-*` fazem
-cada etapa e imprimem JSON — leia esse JSON, não presuma sucesso pelo exit code.
-Eles estão no `PATH` enquanto o plugin está ativo; chame pelo nome, sem caminho.
+O deploy acontece em três etapas com estado entre elas: registrar a release,
+sincronizar os arquivos, ativar. Os adaptadores `cloudez-*` fazem cada etapa e
+imprimem JSON — leia esse JSON, não presuma sucesso pelo exit code. Eles estão
+no `PATH` enquanto o plugin está ativo; chame pelo nome, sem caminho.
 
 Todos os caminhos abaixo são relativos à raiz do projeto sendo publicado, que
-precisa ter um `.cloudez.yaml` (modelo em `cloudez.example.yaml`).
+precisa ter um `.cloudez.yaml`. Se não tiver, pare e mande o usuário rodar
+`/cloudez:setup <domain> <environment>` — sem os dados de servidor não há deploy,
+e eles não são seus para inventar.
 
 ## Antes de qualquer coisa
 
-**Ambiente alvo.** `staging` salvo se o usuário disser produção. Se ele disse
-"sobe" sem qualificar, é staging — não infira produção.
+**Environment alvo.** Sem argumento, leia as chaves de `cloudez:` e escolha nesta
+ordem: `default`, se existir; senão `staging`, se existir; senão **pergunte** qual
+dos environments definidos é o alvo. `production` nunca entra nessa escolha
+automática: se o usuário disse "sobe" sem qualificar, não é produção.
 
 **Produção exige confirmação explícita nesta conversa.** "Sobe pra prod",
 "publica em produção", "manda pro ar" contam. Uma conclusão sua de que produção
 seria o alvo lógico, não conta. Se estiver em dúvida, pergunte antes de rodar
 qualquer coisa.
-
-**Produção também exige aprovação assinada, e ela não é sua para dar.** Um hook
-bloqueia o deploy até existir uma aprovação válida. Você não consegue emiti-la:
-`cloudez-approve` exige TTY e falha quando executado pela tool Bash — de
-propósito.
-
-Quando o bloqueio aparecer, ele já traz o caminho absoluto do comando. Repasse
-esse caminho ao usuário para ele rodar **no terminal dele** — `bin/` só está no
-`PATH` da tool Bash, não no shell dele, então o caminho relativo não serve.
-
-A aprovação vale 15 minutos e **só para o commit atual**. Se você commitar
-qualquer coisa depois dela, ela é invalidada e precisa ser reemitida — não trate
-isso como bug, é o desenho. Não tente contornar o bloqueio de nenhuma forma;
-reporte e espere.
 
 **Working tree limpo.** Rode `git status --porcelain`. Se voltar qualquer coisa,
 pare e reporte o que está pendente. O `ref` do deploy precisa apontar para um
@@ -48,19 +38,23 @@ Colete o SHA com `git rev-parse HEAD`.
 
 ## O procedimento
 
-### 1. Build
+### 1. Decidir o que subir
 
-Leia `.cloudez.yaml` para o comando e o diretório de saída — os campos são
-`sites.<env>.build.command` e `sites.<env>.build.output_dir`.
+O diretório publicado vem dos argumentos. Sem ele: se o projeto tem build
+(`package.json` com script `build`, por exemplo), rode o build e use o diretório
+de saída; se não tem, pergunte ao usuário qual diretório subir.
 
-Rode o build. Se falhar, **pare** — não tente sincronizar um build quebrado.
-Mostre o erro e, se for algo que você consegue corrigir (import faltando, erro
-de tipo), corrija e rode de novo antes de seguir.
+Não chute a raiz do repositório — ela levaria `.git` e `node_modules` para o
+servidor. O `sync` envia o diretório inteiro, sem filtro.
+
+Se o build falhar, **pare** — não sincronize um build quebrado. Mostre o erro e,
+se for algo que você consegue corrigir (import faltando, erro de tipo), corrija
+e rode de novo antes de seguir.
 
 ### 2. Registrar a release
 
 ```sh
-cloudez-begin-deploy <env> <sha> <idempotency_key>
+cloudez-begin-deploy <environment> <sha> <idempotency_key>
 ```
 
 O `idempotency_key` é um UUID que **você gera uma vez por deploy** (`uuidgen`).
@@ -72,7 +66,7 @@ Guarde o `deploy_id` do retorno.
 ### 3. Sincronizar
 
 ```sh
-cloudez-sync <deploy_id> <output_dir>
+cloudez-sync <deploy_id> <diretorio>
 ```
 
 Falha aqui é quase sempre SSH: chave não configurada, host desconhecido, permissão.
@@ -85,34 +79,19 @@ usuário resolve — reporte e pare, não tente contornar.
 cloudez-finalize-deploy <deploy_id>
 ```
 
-Troca o symlink `current` e roda o hook pós-deploy. Dois erros distintos:
+Troca o symlink `current` de forma atômica. Se der `activation_failed`, a release
+**não** foi ativada e o site continua no ar na versão anterior — reporte e pare.
 
-- `activation_failed` — a release **não** foi ativada; o site continua no ar na
-  versão anterior. Reporte e pare.
-- `hook_failed` — a release **foi** ativada mas o hook quebrou; o site pode estar
-  fora. Vá direto para o rollback (passo 6), depois reporte com os `logs`.
-
-### 5. Verificar
+### 5. Rollback
 
 ```sh
-cloudez-health-check <env>
+cloudez-rollback <environment>              # volta para a anterior
+cloudez-rollback <environment> <release_id> # volta para uma específica
 ```
 
-Sai com código 1 quando não está saudável. **Um deploy sem health check não está
-terminado** — não reporte sucesso antes deste passo.
-
-Se falhar, faça rollback antes de reportar.
-
-### 6. Rollback
-
-```sh
-cloudez-rollback <env>              # volta para a anterior
-cloudez-rollback <env> <release_id> # volta para uma específica
-```
-
-Depois de reverter, rode o health check de novo para confirmar que o site voltou.
-Se o rollback também falhar, isso é um incidente — reporte imediatamente com
-todos os logs que você tiver, sem tentar mais nada.
+O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Se o
+rollback também falhar, isso é um incidente — reporte imediatamente com todos os
+logs que você tiver, sem tentar mais nada.
 
 ## Como reportar
 
@@ -121,7 +100,8 @@ detalhe.
 
 Não descreva os passos que correram bem — o usuário não precisa saber que o
 envio funcionou. Descreva o que ele precisa fazer alguma coisa a respeito:
-falhas, rollbacks executados, e a URL para conferir.
+falhas, rollbacks executados, e o domínio para ele conferir (`cloudez.<environment>.domain`
+no `.cloudez.yaml`).
 
 Se houve rollback, diga explicitamente **qual versão está no ar agora**.
 
@@ -130,8 +110,7 @@ Se houve rollback, diga explicitamente **qual versão está no ar agora**.
 Quando o usuário só quer saber o estado:
 
 ```sh
-cloudez-list-releases <env>   # o que está no servidor, qual é a atual
-cloudez-health-check <env>    # o site está de pé?
+cloudez-list-releases <environment>   # o que está no servidor, qual é a atual
 ```
 
 ---

@@ -9,7 +9,7 @@
     {
       "name": "cloudez",
       "source": "./",
-      "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: build local, sincronização via tar sobre ssh, ativação atômica da release, verificação de saúde e rollback — com guard-rails que exigem aprovação humana para produção.",
+      "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: sincronização via tar sobre ssh, ativação atômica da release e rollback.",
       "category": "deployment",
       "tags": ["deploy", "cloudez", "ssh", "hospedagem"]
     }

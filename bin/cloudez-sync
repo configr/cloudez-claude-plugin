@@ -1,17 +1,15 @@
 #!/bin/sh
 # Launcher POSIX: seleciona o binario da plataforma atual.
 #
-# Existe porque o hooks.json guarda uma string de comando estatica e nao tem
-# como variar por sistema. `libexec/guard` resolve para este script no POSIX e
-# para guard.cmd no Windows (via PATHEXT) — mesma string, plataformas
-# diferentes.
+# Existe porque quem chama usa um nome so — `cloudez-sync` — e o binario e por
+# sistema e arquitetura. No Windows o par deste script e o .cmd ao lado, que o
+# PATHEXT resolve a partir do mesmo nome.
 #
-# O mesmo script serve para todos os comandos: o alvo sai do proprio nome do
-# arquivo, com o prefixo `cloudez-` removido. Assim `bin/cloudez-sync` chama
-# libexec/sync-<os>-<arch> sem precisar de uma copia editada.
+# O alvo sai do proprio nome do arquivo, com o prefixo `cloudez-` removido, para
+# que o mesmo script sirva a qualquer comando futuro sem uma copia editada.
 #
 # `exec` e importante: substitui o processo, entao o codigo de saida do binario
-# (0 libera, 2 bloqueia) chega intacto ao harness.
+# chega intacto a quem chamou.
 
 # CDPATH atrapalha: com ele setado, `cd` imprime o destino no stdout e polui a
 # substituicao de comando.
@@ -22,7 +20,7 @@ dir=$(cd -- "$(dirname -- "$0")" && pwd)
 name=$(basename -- "$0")
 name=${name#cloudez-}
 
-# O launcher pode viver em libexec/ (guard) ou em bin/ (adaptadores).
+# O launcher vive em bin/, mas tolera ser chamado de dentro do proprio libexec/.
 libexec="$dir"
 [ -d "$dir/../libexec" ] && libexec=$(cd -- "$dir/../libexec" && pwd)
 
@@ -36,12 +34,9 @@ esac
 bin="$libexec/$name-$os-$arch"
 
 if [ ! -x "$bin" ]; then
-  # Sem binario para esta plataforma nao ha o que executar. Bloquear travaria
-  # toda chamada de Bash da sessao; liberar em silencio desligaria o guard sem
-  # aviso. Avisamos e liberamos.
   echo "cloudez: binario '$name' ausente para $os/$arch ($bin)." >&2
   echo "cloudez: rode ./build.sh no diretorio do plugin." >&2
-  exit 0
+  exit 1
 fi
 
 exec "$bin" "$@"

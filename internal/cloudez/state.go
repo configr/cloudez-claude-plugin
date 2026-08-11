@@ -1,3 +1,5 @@
+// Package cloudez guarda o estado de deploy compartilhado pelos binarios do
+// plugin.
 package cloudez
 
 import (
@@ -7,12 +9,19 @@ import (
 	"path/filepath"
 )
 
+// StateDir e onde vive o estado dos deploys, relativo a raiz do projeto.
+// Sobreponivel por CLOUDEZ_STATE_DIR.
+func StateDir() string {
+	if v := os.Getenv("CLOUDEZ_STATE_DIR"); v != "" {
+		return v
+	}
+	return ".cloudez/state"
+}
+
 // Deploy e o estado gravado por begin-deploy e consumido por sync/finalize.
 //
-// O campo `rsync` conserva o nome por compatibilidade com o begin-deploy em
-// shell, que ainda o escreve. O transporte deixou de ser rsync (agora e tar
-// sobre ssh), mas renomear exigiria mexer no bin/, que sai de cena quando o
-// servidor MCP entrar.
+// O shape espelha o retorno de cloudez_begin_deploy (docs/mcp-tool-contract.md):
+// quando o servidor MCP entrar, o estado vem de la sem conversao.
 type Deploy struct {
 	DeployID    string `json:"deploy_id"`
 	ReleaseID   string `json:"release_id"`
@@ -21,16 +30,14 @@ type Deploy struct {
 	Note        string `json:"note,omitempty"`
 	Status      string `json:"status"`
 
-	Rsync struct {
+	SSH struct {
 		Host string `json:"host"`
 		User string `json:"user"`
 		Port int    `json:"port"`
 		Path string `json:"path"`
-	} `json:"rsync"`
+	} `json:"ssh"`
 
-	Paths struct {
-		Root string `json:"root"`
-	} `json:"paths"`
+	Root string `json:"root"`
 
 	TransferStats string `json:"transfer_stats,omitempty"`
 }

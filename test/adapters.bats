@@ -5,35 +5,229 @@ load helpers/setup
 
 setup() { make_project; }
 
+# ------------------------------------------------------------------- setup --
+
+@test "setup sem argumentos: missing_domain" {
+  rm .cloudez.yaml
+  run cloudez-setup
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "missing_domain" ]
+  [ ! -f .cloudez.yaml ]
+}
+
+# O environment decide para onde o deploy vai. Sem padrao: um template criado
+# para o environment errado e pior do que template nenhum.
+@test "setup sem environment: missing_environment" {
+  rm .cloudez.yaml
+  run cloudez-setup staging.example.com
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "missing_environment" ]
+  [ ! -f .cloudez.yaml ]
+}
+
+# O dominio identifica o site E vira caminho no servidor. URL colada com
+# protocolo ou caminho e o erro mais provavel aqui, e passaria batido.
+@test "setup recusa dominio que nao e FQDN" {
+  rm .cloudez.yaml
+  for d in https://x.example.com x.example.com/path 'x.example.com?a=1' \
+           x.example.com:8080 localhost -x.example.com "x .example.com"; do
+    run cloudez-setup "$d" staging
+    [ "$status" -eq 1 ]
+    [ "$(jq_field "$output" .error.code)" = "invalid_domain" ]
+    [ ! -f .cloudez.yaml ]
+  done
+}
+
+# O environment vira chave YAML por interpolacao. Um nome com espaco ou
+# dois-pontos geraria um arquivo quebrado que o usuario nao escreveu.
+@test "setup com nome de environment invalido nao gera arquivo" {
+  rm .cloudez.yaml
+  run cloudez-setup staging.example.com "prod: uction"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "invalid_environment" ]
+  [ ! -f .cloudez.yaml ]
+}
+
+@test "setup cria o template quando nao ha config" {
+  rm .cloudez.yaml
+  run cloudez-setup staging.example.com staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .status)" = "created" ]
+  [ "$(jq_field "$output" .path)" = ".cloudez.yaml" ]
+  [ "$(jq_field "$output" .domain)" = "staging.example.com" ]
+  [ "$(jq_field "$output" .environment)" = "staging" ]
+  [ -f .cloudez.yaml ]
+}
+
+# O template precisa ser YAML valido desde o primeiro byte: um arquivo gerado
+# que nao parseia manda o usuario depurar indentacao que ele nao escreveu.
+#
+# O bloco raiz e `cloudez`, e dentro dele so o environment pedido.
+@test "o template gerado parseia sob cloudez, com so o environment pedido" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br homolog >/dev/null
+  json=$(bash -c "source '$PLUGIN_ROOT/bin/_yaml.sh'; yaml_to_json .cloudez.yaml")
+  [ "$(jq_field "$json" '.cloudez | keys | join(",")')" = "homolog" ]
+  [ "$(jq_field "$json" .sites)" = "null" ]
+  [ "$(jq_field "$json" .cloudez.homolog.domain)" = "meusite.com.br" ]
+  [ "$(jq_field "$json" .cloudez.homolog.ssh.port)" = "22" ]
+}
+
+# O identificador do site e o dominio; site_id saiu da config.
+@test "o template gerado nao traz site_id" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br staging >/dev/null
+  ! grep -q site_id .cloudez.yaml
+}
+
+# O destino fica explicito na config, nunca derivado em tempo de deploy.
+@test "o template gerado traz root explicito, logo abaixo de domain" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br staging >/dev/null
+  grep -q 'root: ~/meusite.com.br/www' .cloudez.yaml
+  [ "$(grep -n 'domain:' .cloudez.yaml | cut -d: -f1)" \
+    -lt "$(grep -n 'root:' .cloudez.yaml | cut -d: -f1)" ]
+}
+
+# Com dominio e environment em maos, so o ssh sobra para o usuario preencher.
+@test "o template gerado deixa apenas o ssh como TODO" {
+  rm .cloudez.yaml
+  run cloudez-setup meusite.com.br staging
+  [ "$(jq_field "$output" '.todo | join(",")')" = "ssh.host,ssh.user" ]
+  # Só linhas de valor: o comentário do topo também cita TODO.
+  [ "$(grep -cE ': *TODO$' .cloudez.yaml)" -eq 2 ]
+  [ "$(grep -cE '^ +(host|user): TODO$' .cloudez.yaml)" -eq 2 ]
+}
+
+# DNS nao diferencia maiuscula, mas o caminho no servidor diferencia.
+@test "setup normaliza o dominio para minusculas" {
+  rm .cloudez.yaml
+  run cloudez-setup MeuSite.COM.BR staging
+  [ "$(jq_field "$output" .domain)" = "meusite.com.br" ]
+  grep -q 'domain: meusite.com.br' .cloudez.yaml
+  grep -q 'root: ~/meusite.com.br/www' .cloudez.yaml
+}
+
+# ------------------------------------------------------------------- root ---
+
+# make_config <yaml_do_site> — reescreve a config com um unico environment staging
+make_config() {
+  { printf 'cloudez:\n  staging:\n'; printf '%s\n' "$1" | sed 's/^/    /'; } > .cloudez.yaml
+}
+
+# O til nao pode chegar ao servidor: os comandos remotos vao entre aspas simples
+# e o shell de la nao o expande — criaria um diretorio chamado `~`. Caminho
+# relativo resolve a partir do $HOME do usuario ssh, que e o que `~/` significa.
+@test "til inicial em root e removido, nunca enviado" {
+  make_config 'domain: staging.example.com
+root: ~/staging.example.com/www
+ssh: {host: srv.example.com, user: deploy, port: 22}'
+  run cloudez-begin-deploy staging abc1234def K1
+  [ "$status" -eq 0 ]
+  [[ "$(jq_field "$output" .ssh.path)" == staging.example.com/www/releases/* ]]
+  ! grep -q '~' "$MOCK_LOG"
+}
+
+@test "root absoluto continua absoluto" {
+  run cloudez-begin-deploy staging abc1234def K1
+  [ "$status" -eq 0 ]
+  [[ "$(jq_field "$output" .ssh.path)" == /srv/staging/releases/* ]]
+}
+
+# Obrigatorio e explicito: sem root o adaptador para, em vez de adivinhar um
+# destino a partir do dominio.
+@test "sem root: config_invalid, mesmo com domain definido" {
+  make_config 'domain: staging.example.com
+ssh: {host: srv.example.com, user: deploy, port: 22}'
+  run cloudez-list-releases staging
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "config_invalid" ]
+  [[ "$(jq_field "$output" .error.message)" == *root* ]]
+}
+
+# `paths.root` era o nome antigo. Ignorar em silencio publicaria no lugar errado.
+@test "paths.root antigo nao e aceito como root" {
+  make_config 'domain: staging.example.com
+paths: {root: /srv/antigo}
+ssh: {host: srv.example.com, user: deploy, port: 22}'
+  run cloudez-begin-deploy staging abc1234def K1
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "config_invalid" ]
+}
+
+# Config existente carrega host, usuario e caminho que nao dao para adivinhar de
+# volta. Sobrescrever seria destrutivo, entao rodar de novo nao faz nada.
+@test "setup nao sobrescreve config existente" {
+  printf 'cloudez: {producao: {root: /srv/x}}\n' > .cloudez.yaml
+  run cloudez-setup meusite.com.br staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .status)" = "exists" ]
+  grep -q producao .cloudez.yaml
+  ! grep -q TODO .cloudez.yaml
+}
+
+@test "setup respeita o .cloudez.yml existente em vez de criar um .yaml" {
+  mv .cloudez.yaml .cloudez.yml
+  run cloudez-setup meusite.com.br staging
+  [ "$(jq_field "$output" .status)" = "exists" ]
+  [ "$(jq_field "$output" .path)" = ".cloudez.yml" ]
+  [ ! -f .cloudez.yaml ]
+}
+
+@test "setup acrescenta .cloudez/ ao gitignore" {
+  rm .cloudez.yaml .gitignore
+  run cloudez-setup meusite.com.br staging
+  [ "$(jq_field "$output" .gitignore)" = "updated" ]
+  grep -qx '\.cloudez/' .gitignore
+}
+
+@test "setup nao duplica a linha do gitignore" {
+  rm .cloudez.yaml
+  run cloudez-setup meusite.com.br staging
+  [ "$(jq_field "$output" .gitignore)" = "already" ]
+  [ "$(grep -c '^\.cloudez/$' .gitignore)" -eq 1 ]
+}
+
 # ------------------------------------------------------------------ config --
 
 @test "config ausente: config_not_found" {
   rm .cloudez.yaml
-  run cloudez-health-check staging
+  run cloudez-list-releases staging
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "config_not_found" ]
 }
 
 @test "extensao .yml tambem e aceita" {
   mv .cloudez.yaml .cloudez.yml
-  run cloudez-health-check staging
+  run cloudez-list-releases staging
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .healthy)" = "true" ]
+  [ "$(jq_field "$output" .environment)" = "staging" ]
 }
 
 @test "ambiente inexistente: site_not_found com a lista de ambientes" {
-  run cloudez-health-check producao
+  run cloudez-list-releases producao
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "site_not_found" ]
   [[ "$(jq_field "$output" .error.hint)" == *staging* ]]
+}
+
+# O bloco raiz virou `cloudez`. Config antiga precisa de erro nomeado, senao o
+# usuario recebe site_not_found com lista de ambientes vazia e procura o
+# problema no lugar errado.
+@test "bloco sites antigo: config_invalid citando cloudez" {
+  printf 'sites:\n  staging:\n    root: /srv/staging\n' > .cloudez.yaml
+  run cloudez-list-releases staging
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "config_invalid" ]
+  [[ "$(jq_field "$output" .error.message)" == *cloudez* ]]
 }
 
 # REGRESSAO: `die` dentro de config_json rodava numa substituicao de comando
 # aninhada e o `exit 1` nao propagava, entao o script seguia com a config vazia
 # e emitia um segundo erro (site_not_found) contradizendo o primeiro.
 @test "YAML invalido emite exatamente um erro" {
-  printf 'sites:\n  staging:\n   quebrado\n    indent: [\n' > .cloudez.yaml
-  run cloudez-health-check staging
+  printf 'cloudez:\n  staging:\n   quebrado\n    indent: [\n' > .cloudez.yaml
+  run cloudez-list-releases staging
   [ "$status" -eq 1 ]
   [ "$(printf '%s' "$output" | jq -s 'length')" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "config_invalid" ]
@@ -42,56 +236,19 @@ setup() { make_project; }
 # REGRESSAO: `die` escrevia em stdout; como site_config e chamada dentro de
 # $( ), o JSON de erro era capturado na variavel e nunca chegava ao usuario.
 @test "erro vai para stderr, nao para stdout" {
-  run bash -c 'cloudez-health-check producao 2>/dev/null'
+  run bash -c 'cloudez-list-releases producao 2>/dev/null'
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
 
-# ------------------------------------------------------------ health-check --
-
-@test "health-check 200: healthy e exit 0" {
-  MOCK_HTTP_STATUS=200 run cloudez-health-check staging
-  [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .healthy)" = "true" ]
-  [ "$(jq_field "$output" .status_code)" = "200" ]
-}
-
-@test "health-check 502: nao saudavel e exit 1" {
-  MOCK_HTTP_STATUS=502 run cloudez-health-check staging
-  [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .healthy)" = "false" ]
-  [ "$(jq_field "$output" .status_code)" = "502" ]
-}
-
-# REGRESSAO: `read` retorna nao-zero ao encontrar EOF sem newline final, e o
-# `set -e` matava o script antes de imprimir. O -w do curl nao emite \n.
-@test "health-check imprime JSON mesmo quando falha" {
-  MOCK_HTTP_STATUS=500 run cloudez-health-check staging
-  [ -n "$output" ]
-  [ "$(jq_field "$output" .url)" = "https://staging.example.com/" ]
-}
-
-@test "health-check trata curl que falha na conexao" {
-  MOCK_CURL_EXIT=7 run cloudez-health-check staging
-  [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .status_code)" = "0" ]
-}
-
-@test "health-check aceita path e status esperado customizados" {
-  MOCK_HTTP_STATUS=404 run cloudez-health-check staging /saude 404
-  [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .healthy)" = "true" ]
-  [[ "$(jq_field "$output" .url)" == */saude ]]
-}
-
 # ------------------------------------------------------------ begin-deploy --
 
-@test "begin-deploy devolve destino rsync com barra final" {
+@test "begin-deploy devolve destino ssh com barra final" {
   run cloudez-begin-deploy staging abc1234def K1
   [ "$status" -eq 0 ]
   [ "$(jq_field "$output" .status)" = "awaiting_upload" ]
-  # A barra final significa "o conteudo de"; sem ela o rsync aninha o build.
-  [[ "$(jq_field "$output" .rsync.path)" == */ ]]
+  # A barra final significa "o conteudo de"; sem ela o build sobe aninhado.
+  [[ "$(jq_field "$output" .ssh.path)" == */ ]]
   [[ "$(jq_field "$output" .release_id)" == *-abc1234 ]]
 }
 
@@ -157,13 +314,6 @@ setup() { make_project; }
   grep -qE 'tar .*-C dist \.$' "$MOCK_LOG"
 }
 
-@test "sync aplica os excludes da config no tar" {
-  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
-  mkdir -p dist && touch dist/index.html
-  cloudez-sync "$d" dist >/dev/null
-  grep -q -- '--exclude=node_modules' "$MOCK_LOG"
-}
-
 @test "sync propaga falha do transporte" {
   d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
   mkdir -p dist && touch dist/index.html
@@ -206,10 +356,10 @@ setup() { make_project; }
   ! grep -qE "rm -f '?/srv/staging/current" "$MOCK_LOG"
 }
 
-# ----------------------------------------------------------------- approve --
+# ---------------------------------------------------------------- rollback --
 
-@test "approve sem TTY falha: um agente nao pode se auto-aprovar" {
-  run bash -c 'cloudez-approve production < /dev/null'
+@test "rollback sem release anterior: no_previous_release" {
+  run cloudez-rollback staging
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "no_tty" ]
+  [ "$(jq_field "$output" .error.code)" = "no_previous_release" ]
 }

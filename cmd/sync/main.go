@@ -55,15 +55,10 @@ func run() int {
 			fmt.Sprintf("Diretorio '%s' esta vazio.", localDir), nil)
 	}
 
-	var excludes []string
-	if cfg := cloudez.Load(); cfg != nil {
-		excludes = cfg.Sites[dep.Environment].Rsync.Exclude
-	}
-
-	stats, errOut, err := transfer(dep, localDir, excludes)
+	stats, errOut, err := transfer(dep, localDir)
 	if err != nil {
 		return cloudez.Fail("transfer_failed",
-			fmt.Sprintf("Falha ao enviar '%s' para %s.", localDir, dep.Rsync.Host),
+			fmt.Sprintf("Falha ao enviar '%s' para %s.", localDir, dep.SSH.Host),
 			map[string]any{"logs": errOut, "retryable": true})
 	}
 
@@ -80,21 +75,17 @@ func run() int {
 
 // transfer executa `tar -c | ssh tar -x`. Devolve um resumo, a stderr agregada
 // dos dois processos, e o erro.
-func transfer(dep *cloudez.Deploy, localDir string, excludes []string) (string, string, error) {
-	tarArgs := []string{}
-	for _, e := range excludes {
-		tarArgs = append(tarArgs, "--exclude="+e)
-	}
+func transfer(dep *cloudez.Deploy, localDir string) (string, string, error) {
 	// "-C dir ." envia o CONTEUDO do diretorio, nao o diretorio. E o mesmo
 	// motivo da barra final no rsync: sem isso o site sobe aninhado um nivel.
-	tarArgs = append(tarArgs, "-czf", "-", "-C", localDir, ".")
+	tarArgs := []string{"-czf", "-", "-C", localDir, "."}
 
-	remote := fmt.Sprintf("tar xzf - -C %s", shellQuote(dep.Rsync.Path))
+	remote := fmt.Sprintf("tar xzf - -C %s", shellQuote(dep.SSH.Path))
 	sshArgs := []string{
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-p", strconv.Itoa(dep.Rsync.Port),
-		dep.Rsync.User + "@" + dep.Rsync.Host,
+		"-p", strconv.Itoa(dep.SSH.Port),
+		dep.SSH.User + "@" + dep.SSH.Host,
 		remote,
 	}
 
@@ -144,7 +135,7 @@ func transfer(dep *cloudez.Deploy, localDir string, excludes []string) (string, 
 		return "", logs, sshWait
 	}
 
-	return fmt.Sprintf("tar+ssh -> %s:%s", dep.Rsync.Host, dep.Rsync.Path), logs, nil
+	return fmt.Sprintf("tar+ssh -> %s:%s", dep.SSH.Host, dep.SSH.Path), logs, nil
 }
 
 // shellQuote protege o caminho para o shell REMOTO — o ssh junta os argumentos

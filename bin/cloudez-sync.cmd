@@ -1,12 +1,12 @@
 @echo off
-rem Launcher Windows. Par do script POSIX — o hooks.json aponta para
-rem "libexec/guard" sem extensao e o PATHEXT resolve para este arquivo aqui.
+rem Launcher Windows. Par do script POSIX — quem chama usa "cloudez-sync" sem
+rem extensao e o PATHEXT resolve para este arquivo aqui.
 rem
 rem Como no par POSIX, o alvo sai do nome do arquivo (%~n0) com o prefixo
-rem "cloudez-" removido, entao o mesmo conteudo serve para bin\cloudez-sync.cmd.
+rem "cloudez-" removido, entao o mesmo conteudo serve a qualquer comando.
 rem
 rem O `exit /b %ERRORLEVEL%` no final nao e detalhe: sem ele o codigo de saida
-rem do binario (2 = bloqueia) nao chega ao harness e o guard falha ABERTO.
+rem do binario nao chega a quem chamou e uma falha passa por sucesso.
 
 setlocal
 
@@ -24,7 +24,7 @@ set "EXE=%LIBEXEC%%NAME%-windows-%ARCH%.exe"
 if not exist "%EXE%" (
   echo cloudez: binario '%NAME%' ausente ^(%EXE%^). >&2
   echo cloudez: rode build.sh no diretorio do plugin. >&2
-  exit /b 0
+  exit /b 1
 )
 
 "%EXE%" %*
