@@ -1,8 +1,19 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: Bash(cloudez-setup:*), Read, AskUserQuestion
+allowed-tools: Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
 ---
+
+## 0. Autenticação, antes de qualquer coisa
+
+Siga `/cloudez:login` — na prática: rode `cloudez-login --check` e, se falhar,
+repasse o `claude_code_command` do erro (o caminho com `!` na frente, para ele
+enviar como mensagem) e **pare aqui**. Nunca peça o token na conversa.
+
+Só siga adiante com o `--check` passando. O `cloudez-setup` também exige o token,
+então tentar antes só produz o mesmo erro mais tarde.
+
+## 1. Domínio e environment
 
 Argumentos recebidos: `$ARGUMENTS` — o domínio e o environment, nessa ordem.
 Falta algum? Pergunte. Não rode nada antes de ter os dois.
@@ -22,6 +33,8 @@ corrija com o usuário.
 O "Other" do próprio widget cobre "escreva a sua própria". Pergunta estruturada
 e não texto livre porque o nome vira chave no arquivo: um "prod" digitado onde o
 resto do time usa "production" só aparece semanas depois.
+
+## 2. Criar a config
 
 Com os dois em mãos:
 

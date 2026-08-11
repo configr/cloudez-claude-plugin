@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Uso: cloudez-login [--check]
+#
+#   --check      nao pergunta nada e nao exige terminal. Sai 0 se ha token
+#                utilizavel, 1 se nao. E o que os outros adaptadores chamam.
+#   (sem flag)   le um token gerado no painel da Cloudez e salva.
+#
+# Token e a unica forma de autenticar. Existiu um modo --password (e-mail, senha e
+# 2FA, batendo em POST /auth/login/); foi removido de proposito — veja a nota em
+# docs/mcp-tool-contract.md, que guarda o que ja foi descoberto da API para nao ser
+# redescoberto do zero.
+#
+# Ler o token EXIGE TTY, e isso e o ponto central deste script: rodado pela tool
+# Bash de um agente, ele falha. Um token digitado na conversa entra no contexto do
+# modelo e no transcript da sessao — ou seja, vaza para um lugar que o usuario nao
+# controla e nao consegue limpar. O prompt roda no terminal dele.
+#
+# No Claude Code, o jeito de chamar isso e prefixar com `!`, que executa no
+# terminal da sessao. A tool Bash nao serve: ali /dev/tty existe mas responde
+# "Device not configured" — nao ha terminal de controle nenhum.
+#
+# O token nao aparece em nenhuma saida deste script, nem truncado.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+mode="${1:-}"
+
+# status_json <status> <verified> — resposta comum aos dois modos. Sem token.
+status_json() {
+  jq -n --arg s "$1" --arg src "$(token_source)" --arg f "$(token_file)" \
+        --argjson v "$2" \
+    '{status: $s, source: $src, token_file: $f, verified: $v}
+     | if $v then . else
+         . + {warning: "Nao foi possivel confirmar o token com a API da Cloudez (offline, endpoint ainda nao confirmado ou API fora). O token foi aceito como esta."}
+       end'
+}
+
+# ------------------------------------------------------------------- --check --
+
+if [ "$mode" = "--check" ]; then
+  token=$(require_token)   # morre com not_authenticated ou token_invalid
+  case "$(verify_token "$token")" in
+    valid) status_json authenticated true ;;
+    *)     status_json authenticated false ;;
+  esac
+  exit 0
+fi
+
+if [ "$mode" = "--password" ]; then
+  # Erro nomeado em vez de "argumento desconhecido": quem tentar isso vem de uma
+  # versao anterior ou da doc antiga, e merece saber que a estrategia mudou.
+  die password_login_disabled "Login por e-mail e senha foi descontinuado." \
+    '{"hint":"Gere um token no painel da Cloudez e rode cloudez-login sem argumento."}'
+fi
+
+if [ -n "$mode" ]; then
+  die usage "Argumento desconhecido: '$mode'." \
+    '{"hint":"Uso: cloudez-login [--check]"}'
+fi
+
+# --------------------------------------------------------------------- tty ---
+
+if [ ! -t 0 ] || [ ! -r /dev/tty ]; then
+  die no_tty "cloudez-login exige um terminal interativo." \
+    "$(login_hint | jq '. + {reason: "Um token digitado na conversa entra no contexto do modelo e no transcript. O prompt precisa rodar no terminal do usuario."}')"
+fi
+
+# ------------------------------------------------------------ token do painel --
+
+existing=$(resolve_token)
+existing_valid=false
+[ -n "$existing" ] && [ "$(verify_token "$existing")" = valid ] && existing_valid=true
+
+cat >&2 <<EOF
+
+  Login Cloudez
+  ───────────────────────────────────────────────
+  Gere um token no painel da Cloudez e cole abaixo.
+  O token vai para $(token_file), com permissao 0600.
+  Nada e digitado na tela.
+EOF
+
+if [ "$existing_valid" = true ]; then
+  # Sem esta saida nao havia como trocar um token valido por outro sem apagar o
+  # arquivo na mao — e rotacionar token no painel e rotina, nao excecao.
+  printf '  Ja existe um token valido aqui. Enter mantem o atual.\n' >&2
+fi
+printf '  ───────────────────────────────────────────────\n\n' >&2
+
+printf 'Token: ' >&2
+read -rs token < /dev/tty
+printf '\n' >&2
+
+# Espacos em volta saem: colar de um painel costuma trazer um deles.
+token="${token#"${token%%[![:space:]]*}"}"
+token="${token%"${token##*[![:space:]]}"}"
+
+if [ -z "$token" ]; then
+  [ "$existing_valid" = true ] \
+    || die empty_token "Nenhum token informado. Nada foi salvo."
+  status_json already_authenticated true
+  exit 0
+fi
+
+# Espaco no meio nao e token: e email, senha com espaco, ou uma linha inteira
+# copiada por engano. Recusar aqui evita salvar lixo que so falha no deploy.
+case "$token" in
+  *[[:space:]]*) die invalid_token "O valor colado tem espacos — nao parece um token." \
+                   '{"hint":"Cole apenas o token, sem o rotulo nem a URL do painel."}' ;;
+esac
+
+# Salva e valida em seguida, contra o que foi para o arquivo. save_token morre com
+# invalid_token e devolve o token anterior se a Cloudez recusar.
+verdict=$(save_token "$token")
+
+case "$verdict" in
+  valid) status_json authenticated true ;;
+  *)     status_json authenticated false ;;
+esac

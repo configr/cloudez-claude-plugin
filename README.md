@@ -56,9 +56,11 @@ claude plugin validate /caminho/para/cloudez-claude-plugin
 
 Depois de carregado:
 
+- `/cloudez:login` — verifica se há token da Cloudez salvo e conduz o login;
 - `/cloudez:setup <domain> <environment>` — cria o `.cloudez.yaml` do projeto, se
   ainda não existir. Os dois argumentos são obrigatórios: o domínio identifica o
-  site, o environment dá nome ao bloco gerado. Faltando algum, o comando pergunta;
+  site, o environment dá nome ao bloco gerado. Faltando algum, o comando pergunta.
+  Ele começa pelo `/cloudez:login`;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Também é acionado
   sozinho quando você pedir para publicar algo, sem precisar do comando.
 
@@ -99,13 +101,82 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Contrato das tools MCP (`docs/mcp-tool-contract.md`)
 - [x] Esqueleto do plugin (`plugin.json`, `.mcp.json`, `/deploy`)
 - [x] Skill de deploy (`skills/deploy/SKILL.md`)
-- [x] Comando `/cloudez:setup` (`commands/setup.md`)
+- [x] Comandos `/cloudez:setup` e `/cloudez:login` (`commands/`)
 - [x] Adaptadores `bin/` para trabalhar antes do MCP ficar pronto
 - [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
+- [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
 - [ ] Dados de SSH vindos da API, pelo domínio, em vez da config local
 - [ ] Servidor MCP (repositório separado)
 
+## Autenticação
+
+O token da Cloudez vive em **`~/.cloudez/token`**, com permissão `0600` — é
+credencial do usuário, não do projeto: um arquivo no `$HOME` serve todos os
+repositórios, em vez de uma cópia do mesmo segredo em cada um. E fica fora da
+árvore que o `cloudez-sync` empacota com `tar`.
+
+`CLOUDEZ_TOKEN` no ambiente vence o arquivo (CI, uso headless).
+`CLOUDEZ_TOKEN_FILE` muda o caminho, e é o que a suíte usa para não tocar no seu
+token de verdade.
+
+```sh
+bin/cloudez-login          # cola um token gerado no painel da Cloudez e salva
+bin/cloudez-login --check  # só verifica; é o que os outros adaptadores chamam
+```
+
+**Token é a única forma de autenticar.** Gere no painel da Cloudez, cole no prompt.
+
+O login **exige TTY** e isso é o ponto central do desenho: rodado pela tool Bash de
+um agente, ele falha. Um token colado na conversa entra no contexto do modelo e no
+transcript da sessão — um lugar que você não controla e não consegue limpar. O
+prompt roda no seu terminal, não ecoa o que é digitado, e o token não aparece em
+nenhuma saída dos adaptadores.
+
+**Dentro do Claude Code, chame com `!` na frente**, que executa no terminal da
+sessão:
+
+```
+! /caminho/para/o/plugin/bin/cloudez-login
+```
+
+A tool Bash não serve, e não é conservadorismo do plugin: ali não existe terminal
+de controle nenhum — `/dev/tty` aparece mas responde `Device not configured`. O
+erro `no_tty` já traz o comando pronto, com o `!`, no campo `claude_code_command`.
+
+Login por e-mail e senha **foi abandonado**: exigia o mesmo TTY, mais a senha do
+usuário e um 2FA que só funciona com terminal. O que foi descoberto da API nessa
+tentativa está no apêndice A de [`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md),
+para não ser redescoberto do zero. `--password` responde `password_login_disabled`.
+
+A resposta é lida em três faixas, e a diferença importa:
+
+| Resposta da API | Interpretação |
+|---|---|
+| 2xx | token válido (`verified: true`) |
+| 401 / 403 | recusado: exige login novo |
+| offline, 5xx, sem `curl` | **inconclusivo** — passa com `verified: false` e um `warning` |
+
+Falhar fechado no terceiro caso deixaria você sem deploy justamente quando não há
+o que consertar, e a chamada seguinte à API falha com o erro dela, mais
+informativo.
+
+No login, a validação roda **depois** de escrever o arquivo, contra o token que
+acabou de ser gravado — não contra o que estava na memória. Se a Cloudez recusar,
+o token anterior volta: um paste errado não custa a credencial que já funcionava.
+
 ## Limitações conhecidas
+
+**O prompt do login não tem cobertura automatizada.** `read < /dev/tty` precisa de
+um pty, e alocar um em `bats` de forma portátil significa `script`, cuja sintaxe
+divergente entre macOS e Linux é exatamente o tipo de coisa que já quebrou esta
+suíte. O que fica sem teste é só a leitura do terminal: o que tem consequência —
+escrever o segredo com 0600, validar depois do write, desfazer quando a Cloudez
+recusa — mora em `save_token` (`bin/_lib.sh`) e é chamado direto pelos testes.
+
+**A validação do token só foi exercitada contra a API real à mão** — os testes usam
+um mock de `curl`. Verificado manualmente: um token inventado devolve `401` de
+`api.cloudez.io`, e o plugin traduz isso em `token_invalid`. O caminho do token
+válido (`2xx`) depende de uma credencial de verdade e nunca passou pela suíte.
 
 **O caminho Windows não tem verificação automatizada.** Os binários são
 compilados para `windows/amd64` e `windows/arm64`, e o launcher
@@ -153,6 +224,7 @@ depois é substituição, não reescrita.
 
 | Script | Tool MCP correspondente |
 |---|---|
+| `cloudez-login` | *(nenhuma — o token é local, e o MCP o lê)* |
 | `cloudez-setup` | *(nenhuma — a config é local)* |
 | `cloudez-begin-deploy` | `cloudez_begin_deploy` |
 | `cloudez-sync` (Go) | *(nenhuma — o transporte fica sempre local)* |
@@ -227,6 +299,10 @@ O servidor guarda as 5 releases mais recentes — é até onde o rollback alcan�
 existir. No servidor, GNU coreutils — a troca atômica do symlink usa `mv -T`,
 que não existe em BSD/macOS.
 
+`curl` é **opcional**: sem ele o token não é verificado contra a API e o retorno
+diz `verified: false`. Exigir curl para ler um arquivo local seria dependência
+nova por nada.
+
 Autenticação SSH é por chave, em `~/.ssh/`. Os scripts rodam com
 `BatchMode=yes`: sem chave configurada eles falham na hora em vez de travar num
 prompt de senha que o agente não consegue responder.
@@ -238,15 +314,19 @@ vive em outro repositório:
 
 ```sh
 export CLOUDEZ_MCP_PATH=/caminho/para/o/repo/do/mcp
-export CLOUDEZ_TOKEN_STAGING=...
-export CLOUDEZ_TOKEN_PRODUCTION=...
 ```
 
 Ajuste `command`/`args` no `.mcp.json` quando o servidor MCP definir como é
 distribuído (npx, binário, etc.) — o valor atual é um placeholder.
 
-Tokens **separados por ambiente** não é detalhe: um token de staging capaz de
-alterar produção derruba a separação entre os dois.
+O token **não** é passado por argumento nem colocado no `.mcp.json`: o servidor
+MCP lê `~/.cloudez/token`, o mesmo arquivo que o `cloudez-login` escreve, e aceita
+`CLOUDEZ_TOKEN` no ambiente como sobreposição. Uma fonte da verdade, escrita por
+um comando que exige TTY.
+
+Um token com escopo por ambiente (staging que não alcança produção) seria melhor
+para limitar estrago, mas depende de a Cloudez emitir tokens escopados — está
+como pendência no contrato, não implementado.
 
 ### Permissões
 

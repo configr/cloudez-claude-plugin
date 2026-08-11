@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Mock de curl para a verificacao de token. Nenhum teste toca a rede.
+#
+# Uma chamada so, hoje: GET /auth/token/validate/ -> codigo HTTP
+# (MOCK_HTTP_STATUS, default 200; MOCK_CURL_EXIT simula falha de conexao).
+printf 'curl %s\n' "$*" >> "${MOCK_LOG:-/dev/null}"
+
+# Registra o conteudo do arquivo de token no momento da chamada. E o que permite
+# afirmar que o login salva ANTES de validar, sem precisar de um pty. Os tokens
+# dos testes sao falsos.
+if [ -f "${CLOUDEZ_TOKEN_FILE:-/dev/null}" ]; then
+  printf 'token_file_at_call=%s\n' "$(tr -d '\r\n' < "$CLOUDEZ_TOKEN_FILE")" \
+    >> "${MOCK_LOG:-/dev/null}"
+fi
+
+if [ "${MOCK_CURL_EXIT:-0}" -ne 0 ]; then
+  exit "${MOCK_CURL_EXIT}"
+fi
+
+printf '%s' "${MOCK_HTTP_STATUS:-200}"

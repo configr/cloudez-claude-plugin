@@ -9,6 +9,12 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
+# Autenticacao antes de tudo, inclusive antes de validar os argumentos: sem token
+# nao ha o que fazer com um .cloudez.yaml, e o proximo passo do setup (buscar os
+# dados de ssh na API pelo dominio) depende dela. Morre com not_authenticated ou
+# token_invalid, ambos trazendo o caminho do cloudez-login.
+require_token >/dev/null
+
 domain="${1:-}"
 environment="${2:-}"
 
@@ -22,12 +28,11 @@ environment="${2:-}"
 domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
 
 # FQDN e nada mais: protocolo, caminho, querystring ou porta viram erro em vez
-# de entrar na config e reaparecer como um caminho de servidor sem sentido.
-if ! printf '%s' "$domain" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$' \
-   || [ "${#domain}" -gt 253 ]; then
-  die invalid_domain "'$1' nao e um FQDN valido." \
-    '{"hint":"Use apenas o dominio: meusite.com.br. Sem https://, sem /caminho, sem ?query, sem :porta."}'
-fi
+# de entrar na config e reaparecer como um caminho de servidor sem sentido. A
+# mesma regra vale para o dominio do painel, no cloudez-login.
+is_fqdn "$domain" \
+  || die invalid_domain "'$1' nao e um FQDN valido." \
+       '{"hint":"Use apenas o dominio: meusite.com.br. Sem https://, sem /caminho, sem ?query, sem :porta."}'
 
 [ -n "$environment" ] \
   || die missing_environment "Informe o environment: cloudez-setup <domain> <environment>." \

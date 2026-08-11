@@ -4,8 +4,7 @@
       "command": "node",
       "args": ["${CLOUDEZ_MCP_PATH}/dist/index.js"],
       "env": {
-        "CLOUDEZ_TOKEN_STAGING": "${CLOUDEZ_TOKEN_STAGING}",
-        "CLOUDEZ_TOKEN_PRODUCTION": "${CLOUDEZ_TOKEN_PRODUCTION}"
+        "CLOUDEZ_TOKEN": "${CLOUDEZ_TOKEN}"
       }
     }
   }

@@ -18,6 +18,16 @@ make_project() {
   export MOCK_LOG
   : > "$MOCK_LOG"
 
+  # O token vive no $HOME do usuario. Apontar para o tmp do teste e o que impede
+  # a suite de ler — ou pior, sobrescrever — o token real de quem roda ela.
+  CLOUDEZ_TOKEN_FILE="$TEST_TMP/token"
+  export CLOUDEZ_TOKEN_FILE
+  printf 'tok_teste\n' > "$CLOUDEZ_TOKEN_FILE"
+
+  # CLOUDEZ_TOKEN venceria o arquivo e furaria os testes de autenticacao na
+  # maquina de quem tem a variavel exportada.
+  unset CLOUDEZ_TOKEN
+
   mkdir -p "$TEST_TMP/project"
   cd "$TEST_TMP/project" || return 1
 

@@ -397,12 +397,37 @@ insiste em erro permanente.
 
 ## 5. Credenciais e escopo
 
-- O token da Cloudez vive em **variável de ambiente do processo MCP**, nunca em
-  argumento de tool, nunca no contexto do modelo.
-- Tokens **separados por ambiente**. `CLOUDEZ_TOKEN_STAGING` e
-  `CLOUDEZ_TOKEN_PRODUCTION`. Um token de staging que consegue derrubar produção
-  apaga a separação entre os dois.
-- A chave SSH usada pelo transporte é do usuário, em `~/.ssh/`. O MCP nunca a vê.
+O token da Cloudez **nunca** é argumento de tool e nunca entra no contexto do
+modelo. Ele tem uma fonte da verdade:
+
+```
+~/.cloudez/token      # 0600, escrito por bin/cloudez-login
+CLOUDEZ_TOKEN         # sobrepõe o arquivo (CI, headless)
+```
+
+**A única forma de obter o token é gerá-lo no painel da Cloudez** e informá-lo ao
+`bin/cloudez-login`. Login por e-mail e senha foi explorado e **abandonado** — veja
+o apêndice A, que guarda o que já foi descoberto da API para não ser redescoberto
+do zero.
+
+**O servidor MCP lê esse arquivo**, com a variável de ambiente como sobreposição —
+a mesma precedência que os adaptadores em `bin/` aplicam. O plugin não repassa o
+token ao servidor; os dois leem o mesmo lugar.
+
+Quem escreve o arquivo é um comando que **exige TTY**: rodado pela tool Bash de um
+agente, ele falha. Um token colado na conversa entra no transcript da sessão, que
+o usuário não controla e não consegue limpar.
+
+A verificação do token distingue três respostas. Isto é contrato, não detalhe de
+implementação — o plugin depende dessa distinção:
+
+| Resposta | Significado |
+|---|---|
+| 2xx | token válido |
+| 401 / 403 | recusado; exige login novo |
+| offline, 404, 5xx | inconclusivo; o plugin segue e reporta `verified: false` |
+
+A chave SSH usada pelo transporte é do usuário, em `~/.ssh/`. O MCP nunca a vê.
 
 ---
 
@@ -421,19 +446,70 @@ insiste em erro permanente.
 
 Confirmar antes de implementar:
 
-1. **Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
-   API, a partir do domínio?** É a pendência que mais importa: hoje eles são
-   digitados à mão em cada `.cloudez.yaml`, e `cloudez_get_site` é o que elimina
-   isso.
-2. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
+1. **A Cloudez emite tokens com escopo?** Um token que alcance staging mas não
+   produção daria à seção 5 um token por environment, limitando estrago. Hoje é um
+   token de usuário, gerado no painel, com acesso a tudo que a conta acessa.
+2. **Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
+   API, a partir do domínio?** Hoje eles são digitados à mão em cada
+   `.cloudez.yaml`, e `cloudez_get_site` é o que elimina isso.
+3. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
    no document root (sem `releases/` e `current`), `begin`/`finalize` colapsam em
    uma tool só `cloudez_deploy(domain, ref)` e o rollback precisa de outra
    estratégia (backup do diretório anterior, ou re-deploy do SHA antigo).
-3. **Alguma stack precisa de restart/reload depois da troca do symlink?** Para
+4. **Alguma stack precisa de restart/reload depois da troca do symlink?** Para
    site estático, não — e é por isso que os hooks saíram do plugin. Se `php` ou
    `node` precisarem, isso vira uma tool própria (`cloudez_restart(domain)`), não
    um campo de configuração no `finalize`.
-4. **O `finalize` é síncrono?** Se demorar mais que ~30s, precisa ser assíncrono
+5. **O `finalize` é síncrono?** Se demorar mais que ~30s, precisa ser assíncrono
    com polling via `cloudez_get_deploy_status`.
-5. **Quantas releases o servidor retém?** O plugin em shell mantém 5. Se o
+6. **Quantas releases o servidor retém?** O plugin em shell mantém 5. Se o
    servidor tiver limite próprio, `list_releases` precisa refleti-lo.
+
+---
+
+## Apêndice A — login por e-mail e senha (explorado e abandonado)
+
+Esta rota foi implementada, testada contra a API real e **removida** em favor de
+um token gerado no painel. O registro fica aqui porque o que foi descoberto custou
+requisições e vale para quem retomar o assunto — inclusive para o servidor MCP, se
+ele for autenticar usuários.
+
+**`POST /auth/login/`** — o próprio endpoint declara o contrato em `OPTIONS`
+(`{"name": "Custom Login"}`):
+
+| Campo | Obrigatório |
+|---|---|
+| `password` | sim |
+| `company` | sim — **UUID** da empresa |
+| `email` | não (ou `username`) |
+
+Nenhum campo de segundo fator, e nenhum endpoint dedicado a 2FA responde:
+`/auth/2fa/`, `/auth/otp/`, `/auth/mfa/`, `/auth/two-factor/`, `/auth/login/2fa/` e
+`/auth/token/` são todos 404. Um código de 2FA, se existir, entra por um caminho
+que não achamos.
+
+**O UUID da empresa** sai de `GET /v3/company/theme/<domínio-do-painel>/`, consulta
+**aberta** (sem autenticação), no campo `code`:
+
+```jsonc
+// GET /v3/company/theme/cloud.configr.com/
+{ "name": "Configr", "slug": "configr",
+  "code": "5278e21e-e651-4883-8370-c61162f58d61",   // <- o company do login
+  "brand_primary_color": "#6811BF", "logo_primary": "https://…", … }
+```
+
+O domínio é o do **painel**, não o do site publicado. Domínio desconhecido responde
+`404 {"detail":"Not found."}` — note que rota inexistente responde
+`{"detail": ["Not found"]}`, em lista e sem ponto: dá para distinguir os dois.
+
+**O que ficou sem confirmação:** onde o token aparece na resposta `200` do login.
+Só uma credencial válida responde isso, e a implementação removida tentava `token`,
+`key` e `auth_token`. Uma tentativa com senha deliberadamente errada confirmou o
+resto do caminho: a API aceitou o payload e respondeu
+`400 {"detail": "Unable to log in with provided credentials."}`.
+
+**Por que foi abandonado:** um login interativo exige TTY, e a tool Bash do agente
+não tem terminal de controle (`/dev/tty` responde `Device not configured`). Isso
+valeria a pena se a alternativa fosse pior — mas gerar um token no painel resolve
+o mesmo problema sem a senha do usuário passar por lugar nenhum, e o 2FA, que só
+funciona com terminal, deixa de ser um problema.

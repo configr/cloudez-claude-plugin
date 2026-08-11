@@ -115,6 +115,157 @@ ssh_run() {
       "$(cfg "$site" .ssh.user)@$(cfg "$site" .ssh.host)" "$@"
 }
 
+# is_fqdn <valor>
+#
+# FQDN e nada mais: protocolo, caminho, querystring ou porta reprovam. Usado no
+# dominio do site (cloudez-setup) e no dominio do painel (cloudez-login) — os dois
+# viram parte de URL ou de caminho, e um valor solto ali reaparece longe da causa.
+is_fqdn() {
+  printf '%s' "$1" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$' \
+    && [ "${#1}" -le 253 ]
+}
+
+# -------------------------------------------------------------------- token --
+#
+# O token e credencial do USUARIO, nao do projeto: um arquivo no $HOME serve
+# todos os repositorios, em vez de uma copia do mesmo segredo por projeto — e
+# fica fora da arvore que o cloudez-sync empacota com tar.
+#
+# Precedencia: CLOUDEZ_TOKEN (CI, headless) > arquivo.
+# CLOUDEZ_TOKEN_FILE existe para os testes nao escreverem no $HOME de verdade.
+#
+# Nenhuma funcao daqui imprime o token. Ele nao entra em log, em JSON de retorno
+# nem em mensagem de erro: o consumidor destes scripts e um modelo, e o que sai
+# no stdout vira contexto.
+
+token_file() { printf '%s' "${CLOUDEZ_TOKEN_FILE:-$HOME/.cloudez/token}"; }
+
+# resolve_token -> token em stdout; vazio quando nao ha nenhum
+resolve_token() {
+  if [ -n "${CLOUDEZ_TOKEN:-}" ]; then printf '%s' "$CLOUDEZ_TOKEN"; return 0; fi
+  local f; f=$(token_file)
+  [ -f "$f" ] || return 0
+  # tr -d: o newline final do arquivo e o CR de quem editou no Windows
+  tr -d '\r\n' < "$f"
+}
+
+# token_source -> "env" | "file" | "none"
+token_source() {
+  if [ -n "${CLOUDEZ_TOKEN:-}" ]; then printf 'env'
+  elif [ -f "$(token_file)" ]; then printf 'file'
+  else printf 'none'; fi
+}
+
+# cloudez_api_check <token> -> codigo HTTP em stdout, "000" quando nao deu para
+# falar com a API.
+#
+# Endpoint e header confirmados com a Cloudez:
+#
+#   GET https://api.cloudez.io/auth/token/validate/
+#   Authorization: Token <key>
+#
+# `Token`, nao `Bearer` — trocar o esquema devolve 401 e faria todo token parecer
+# recusado. Esta funcao e a unica superficie de contato com a API de autenticacao.
+#
+# curl e opcional de proposito: sem ele nao ha verificacao, e a resposta e
+# "unknown" em vez de erro. Um adaptador que exige curl para ler um arquivo local
+# seria dependencia nova por nada.
+cloudez_api_check() {
+  command -v curl >/dev/null 2>&1 || { printf '000'; return 0; }
+  local code
+  # Numa falha de conexao o curl imprime 000 e ainda sai nao-zero; o `|| true`
+  # impede o set -e de matar o script, e o codigo continua sendo 000.
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+           --max-time "${CLOUDEZ_API_TIMEOUT:-10}" \
+           -H "Authorization: Token $1" \
+           "${CLOUDEZ_API_URL:-https://api.cloudez.io}${CLOUDEZ_API_VALIDATE_PATH:-/auth/token/validate/}" \
+           2>/dev/null || true)
+  printf '%s' "${code:-000}"
+}
+
+# verify_token <token> -> "valid" | "invalid" | "unknown"
+#
+# So a recusa explicita da API e conclusiva. Offline, endpoint errado ou API fora
+# viram "unknown", e quem chama trata como aceitavel: falhar fechado ai deixaria
+# o usuario sem deploy justamente quando ele nao tem como consertar nada — e a
+# chamada seguinte ao MCP falha com o erro dela, que e mais informativo.
+verify_token() {
+  case "$(cloudez_api_check "$1")" in
+    2*)      printf 'valid' ;;
+    401|403) printf 'invalid' ;;
+    *)       printf 'unknown' ;;
+  esac
+}
+
+# login_hint -> JSON com o caminho absoluto do cloudez-login
+#
+# Absoluto porque bin/ so esta no PATH da tool Bash, nao no terminal do usuario —
+# e e no terminal dele que o login roda.
+#
+# O `!` na frente e o que resolve isso dentro do Claude Code: ele executa no
+# terminal da sessao, onde existe TTY. Pela tool Bash nao ha terminal de controle
+# nenhum (/dev/tty responde "Device not configured"), entao nao e questao de
+# permissao ou de flag — nao tem onde perguntar.
+login_hint() {
+  local bin
+  bin="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/cloudez-login"
+  jq -n --arg b "$bin" \
+    '{hint: ("No Claude Code, peca ao usuario para enviar uma mensagem com: ! " + $b
+             + "  (o ! executa no terminal da sessao, onde existe TTY). Fora do Claude Code, e rodar o comando no terminal dele."),
+      login_command: $b,
+      claude_code_command: ("! " + $b)}'
+}
+
+# save_token <token> -> veredito em stdout ("valid" | "unknown")
+#
+# A ordem aqui e deliberada: escreve primeiro, valida depois, contra o token que
+# ja esta no arquivo — e nao contra o que estava na memoria. Quem valida e a mesma
+# verify_token que o --check usa, para nao existirem duas nocoes de "token bom"
+# divergindo com o tempo.
+#
+# Se a Cloudez recusar, o token anterior volta: perder uma credencial que
+# funcionava por causa de um paste errado seria pior do que o paste errado. O
+# anterior vem de uma variavel, nao de uma copia em disco — um segredo nao precisa
+# de um segundo arquivo por perto, nem por um instante.
+save_token() {
+  local token="$1" f previous="" verdict
+  f=$(token_file)
+  [ -f "$f" ] && previous=$(tr -d '\r\n' < "$f")
+
+  mkdir -p "$(dirname "$f")"
+  chmod 700 "$(dirname "$f")" 2>/dev/null || true
+
+  # umask no subshell em vez de chmod depois: entre criar o arquivo e ajustar a
+  # permissao existe uma janela em que ele fica legivel por outros.
+  (umask 077; printf '%s\n' "$token" > "$f")
+
+  verdict=$(verify_token "$token")
+  if [ "$verdict" = invalid ]; then
+    if [ -n "$previous" ]; then
+      (umask 077; printf '%s\n' "$previous" > "$f")
+    else
+      rm -f "$f"
+    fi
+    die invalid_token "A Cloudez recusou este token." \
+      '{"hint":"Confira se o token foi copiado inteiro e se nao foi revogado no painel. O arquivo nao foi alterado."}'
+  fi
+
+  printf '%s' "$verdict"
+}
+
+# require_token -> token em stdout; morre se nao houver, ou se a API recusar
+require_token() {
+  local t
+  t=$(resolve_token)
+  [ -n "$t" ] \
+    || die not_authenticated "Nenhum token da Cloudez encontrado em $(token_file)." "$(login_hint)"
+  [ "$(verify_token "$t")" != invalid ] \
+    || die token_invalid "A Cloudez recusou o token salvo (expirado ou revogado)." "$(login_hint)"
+  printf '%s' "$t"
+}
+
+# -------------------------------------------------------------------- state --
+
 # state_path <deploy_id>
 state_path() { printf '%s/%s.json' "$CLOUDEZ_STATE_DIR" "$1"; }
 
