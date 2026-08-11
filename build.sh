@@ -7,6 +7,13 @@
 #
 # Os artefatos vao para libexec/. Quem os invoca e o launcher `bin/cloudez-<cmd>`
 # (com o par .cmd para Windows), que escolhe o arquivo da plataforma atual.
+#
+# -buildvcs=false porque os binarios sao versionados junto do fonte. Por padrao o
+# go embute a revisao do git e um `vcs.modified` no binario, entao todo commit
+# mudava os bytes de saida: `test/run.sh` (que rebuilda) deixava a arvore suja
+# depois de qualquer commit, e o binario commitado carregava para sempre o selo
+# de um commit anterior, com modified=true. Sem o selo, duas builds do mesmo
+# fonte com o mesmo Go sao byte-identicas.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -22,7 +29,7 @@ for cmd in $CMDS; do
     out="libexec/$cmd-$os-$arch"
     [ "$os" = "windows" ] && out="$out.exe"
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-      go build -trimpath -ldflags="-s -w" -o "$out" "./cmd/$cmd"
+      go build -trimpath -buildvcs=false -ldflags="-s -w" -o "$out" "./cmd/$cmd"
     printf '%-40s %s\n' "$out" "$(du -h "$out" | cut -f1)"
   done
 done
