@@ -604,6 +604,57 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
 
 # ---------------------------------------------------------------- rollback --
 
+# O stderr do ssh nao pode entrar na lista. `StrictHostKeyChecking=accept-new`
+# imprime um aviso na PRIMEIRA conexao a um host — o cenario do primeiro deploy —
+# e com `2>&1` ele virava uma release.
+@test "aviso no stderr do ssh nao vira release" {
+  MOCK_SSH_STDOUT='CURRENT 20260102T000000Z-bbbbbbb
+20260102T000000Z-bbbbbbb
+20260101T000000Z-aaaaaaa' \
+  MOCK_SSH_STDERR_FIRST='Warning: Permanently added the host to the list of known hosts.' \
+    run cloudez-list-releases staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" '.releases | length')" = "2" ]
+  [[ "$output" != *Warning* ]]
+}
+
+# A linha do marcador nunca pode aparecer como release. O filtro de antes era
+# posicional (`tail -n +2`): bastava uma linha inesperada na frente para ele
+# descartar a errada e promover o CURRENT.
+@test "a linha CURRENT nunca vira release" {
+  MOCK_SSH_STDOUT='CURRENT 20260102T000000Z-bbbbbbb
+20260102T000000Z-bbbbbbb' \
+  MOCK_SSH_STDERR_FIRST='ruido antes de tudo' \
+    run cloudez-list-releases staging
+  [ "$(jq_field "$output" '.releases | length')" = "1" ]
+  [ "$(jq_field "$output" '.releases[0].release_id')" = "20260102T000000Z-bbbbbbb" ]
+  [[ "$output" != *CURRENT* ]]
+}
+
+# O estrago real acontecia aqui: o rollback escolhe a primeira release que nao e
+# a atual, entao o ruido virava o ALVO. O symlink apontava para um caminho
+# inexistente, o site respondia 404, e o adaptador reportava rolled_back.
+@test "rollback nao escolhe ruido do stderr como alvo" {
+  MOCK_SSH_STDOUT='CURRENT 20260102T000000Z-bbbbbbb
+20260102T000000Z-bbbbbbb
+20260101T000000Z-aaaaaaa' \
+  MOCK_SSH_STDERR_FIRST='Warning: Permanently added the host to the list of known hosts.' \
+    run cloudez-rollback staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .to_release_id)" = "20260101T000000Z-aaaaaaa" ]
+  ! grep -q "releases/Warning" "$MOCK_LOG"
+}
+
+# Falha continua reportando o stderr: separar as duas coisas nao pode custar o
+# diagnostico.
+@test "falha de ssh ainda traz o stderr nos logs" {
+  MOCK_SSH_EXIT=255 MOCK_SSH_STDERR='ssh: connect to host porta 22: Connection refused' \
+    run cloudez-list-releases staging
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "ssh_failed" ]
+  [[ "$(jq_field "$output" .error.logs)" == *"Connection refused"* ]]
+}
+
 @test "rollback sem release anterior: no_previous_release" {
   run cloudez-rollback staging
   [ "$status" -eq 1 ]
