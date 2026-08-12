@@ -193,7 +193,7 @@ como array puro: ligar a paginação um dia não pode quebrar o setup de todo mu
   "name": "claudetest",
   "values": [
     { "slug": "domain", "value": "claudetest.com.br" },
-    { "slug": "root",   "value": "~/claudetest.com.br/www" }
+    { "slug": "root",   "value": "~/claudetest.com.br/www/claude" }
   ]
 }
 ```
@@ -240,7 +240,7 @@ devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
     "port": 22,
     "user": "deploy"
   },
-  "root": "~/meusite.com.br/www",
+  "root": "~/meusite.com.br/www/claude",
   "current_release": "20260807T143000Z-a1b2c3d"
 }
 ```
@@ -253,6 +253,17 @@ document root do site precisa apontar para `<root>/current`. Um `~/` inicial
 significa "relativo ao `$HOME` do usuário ssh"; o plugin o remove antes de
 montar comandos remotos, porque dentro de aspas simples o shell do servidor não
 expande til. Quando o `.cloudez.yaml` define `root`, o valor local vence.
+
+**A API devolve o `root` já com o sufixo `/claude`** — `~/<domain>/www/claude`, e
+não `~/<domain>/www`. É a mesma convenção que o `cloudez-setup` grava no template,
+e as duas pontas precisam concordar: a estrutura de releases fica num
+subdiretório do document root do site, para o deploy não tomar conta do `www`
+inteiro e apagar o que já estivesse lá.
+
+A consequência prática é que **o document root no painel da Cloudez precisa
+apontar para `~/<domain>/www/claude/current`**. Deixado em `~/<domain>/www`, o
+site segue servindo o conteúdo antigo e o deploy não tem efeito visível — sem
+erro em lugar nenhum, que é o pior formato de falha.
 
 ---
 
@@ -292,7 +303,7 @@ deve escrever. Não move nenhum byte.
     "host": "srv-12.cloudez.io",
     "port": 22,
     "user": "deploy",
-    "path": "~/meusite.com.br/www/releases/20260807T143000Z-a1b2c3d/"
+    "path": "~/meusite.com.br/www/claude/releases/20260807T143000Z-a1b2c3d/"
   },
   "expires_at": "2026-08-07T15:30:00Z"
 }

@@ -101,7 +101,7 @@ site_root() {
   root=$(cfg "$site" .root)
   [ -n "$root" ] \
     || die config_invalid "Ambiente '$environment' nao tem root definido em $(resolve_config)." \
-         '{"hint":"Ex.: root: ~/meusite.com.br/www — o deploy publica em <root>/current."}'
+         '{"hint":"Ex.: root: ~/meusite.com.br/www/claude — o deploy publica em <root>/current."}'
   printf '%s' "${root#\~/}"
 }
 

@@ -84,7 +84,7 @@ setup() { make_project; }
 @test "o template gerado traz root explicito, logo abaixo de domain" {
   rm .cloudez.yaml
   cloudez-setup meusite.com.br staging >/dev/null
-  grep -q 'root: ~/meusite.com.br/www' .cloudez.yaml
+  grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
   [ "$(grep -n 'domain:' .cloudez.yaml | cut -d: -f1)" \
     -lt "$(grep -n 'root:' .cloudez.yaml | cut -d: -f1)" ]
 }
@@ -105,7 +105,7 @@ setup() { make_project; }
   run cloudez-setup MeuSite.COM.BR staging
   [ "$(jq_field "$output" .domain)" = "meusite.com.br" ]
   grep -q 'domain: meusite.com.br' .cloudez.yaml
-  grep -q 'root: ~/meusite.com.br/www' .cloudez.yaml
+  grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
 }
 
 # ------------------------------------------------------------------- root ---

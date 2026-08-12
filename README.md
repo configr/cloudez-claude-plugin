@@ -296,7 +296,7 @@ nome é livre: um projeto com um destino só costuma usar `default`.
 cloudez:
   staging:
     domain: staging.meusite.com.br
-    root: ~/staging.meusite.com.br/www
+    root: ~/staging.meusite.com.br/www/claude
     ssh: {host: srv-12.cloudez.io, user: deploy, port: 22}
 ```
 
@@ -308,9 +308,12 @@ exige um FQDN (`meusite.com.br`), sem protocolo, caminho, query ou porta, e
 normaliza para minúsculas: o domínio também vira caminho no servidor, e caminho
 diferencia maiúscula onde o DNS não diferencia.
 
-O `root` é **obrigatório e explícito**, e o padrão da Cloudez é
-`~/<domain>/www`. Ele não é derivado do domínio de propósito: para onde os
-arquivos vão é a decisão mais destrutiva do deploy, e destino implícito é
+O `root` é **obrigatório e explícito**, e o `setup` gera
+`~/<domain>/www/claude`. O document root do site na Cloudez é `~/<domain>/www`;
+a estrutura de releases mora num subdiretório `claude/` dentro dele, para o
+deploy não tomar conta do `www` inteiro — o que apagaria o que já estivesse lá.
+Ele fica escrito no arquivo em vez de derivado do domínio de propósito: para onde
+os arquivos vão é a decisão mais destrutiva do deploy, e destino implícito é
 destino que ninguém confere.
 
 Um `~/` inicial é removido, não expandido — os comandos remotos vão entre aspas
@@ -339,8 +342,9 @@ O deploy usa o padrão releases + symlink:
 ```
 
 O document root do site no painel da Cloudez precisa apontar para `current` —
-com `root: ~/<domain>/www`, isso é `~/<domain>/www/current`, e não
-`~/<domain>/www`.
+com o `root` que o `setup` gera, isso é `~/<domain>/www/claude/current`. Sem
+esse ajuste no painel, o site segue servindo o que já estava em `~/<domain>/www`
+e o deploy parece não ter efeito nenhum.
 O servidor guarda as 5 releases mais recentes — é até onde o rollback alcança.
 
 ### Dependências

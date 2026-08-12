@@ -27,8 +27,8 @@ environment="${2:-}"
        '{"hint":"FQDN, sem protocolo nem caminho. Ex.: staging.meusite.com.br"}'
 
 # DNS nao diferencia maiuscula, mas o caminho no servidor diferencia: o dominio
-# vira `~/<domain>/www`, entao normalizar aqui evita dois diretorios para o
-# mesmo site.
+# vira `~/<domain>/www/claude`, entao normalizar aqui evita dois diretorios para
+# o mesmo site.
 domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
 
 # FQDN e nada mais: protocolo, caminho, querystring ou porta viram erro em vez
@@ -63,15 +63,18 @@ cat > "$target" <<YAML
 # Configuração de deploy Cloudez. Preencha os TODO do bloco ssh.
 #
 # O document root do site no painel da Cloudez precisa apontar para
-# <root>/current — é o symlink que o deploy troca atomicamente.
+# <root>/current — é o symlink que o deploy troca atomicamente. Com o root
+# abaixo, isso é ~/$domain/www/claude/current.
 
 cloudez:
   $environment:
     # O domínio identifica o site.
     domain: $domain
 
-    # Onde o site vive no servidor. O padrão da Cloudez é ~/<domain>/www.
-    root: ~/$domain/www
+    # Onde o deploy publica. O document root do site na Cloudez é
+    # ~/$domain/www; a estrutura de releases fica no subdiretório claude/
+    # dele, para o deploy não tomar conta do www inteiro.
+    root: ~/$domain/www/claude
 
     ssh:
       host: TODO

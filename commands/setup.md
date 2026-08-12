@@ -109,9 +109,14 @@ minúsculas, e é essa a forma que o servidor conhece.
 Leia o JSON.
 
 **`status: "created"`** — o template foi escrito em `path`, com `domain` e `root`
-já preenchidos (`root` é `~/<domain>/www`, o padrão da Cloudez). Diga para onde o
-deploy vai publicar — o `root` é explícito no arquivo justamente para o usuário
-poder discordar.
+já preenchidos. O `root` é sempre `~/<domain>/www/claude`: o document root do site
+na Cloudez é `~/<domain>/www`, e a estrutura de releases fica num subdiretório
+`claude/` dentro dele, para o deploy não tomar conta do `www` inteiro.
+
+Diga para onde o deploy vai publicar, e **avise que o document root do site no
+painel precisa apontar para `~/<domain>/www/claude/current`** — sem isso o site
+continua servindo o que já estava em `www`, e o deploy parece não ter efeito. O
+`root` é explícito no arquivo justamente para o usuário poder discordar.
 
 Falta o `ssh` (o campo `todo` do retorno). Se o `cloudez_get_site` do passo 2
 trouxe `ssh.host` e `ssh.user`, ofereça preencher com esses valores e peça
