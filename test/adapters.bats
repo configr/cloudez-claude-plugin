@@ -493,6 +493,43 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
   ! grep -qE "rm -f '?/srv/staging/current" "$MOCK_LOG"
 }
 
+# O ALVO do link e relativo ao DIRETORIO DO LINK. Com root vindo de `~/` — que e
+# o que o setup gera — o root e relativo ao $HOME, e usa-lo como alvo produz
+# `current -> <root>/releases/<id>` resolvido a partir de `<root>/`, ou seja um
+# link quebrado. `ln` nao reclama, `ls` nao reclama, e o site responde 404 depois
+# de um deploy que se declarou bem-sucedido.
+#
+# Este cenario PRECISA de root relativo: com um root absoluto o alvo errado
+# ainda resolveria, e foi por isso que o bug passou pela suite — o fixture
+# padrao usa /srv/staging.
+@test "o alvo do current e relativo, com root vindo de ~/" {
+  make_config 'domain: staging.example.com
+root: ~/staging.example.com/www/claude
+ssh: {host: srv.example.com, user: deploy, port: 22}'
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-finalize-deploy "$d"
+  [ "$status" -eq 0 ]
+  grep -qE "ln -sfn 'releases/[0-9TZ]+-abc1234'" "$MOCK_LOG"
+  ! grep -q "ln -sfn 'staging.example.com/www/claude/releases" "$MOCK_LOG"
+}
+
+@test "o alvo do current no rollback tambem e relativo" {
+  make_config 'domain: staging.example.com
+root: ~/staging.example.com/www/claude
+ssh: {host: srv.example.com, user: deploy, port: 22}'
+  # Formato que o cloudez-list-releases espera: CURRENT na primeira linha, uma
+  # release por linha depois.
+  MOCK_SSH_STDOUT='CURRENT 20260102T000000Z-bbbbbbb
+20260102T000000Z-bbbbbbb
+20260101T000000Z-aaaaaaa' \
+    run cloudez-rollback staging 20260101T000000Z-aaaaaaa
+  [ "$status" -eq 0 ]
+  grep -qE "ln -sfn 'releases/20260101T000000Z-aaaaaaa'" "$MOCK_LOG"
+  ! grep -q "ln -sfn 'staging.example.com/www/claude/releases" "$MOCK_LOG"
+}
+
 # ---------------------------------------------------------------- rollback --
 
 @test "rollback sem release anterior: no_previous_release" {

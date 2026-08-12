@@ -27,8 +27,11 @@ printf '%s' "$releases" | jq -e --arg t "$target" '.releases[] | select(.release
   || die release_not_found "Release '$target' nao existe no servidor (pode ter sido limpa)." \
        "$(printf '%s' "$releases" | jq -c '{available: [.releases[].release_id]}')"
 
+# Alvo relativo ao diretorio do link, nao ao cwd — mesma razao detalhada no
+# cloudez-finalize-deploy: `$root/...` como alvo gera um link quebrado, e a
+# falha aparece so no navegador, como 404.
 activate="set -e
-  ln -sfn '$root/releases/$target' '$root/.current.tmp.\$\$'
+  ln -sfn 'releases/$target' '$root/.current.tmp.\$\$'
   mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
 
 require_ssh_target "$site"

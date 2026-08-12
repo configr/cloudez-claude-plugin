@@ -33,8 +33,16 @@ previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r base
 #
 # `mv -T` e GNU coreutils. Roda no servidor (Linux), nao na maquina local —
 # num host BSD/macOS falharia, e ai o mv moveria o link PARA DENTRO de current.
+#
+# O ALVO do link e relativo ao DIRETORIO DO LINK, nao ao cwd de quem o cria.
+# `$root` e relativo ao $HOME (o `~/` foi removido para o shell remoto nao
+# receber til dentro de aspas simples), entao usa-lo como alvo produz um link
+# que so resolveria se `current` morasse no $HOME — e ele mora em `$root/`.
+# O resultado e um link quebrado, `ls` e `ln` nao reclamam, e o site responde
+# 404 depois de um deploy que se declarou bem-sucedido. `releases/<id>` e
+# relativo ao proprio `$root/`, que e onde o link fica.
 activate="set -e
-  ln -sfn '$root/releases/$release_id' '$root/.current.tmp.\$\$'
+  ln -sfn 'releases/$release_id' '$root/.current.tmp.\$\$'
   mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
 
 if ! out=$(ssh_run "$site" "$activate" 2>&1); then
