@@ -108,8 +108,12 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Adaptadores `bin/` para trabalhar antes do MCP ficar pronto
 - [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
 - [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
-- [ ] Dados de SSH vindos da API, pelo domínio, em vez da config local
-- [ ] Servidor MCP (repositório separado)
+- [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
+- [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
+- [ ] Slugs de `stack` e `current_release` confirmados — informativos, não bloqueiam
+- [ ] Bloco `ssh` fora do `.cloudez.yaml` — hoje ele ainda é gravado lá, mesmo
+      vindo da API
+- [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
 ## Autenticação
 

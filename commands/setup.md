@@ -119,11 +119,21 @@ painel precisa apontar para `~/<domain>/www/claude/current`** — sem isso o sit
 continua servindo o que já estava em `www`, e o deploy parece não ter efeito. O
 `root` é explícito no arquivo justamente para o usuário poder discordar.
 
-Falta o `ssh` (o campo `todo` do retorno). Se o `cloudez_get_site` do passo 2
-trouxe `ssh.host` e `ssh.user`, ofereça preencher com esses valores e peça
-confirmação. Se não trouxe, **pergunte ao usuário** — `ssh.host` e `ssh.user` vêm
-do painel da Cloudez, e não são seus para inventar. Um host plausível e errado
-vira um deploy que falha longe daqui.
+Falta o `ssh` (o campo `todo` do retorno). O que fazer depende do que o
+`cloudez_get_site` do passo 2 devolveu:
+
+- **veio `ssh`** — ofereça preencher `host`, `user` e `port` com esses valores e
+  peça confirmação. Vieram da conta do usuário, não de palpite;
+- **veio `ssh_unavailable` dizendo que o usuário não tem SSH liberado
+  (`has_ssh: false`)** — **avise que o deploy não vai funcionar** enquanto isso
+  não for habilitado no painel da Cloudez. Deixe o `TODO` no arquivo e **não
+  peça** host e usuário: nenhum valor digitado contorna um acesso bloqueado, e
+  preencher só faria a falha aparecer bem mais tarde, como permissão negada no
+  meio de um deploy;
+- **veio `ssh_unavailable` dizendo que a API não trouxe os campos** — aí é
+  ausência de dado, não bloqueio. **Pergunte ao usuário**: `ssh.host` e
+  `ssh.user` vêm do painel da Cloudez e não são seus para inventar. Um host
+  plausível e errado vira um deploy que falha longe daqui.
 
 Se `gitignore` vier como `"updated"`, avise que `.cloudez/` foi acrescentado ao
 `.gitignore` — é onde fica o estado dos deploys.

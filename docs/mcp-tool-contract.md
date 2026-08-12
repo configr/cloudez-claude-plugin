@@ -152,8 +152,8 @@ Detalhes de um site, incluindo o alvo de sincronização. Tem duas funções:
    escrever um `.cloudez.yaml` para ele. É o que impede um domínio com typo de
    virar uma config que só falha no deploy, longe da causa. Esta é a razão de o
    setup exigir autenticação: sem token não há como saber se o site existe.
-2. **Aposentar o bloco `ssh` da config local** — hoje host, user e port são
-   digitados à mão no `.cloudez.yaml`.
+2. **Preencher o bloco `ssh` da config local**, que antes era digitado à mão no
+   `.cloudez.yaml`.
 
 Campo que a API não trouxer **some do retorno**, em vez de virar `null`, string
 vazia ou um default plausível. O bloco `ssh` só sai inteiro: meio bloco faria o
@@ -193,8 +193,10 @@ como array puro: ligar a paginação um dia não pode quebrar o setup de todo mu
   "name": "claudetest",
   "values": [
     { "slug": "domain", "value": "claudetest.com.br" },
-    { "slug": "root",   "value": "~/claudetest.com.br/www/claude" }
-  ]
+    { "slug": "stack",  "value": "static" }
+  ],
+  "cloud": { "fqdn": "srv-12.cloudez.io" },
+  "user":  { "username": "deploy", "has_ssh": true }
 }
 ```
 
@@ -240,40 +242,73 @@ devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
 ```
 
 ```jsonc
-// output
+// output — match exato, com ssh utilizável
 {
-  "domain": "meusite.com.br",
-  "name": "meusite",
-  "stack": "static",
-  "ssh": {
-    "host": "srv-12.cloudez.io",
-    "port": 22,
-    "user": "deploy"
-  },
-  "root": "~/meusite.com.br/www/claude",
-  "current_release": "20260807T143000Z-a1b2c3d"
+  "match": "exact",
+  "site": {
+    "domain": "meusite.com.br",
+    "name": "meusite",
+    "stack": "static",
+    "ssh": {
+      "host": "srv-12.cloudez.io",
+      "port": 22,
+      "user": "deploy"
+    },
+    "current_release": "20260807T143000Z-a1b2c3d"
+  }
 }
 ```
 
 > Nenhuma credencial no retorno. A chave SSH vive no ambiente do usuário
 > (`~/.ssh/`), não passa pelo MCP nem pelo contexto do modelo.
 
-O `root` é o diretório que contém `releases/`, `current` e `shared/` — o
-document root do site precisa apontar para `<root>/current`. Um `~/` inicial
-significa "relativo ao `$HOME` do usuário ssh"; o plugin o remove antes de
-montar comandos remotos, porque dentro de aspas simples o shell do servidor não
-expande til. Quando o `.cloudez.yaml` define `root`, o valor local vence.
+**O destino do ssh não vem de `values`.** Ele mora em dois objetos do recurso:
 
-**A API devolve o `root` já com o sufixo `/claude`** — `~/<domain>/www/claude`, e
-não `~/<domain>/www`. É a mesma convenção que o `cloudez-setup` grava no template,
-e as duas pontas precisam concordar: a estrutura de releases fica num
-subdiretório do document root do site, para o deploy não tomar conta do `www`
-inteiro e apagar o que já estivesse lá.
+| Campo na API | Vira |
+|---|---|
+| `cloud.fqdn` | `ssh.host` — o servidor onde o site está hospedado |
+| `user.username` | `ssh.user` |
+| `user.has_ssh` | porteiro: `false` impede o bloco `ssh` de existir |
+
+A porta não vem no recurso. O default é `22`.
+
+**`has_ssh: false` não é ausência de dado, é recusa** — e os dois pedem respostas
+opostas. Por isso, quando não há bloco `ssh`, o retorno traz `ssh_unavailable`
+explicando qual dos dois casos é:
+
+```jsonc
+// output — o usuário não tem ssh liberado
+{
+  "match": "exact",
+  "site": {
+    "domain": "meusite.com.br",
+    "ssh_unavailable": "O usuário 'deploy' não tem SSH liberado nesta conta (has_ssh: false). O deploy não é possível até que o acesso SSH seja habilitado no painel da Cloudez. Preencher host e usuário à mão não resolve."
+  }
+}
+```
+
+Sem essa distinção, um usuário sem SSH liberado receberia o pedido de preencher
+`ssh.host` e `ssh.user` na config à mão — e o deploy falharia depois com permissão
+negada, longe da causa. Nenhum valor digitado contorna um `has_ssh: false`.
+
+**`cloudez_get_site` não devolve `root`.** O destino da publicação vem sempre do
+`.cloudez.yaml` do projeto, e ter uma segunda fonte para ele seria criar a
+pergunta "qual vale?" para a informação mais destrutiva deste plugin — pergunta
+que só apareceria quando as duas divergissem, que é tarde.
+
+O `root` da config é o diretório que contém `releases/`, `current` e `shared/`.
+Um `~/` inicial significa "relativo ao `$HOME` do usuário ssh"; o plugin o remove
+antes de montar comandos remotos, porque dentro de aspas simples o shell do
+servidor não expande til.
+
+O `cloudez-setup` grava `~/<domain>/www/claude`: o document root do site na
+Cloudez é `~/<domain>/www`, e a estrutura de releases fica num subdiretório dele
+para o deploy não tomar conta do `www` inteiro e apagar o que já estivesse lá.
 
 A consequência prática é que **o document root no painel da Cloudez precisa
-apontar para `~/<domain>/www/claude/current`**. Deixado em `~/<domain>/www`, o
-site segue servindo o conteúdo antigo e o deploy não tem efeito visível — sem
-erro em lugar nenhum, que é o pior formato de falha.
+apontar para `<root>/current`** — com o default acima, `~/<domain>/www/claude/current`.
+Deixado em `~/<domain>/www`, o site segue servindo o conteúdo antigo e o deploy
+não tem efeito visível: sem erro em lugar nenhum, que é o pior formato de falha.
 
 ---
 
@@ -615,16 +650,15 @@ Confirmar antes de implementar:
    com `{domain}` interpolado).
 
    **Estrutura confirmada:** a configuração vem em `values`, como pares
-   `slug`/`value`, e o domínio é o de `slug: "domain"`.
+   `slug`/`value`, e o domínio é o de `slug: "domain"` ou do atributo `domain`.
+   O destino do ssh vem de `cloud.fqdn`, `user.username` e `user.has_ssh`.
 
-   **Faltam os slugs do resto.** O mapeamento lê `root`, `stack`,
-   `current_release`, `ssh_host`, `ssh_user` e `ssh_port` — nomes assumidos, não
-   verificados. Enquanto não forem confirmados, o `.cloudez.yaml` continua saindo
-   com `ssh.host` e `ssh.user` em `TODO`, porque campo não reconhecido some do
-   retorno em vez de virar palpite.
+   **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
+   nomes e não verificados. Campo não reconhecido some do retorno em vez de virar
+   palpite, e nenhum dos dois bloqueia deploy: são informativos. O `root` saiu da
+   lista de vez — vem sempre da config local.
 
-   Um `GET` de exemplo autenticado resolve: basta a lista de slugs que vêm em
-   `values`. Também vale confirmar se `?domain=` é filtro exato ou parcial — a
+   Também vale confirmar se `?domain=` é filtro exato ou parcial — a
    implementação assume o pior caso e confere por igualdade.
 3. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
    no document root (sem `releases/` e `current`), `begin`/`finalize` colapsam em
