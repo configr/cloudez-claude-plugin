@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -142,5 +142,45 @@ Se `gitignore` vier como `"updated"`, avise que `.cloudez/` foi acrescentado ao
 nada por conta própria: leia o arquivo e diga se o environment pedido já está lá.
 Se não estiver, mostre um bloco novo no mesmo formato dos existentes e pergunte
 antes de acrescentar.
+
+## 5. Document root do site
+
+Último passo, e o que evita a falha mais confusa deste plugin.
+
+O `cloudez_get_site` do passo 2 devolveu o `app_root_path` do site — o diretório
+que o servidor web entrega, relativo a `~/<domain>/www`. O deploy publica em
+`<root>/current`, e com o `root` que o `setup` grava isso é **`claude/current`**.
+
+**Se `app_root_path` já for `claude/current`**, diga que está tudo certo e siga.
+
+**Se for qualquer outra coisa** — inclusive ausente — explique o problema em
+termos do que vai acontecer, não do campo: com o document root apontando para
+outro lugar, o deploy vai rodar inteiro, sem erro nenhum, e o site vai continuar
+servindo o conteúdo antigo. É uma falha silenciosa, e o usuário só descobre
+comparando o que publicou com o que o navegador mostra.
+
+**Ofereça ajustar, e espere a resposta.** Diga qual é o valor atual e qual
+passaria a ser. Duas coisas que ele precisa saber para decidir:
+
+- a mudança vale **na hora**, não no próximo deploy;
+- até o primeiro deploy, `claude/current` ainda não existe no servidor — então o
+  site fica **fora do ar** nesse intervalo. Para um site novo isso é irrelevante;
+  para um que já está no ar, é decisão dele, e o caminho seguro é ajustar logo
+  antes do primeiro deploy, não agora.
+
+**Se aceitar:**
+
+```
+cloudez_set_app_root_path(domain: "<domain>", app_root_path: "claude/current")
+```
+
+Confirme pelo retorno: `changed: true` é ajuste feito, `changed: false` é valor
+que já estava correto. Se vier erro dizendo que o valor **não mudou**, não diga
+que o document root foi ajustado — a alteração não pegou, e um deploy contando
+com ela vai parecer não ter efeito.
+
+**Se recusar**, tudo bem: registre que o `app_root_path` continua em outro valor
+e que o primeiro deploy não vai aparecer no site até isso mudar. Não insista e
+não ajuste mesmo assim.
 
 Quando o arquivo estiver completo, o deploy é `/cloudez:deploy <environment>`.

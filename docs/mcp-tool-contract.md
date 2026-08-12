@@ -312,7 +312,59 @@ não tem efeito visível: sem erro em lugar nenhum, que é o pior formato de fal
 
 ---
 
-### 3.4 `cloudez_begin_deploy` — **mutating**
+### 3.4 `cloudez_set_app_root_path` — **mutating**
+
+Altera o `app_root_path` do site: o diretório que o servidor web entrega,
+relativo a `~/<domain>/www`.
+
+Existe por causa de uma falha silenciosa. O deploy publica em `<root>/current`, e
+com o `root` que o `cloudez-setup` grava isso é `claude/current`. Se o
+`app_root_path` apontar para outro lugar, o deploy roda inteiro, sem erro nenhum,
+e o site continua servindo o conteúdo antigo — o usuário só descobre comparando o
+que publicou com o que o navegador mostra.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "domain": { "type": "string" },
+    "app_root_path": { "type": "string", "description": "Relativo a ~/<domain>/www. Normalmente 'claude/current'." }
+  },
+  "required": ["domain", "app_root_path"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{ "domain": "meusite.com.br", "app_root_path": "claude/current",
+  "previous_app_root_path": "public_html", "changed": true }
+```
+
+`changed: false` significa que o valor já estava correto e nenhuma escrita foi
+feita.
+
+**Sem `idempotency_key`, e a exceção é deliberada.** A regra da seção 2 existe
+porque as outras mutating criam recursos, e repetir cria dois. Esta atribui um
+valor fixo: repetir dá no mesmo. A chave existiria só para cumprir formalidade.
+
+**A tool relê o site depois de escrever** e falha se o valor não mudou de fato.
+O formato do corpo do `PATCH` ainda não foi confirmado contra a API real — se ela
+esperar o campo dentro de `values` em vez de no topo, pode responder `200` e
+ignorar. Uma escrita que se declara bem-sucedida sem ter efeito é pior do que uma
+que falha: manda o usuário fazer deploy confiante num document root errado, e o
+sintoma que volta é "publiquei e o site não mudou", o mais difícil de ligar à
+causa.
+
+**A tool não decide sozinha.** Quem chama precisa ter perguntado ao usuário: a
+mudança vale na hora, e até o primeiro deploy o diretório `claude/current` ainda
+não existe no servidor — um site que já estava no ar fica fora dele nesse
+intervalo.
+
+---
+
+### 3.5 `cloudez_begin_deploy` — **mutating**
 
 Registra a intenção de deploy e devolve o diretório de release onde o transporte
 deve escrever. Não move nenhum byte.
@@ -365,7 +417,7 @@ deploy aninhado um nível errado.
 
 ---
 
-### 3.5 `cloudez_finalize_deploy` — **mutating**
+### 3.6 `cloudez_finalize_deploy` — **mutating**
 
 Ativa a release já sincronizada: troca o symlink `current` de forma atômica e
 limpa releases antigas.
@@ -415,7 +467,7 @@ não pode compartilhar código com essa.
 
 ---
 
-### 3.6 `cloudez_get_deploy_status` — read-only
+### 3.7 `cloudez_get_deploy_status` — read-only
 
 Consulta o estado de um deploy. Usado para polling quando `finalize` é
 assíncrono, e para inspeção posterior.
@@ -442,7 +494,7 @@ assíncrono, e para inspeção posterior.
 
 ---
 
-### 3.7 `cloudez_list_releases` — read-only
+### 3.8 `cloudez_list_releases` — read-only
 
 Necessária para o rollback ser dirigível pelo modelo (escolher para qual release
 voltar) e para auditoria.
@@ -472,7 +524,7 @@ o alvo de um rollback já foi limpo, `rollback` precisa falhar com
 
 ---
 
-### 3.8 `cloudez_rollback` — **mutating**
+### 3.9 `cloudez_rollback` — **mutating**
 
 Volta o symlink `current` para uma release anterior.
 
@@ -502,7 +554,7 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.9 Fora do escopo, por enquanto
+### 3.10 Fora do escopo, por enquanto
 
 Duas tools saíram desta proposta junto com as features correspondentes do
 plugin. Ficam registradas para não serem redescobertas do zero:
@@ -652,6 +704,11 @@ Confirmar antes de implementar:
    **Estrutura confirmada:** a configuração vem em `values`, como pares
    `slug`/`value`, e o domínio é o de `slug: "domain"` ou do atributo `domain`.
    O destino do ssh vem de `cloud.fqdn`, `user.username` e `user.has_ssh`.
+
+   **Falta o formato do corpo do `PATCH`** que altera o `app_root_path`
+   (seção 3.4). Hoje é `PATCH /v3/website/<id>/` com `{"app_root_path": "..."}`
+   no topo, sobreponível por `CLOUDEZ_API_SITE_PATCH_PATH`. A tool relê o site
+   depois de escrever justamente porque isso está aberto.
 
    **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
    nomes e não verificados. Campo não reconhecido some do retorno em vez de virar
