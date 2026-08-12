@@ -15,6 +15,22 @@ note="${4:-}"
 site=$(site_config "$environment")
 mkdir -p "$CLOUDEZ_STATE_DIR/key"
 
+# Poda do estado local. Sem ela `.cloudez/state/` so cresce: um arquivo por
+# deploy, mais um por chave de idempotencia, incluindo os que falharam no meio.
+# Num projeto que publica todo dia isso vira lixo permanente no repositorio de
+# quem faz o deploy.
+#
+# O TTL nao pode ser curto: a chave de idempotencia e o que impede um retry de
+# virar um segundo deploy, e ela precisa sobreviver a qualquer nova tentativa
+# plausivel da mesma publicacao. Sete dias e folgado para isso e ainda limita o
+# crescimento — um deploy que alguem retome depois de uma semana nao e retry, e
+# um deploy novo.
+#
+# Best-effort: falhar aqui nao pode impedir um deploy. E `-mtime` porque `find`
+# com `-newermt` diverge entre BSD e GNU, e este script roda nas duas.
+STATE_TTL_DAYS=7
+find "$CLOUDEZ_STATE_DIR" -type f -mtime "+$STATE_TTL_DAYS" -delete 2>/dev/null || true
+
 # Idempotencia: a mesma chave devolve o mesmo deploy, nunca cria outro.
 key_file="$CLOUDEZ_STATE_DIR/key/$idem"
 if [ -f "$key_file" ]; then

@@ -152,6 +152,14 @@ isso ao usuário** — é conteúdo dele posto de lado, e só ele decide se aind
 serve para alguma coisa. Sem esse aviso vira um diretório órfão no servidor que
 só aparece quando alguém for olhar.
 
+Se vier `pruned_replaced`, esse número de diretórios substituídos **antigos** foi
+apagado para o servidor não acumular cópias inteiras do document root. Reporte
+também: é conteúdo do usuário, e apagar em silêncio seria pior do que acumular.
+Os dois mais recentes sempre ficam.
+
+`previous_release_id` **não aparece** quando não havia release anterior — é o
+caso do primeiro deploy do site. Campo ausente, não string vazia.
+
 ## 8. Rollback
 
 ```sh

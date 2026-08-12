@@ -10,6 +10,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 # Constante em vez de config: nunca houve motivo real para variar por ambiente.
 KEEP_RELEASES=5
 
+# Quantos diretorios `.current-<release_id>` ficam no servidor.
+#
+# Numero SEPARADO, e menor, porque a natureza deles e outra: releases foram
+# criadas por nos e podar e limpeza; um `.current-*` e o document root que o
+# usuario tinha, posto de lado por nos. Apagar isso e apagar conteudo dele.
+#
+# No caminho normal existe no maximo UM: o primeiro deploy encontra o diretorio,
+# move, e dali em diante `current` e symlink. A poda so chega a rodar quando
+# alguem recria o diretorio a mao, repetidamente — e ai dois ja cobrem qualquer
+# necessidade de voltar atras.
+KEEP_REPLACED=2
+
 deploy_id="${1:?uso: cloudez-finalize-deploy <deploy_id>}"
 
 state=$(load_state "$deploy_id")
@@ -41,6 +53,7 @@ previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r base
 # O resultado e um link quebrado, `ls` e `ln` nao reclamam, e o site responde
 # 404 depois de um deploy que se declarou bem-sucedido. `releases/<id>` e
 # relativo ao proprio `$root/`, que e onde o link fica.
+#
 # `current` pode ser um DIRETORIO de verdade, e nao um symlink nosso: e o caso do
 # site que ja tinha conteudo antes de o plugin entrar. `mv -T` de um link sobre
 # um diretorio nao substitui — o rename(2) falha —, entao sem tratar isso o
@@ -72,9 +85,19 @@ if ! out=$(ssh_run "$site" "$activate" 2>&1); then
 fi
 
 # Limpeza best-effort: falhar aqui nao invalida um deploy que ja deu certo.
-ssh_run "$site" \
-  "ls -1dt '$root/releases/'*/ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -rf" \
-  >/dev/null 2>&1 || true
+#
+# Sem `set -e` de proposito: um `ls` que nao casa nada sai nao-zero, e isso e o
+# caso normal quando nao ha o que podar.
+#
+# O stderr fica fora do que se le como dado — a licao do cloudez-list-releases.
+prune="ls -1dt '$root/releases/'*/ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -rf
+  old=\$(ls -1dt '$root/.current-'*/ 2>/dev/null | tail -n +$((KEEP_REPLACED + 1)))
+  if [ -n \"\$old\" ]; then
+    printf '%s\n' \"\$old\" | xargs -r rm -rf
+    printf 'PRUNED %s\n' \"\$(printf '%s\n' \"\$old\" | wc -l | tr -d ' ')\"
+  fi"
+
+pruned=$(ssh_run "$site" "$prune" 2>/dev/null | awk '/^PRUNED /{print $2}') || true
 
 # Ter movido um diretorio precisa chegar a quem chamou. E conteudo do usuario
 # posto de lado, e ninguem alem dele decide se aquilo ainda serve para alguma
@@ -82,8 +105,18 @@ ssh_run "$site" \
 # quando alguem for olhar.
 moved=$(printf '%s\n' "$out" | awk '/^MOVED /{print $2}')
 
+# Campo que nao existe SOME do retorno, em vez de virar string vazia. E a mesma
+# regra que o resto do plugin segue, e aqui ela tem consumidor: `""` sobrevive a
+# um `if (previous_release_id)` em qualquer linguagem que trate string vazia como
+# falsa, mas passa por um `if ("previous_release_id" in resposta)`. Ausente, os
+# dois concordam.
+#
+# No primeiro deploy de um site nao ha release anterior, entao este e o caso
+# comum, nao a excecao.
 printf '%s' "$state" \
-  | jq --arg prev "${previous:-}" --arg moved "${moved:-}" \
-      '.status = "succeeded" | .previous_release_id = $prev
-       | if $moved == "" then . else .replaced_directory = $moved end' \
+  | jq --arg prev "${previous:-}" --arg moved "${moved:-}" --arg pruned "${pruned:-}" \
+      '.status = "succeeded"
+       | if $prev   == "" then . else .previous_release_id = $prev   end
+       | if $moved  == "" then . else .replaced_directory  = $moved  end
+       | if $pruned == "" then . else .pruned_replaced = ($pruned | tonumber) end' \
   | tee "$(state_path "$deploy_id")"

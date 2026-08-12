@@ -569,6 +569,24 @@ O campo `logs` é o que permite o Claude diagnosticar sem intervenção. Trunque
 **fim** se precisar (as últimas linhas são as que importam) e informe quantas
 linhas foram cortadas.
 
+**`previous_release_id` é omitido quando não há release anterior**, e não
+enviado como `""`. É o caso do primeiro deploy de um site, então é comum, não
+exceção. String vazia sobrevive a um teste de existência de campo e falha num
+teste de valor; ausente, os dois concordam — e é a mesma regra que o resto do
+contrato segue.
+
+Dois campos opcionais aparecem quando a ativação mexeu no que já estava no
+servidor, e os dois precisam ser repassados ao usuário:
+
+| Campo | Quando | O que significa |
+|---|---|---|
+| `replaced_directory` | `current` era um diretório, não um symlink | O document root anterior foi **movido** para esse caminho, nunca apagado |
+| `pruned_replaced` | havia diretórios substituídos antigos demais | Quantos foram apagados; os mais recentes ficam |
+
+O segundo apaga conteúdo do usuário, e por isso é reportado em vez de
+silencioso: acumular cópias inteiras do document root é ruim, mas apagá-las sem
+avisar é pior.
+
 `activation_failed` precisa significar que a release **não** entrou: o site
 continua na versão anterior. Uma falha que deixa o site num estado intermediário
 não pode compartilhar código com essa.

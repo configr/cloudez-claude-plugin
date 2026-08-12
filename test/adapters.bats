@@ -484,6 +484,90 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
 
 # ---------------------------------------------------------------- finalize --
 
+# ------------------------------------------------------------------ poda ---
+
+# Um `.current-*` e o document root que o usuario tinha, posto de lado por nos —
+# apagar isso e apagar conteudo dele. Por isso o numero e separado do das
+# releases, e menor.
+@test "a poda alcanca os diretorios .current-*, nao so releases/" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  cloudez-finalize-deploy "$d" >/dev/null
+  # Especifico do comando de PODA. Um grep solto por ".current-" casaria com a
+  # ativacao, que tambem cita o nome — e passaria mesmo sem poda nenhuma.
+  grep -q "ls -1dt '/srv/staging/.current-'" "$MOCK_LOG"
+  grep -q "ls -1dt '/srv/staging/releases/'" "$MOCK_LOG"
+}
+
+# Apagar conteudo do usuario nao pode ser silencioso.
+@test "poda de .current-* e reportada no JSON" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  MOCK_SSH_STDOUT='PRUNED 3' run cloudez-finalize-deploy "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .pruned_replaced)" = "3" ]
+}
+
+@test "sem poda, o campo nao aparece" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-finalize-deploy "$d"
+  [ "$(jq_field "$output" .pruned_replaced)" = "null" ]
+}
+
+# String vazia nao e o mesmo que ausente: `""` passa por um teste de existencia
+# de campo e falha num teste de valor. Ausente, os dois concordam. No primeiro
+# deploy de um site nao ha release anterior, entao este e o caso comum.
+@test "sem release anterior, previous_release_id nao aparece" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-finalize-deploy "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" 'has("previous_release_id")')" = "false" ]
+}
+
+@test "com release anterior, previous_release_id aparece" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  MOCK_SSH_STDOUT='20260101T000000Z-aaaaaaa' run cloudez-finalize-deploy "$d"
+  [ "$(jq_field "$output" .previous_release_id)" = "20260101T000000Z-aaaaaaa" ]
+}
+
+# `.cloudez/state/` e um arquivo por deploy mais um por chave de idempotencia,
+# incluindo os que falharam. Sem TTL cresce para sempre no repositorio de quem
+# publica com frequencia.
+@test "estado local antigo e podado" {
+  # O caminho padrao do _lib.sh, relativo a raiz do projeto publicado.
+  state=.cloudez/state
+  mkdir -p "$state/key"
+  printf '{}' > "$state/antigo.json"
+  printf 'x' > "$state/key/CHAVE_ANTIGA"
+  touch -t 202501010000 "$state/antigo.json" "$state/key/CHAVE_ANTIGA"
+
+  cloudez-begin-deploy staging abc1234def K_NOVA >/dev/null
+  [ ! -f "$state/antigo.json" ]
+  [ ! -f "$state/key/CHAVE_ANTIGA" ]
+}
+
+# A chave de idempotencia e o que impede um retry de virar um segundo deploy.
+# Podar uma chave recente quebraria justamente a garantia que ela existe para dar.
+@test "estado recente sobrevive a poda" {
+  state=.cloudez/state
+  d1=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  d2=$(cloudez-begin-deploy staging abc1234def K2 | jq -r .deploy_id)
+  [ -f "$state/$d1.json" ]
+  [ -f "$state/key/K1" ]
+  # E a idempotencia continua valendo depois da poda ter rodado.
+  d1_again=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  [ "$d1_again" = "$d1" ]
+  [ "$d2" != "$d1" ]
+}
+
 @test "finalize antes do sync: upload_incomplete" {
   d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
   run cloudez-finalize-deploy "$d"
