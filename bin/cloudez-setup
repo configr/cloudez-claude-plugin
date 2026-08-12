@@ -9,13 +9,15 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-# Este script nao exige token. Ele escreve um arquivo local a partir dos
-# argumentos e nao fala com a Cloudez — exigir credencial para isso era barrar o
-# usuario numa etapa que funciona offline.
+# Este script nao exige token, e nao confirma que o dominio existe na conta.
+# Quem confirma e a tool `cloudez_get_site` do MCP, chamada pelo /cloudez:setup
+# antes de chegar aqui — este adaptador nao fala com a Cloudez, por desenho: o
+# control plane e do MCP.
 #
-# Quando o setup passar a buscar host, user e port pelo dominio, quem faz essa
-# busca e o MCP (`cloudez_get_site`), e e la que a autenticacao e cobrada. O
-# comando /cloudez:setup checa `cloudez_auth_status` antes de chegar aqui.
+# Isso significa que a checagem NAO e invariante deste script. Rodado direto, ele
+# escreve config para qualquer FQDN bem formado, exista ou nao. E uma consequencia
+# aceita: a confirmacao depende de rede e credencial, que sao justamente o que
+# este adaptador nao tem. Quem garante a ordem e o commands/setup.md.
 
 domain="${1:-}"
 environment="${2:-}"

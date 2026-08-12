@@ -146,10 +146,82 @@ Lista os sites/aplicações da conta.
 
 ### 3.3 `cloudez_get_site` — read-only
 
-Detalhes de um site, incluindo o alvo de sincronização. **É a tool que aposenta o
-bloco `ssh` da config local** (veja o roadmap no README): hoje host, user e port
-são digitados à mão no `.cloudez.yaml`, e a intenção é buscá-los aqui pelo
-domínio.
+Detalhes de um site, incluindo o alvo de sincronização. Tem duas funções:
+
+1. **Confirmar que o domínio existe na conta**, antes de o `/cloudez:setup`
+   escrever um `.cloudez.yaml` para ele. É o que impede um domínio com typo de
+   virar uma config que só falha no deploy, longe da causa. Esta é a razão de o
+   setup exigir autenticação: sem token não há como saber se o site existe.
+2. **Aposentar o bloco `ssh` da config local** — hoje host, user e port são
+   digitados à mão no `.cloudez.yaml`.
+
+Campo que a API não trouxer **some do retorno**, em vez de virar `null`, string
+vazia ou um default plausível. O bloco `ssh` só sai inteiro: meio bloco faria o
+usuário preencher o resto à mão sem desconfiar do que veio da API. Um `host`
+inventado não falha na tool, falha num deploy contra um servidor que não é o
+dele.
+
+O domínio é normalizado para minúsculas antes da consulta, como no
+`cloudez-setup`: o domínio vira caminho no servidor, e caminho diferencia
+maiúscula onde o DNS não diferencia.
+
+**Endpoint na API da Cloudez:**
+
+```
+GET /v3/website/?domain=meusite.com.br
+```
+
+É uma **coleção filtrada**, não um recurso por path, e isso muda duas coisas em
+relação a um `GET /v3/website/<domínio>/`:
+
+- **"Não existe" chega como lista vazia com `200`**, não como `404`. Um `404`
+  nesta rota significa rota errada — ver seção 4.
+- **O resultado do filtro precisa ser conferido, não aceito.** Não está
+  confirmado se `?domain=` é comparação exata ou parcial. Se for parcial,
+  `claudetest.com.br` casa também com `staging.claudetest.com.br`, e pegar o
+  primeiro item devolveria um site que o usuário não pediu — erro que só
+  apareceria no deploy. A implementação filtra por igualdade exata do domínio
+  antes de escolher.
+
+A resposta é aceita tanto paginada (`{count, next, previous, results}`) quanto
+como array puro: ligar a paginação um dia não pode quebrar o setup de todo mundo.
+
+**A configuração de cada site vem numa lista de pares**, não em campos de topo:
+
+```jsonc
+{
+  "name": "claudetest",
+  "values": [
+    { "slug": "domain", "value": "claudetest.com.br" },
+    { "slug": "root",   "value": "~/claudetest.com.br/www" }
+  ]
+}
+```
+
+O domínio é o `value` da entrada com `slug: "domain"` — é por ele que se compara,
+não pelo `name` nem por campo de topo. Quando os dois existem, `values` vence:
+é onde mora a configuração efetiva.
+
+**Três desfechos, e a diferença entre eles é quem decide:**
+
+**Item sem `slug: "domain"` é descartado antes de qualquer decisão.** A busca
+inteira gira em torno de comparar domínios: um item que não declara o seu não
+casa, não é oferecível ao usuário e não tem como ser confirmado por ele. Só
+poderia virar palpite.
+
+| Resposta da API | Retorno | Quem decide |
+|---|---|---|
+| nada com `slug: "domain"` (inclusive lista vazia) | erro `site_not_found` | ninguém: terminal |
+| há um `slug: "domain"` igual ao pedido | `{match: "exact", site}` | o usuário confirma |
+| só domínios aproximados | `{match: "candidates", requested_domain, candidates}` | o usuário escolhe |
+
+Uma resposta cheia de itens sem domínio cai no mesmo `site_not_found` de uma
+busca vazia: em ambos o usuário não tem o que escolher, e distinguir os dois lhe
+daria uma informação sobre a qual não pode agir.
+
+A tool **não escolhe** no terceiro caso, e isso é contrato, não zelo: um site
+escolhido por conta própria é um deploy no lugar errado, descoberto tarde. Ela
+devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
 
 ```jsonc
 // input
@@ -410,11 +482,27 @@ estruturado — o mesmo shape que os adaptadores em `bin/` já imprimem em stder
 }
 ```
 
+**`site_not_found` significa "não está nesta conta", nunca "a rota não existe".**
+A distinção importa porque as duas chegam como `404` e levam a conversas opostas:
+a primeira manda o usuário conferir o painel, a segunda é bug do servidor MCP.
+A Cloudez separa as duas no corpo — veja o apêndice A:
+
+```
+recurso inexistente ->  {"detail": "Not found."}     string, com ponto
+rota inexistente    ->  {"detail": ["Not found"]}    lista, sem ponto
+```
+
+Uma rota errada precisa virar `upstream_unavailable` com um `hint` dizendo que
+nada foi concluído sobre o domínio. Sem isso, um path errado no servidor reporta
+que todos os sites do usuário sumiram da conta.
+
 Códigos previstos:
 
 | `code` | `retryable` | Significado |
 |---|---|---|
 | `site_not_found` | não | domínio não existe na conta |
+| `not_authenticated` | não | nenhum token configurado na máquina |
+| `token_invalid` | não | a Cloudez recusou o token (expirado ou revogado) |
 | `deploy_not_found` | não | `deploy_id` inválido ou expirado |
 | `upload_incomplete` | não | `finalize` chamado antes do transporte terminar |
 | `activation_failed` | não | a troca do symlink falhou; o site segue na versão anterior |
@@ -501,11 +589,22 @@ Confirmar antes de implementar:
    produção daria à seção 5 um token por environment, limitando estrago. Hoje é um
    token de usuário, gerado no painel, com acesso a tudo que a conta acessa.
 2. ~~**Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
-   API, a partir do domínio?**~~ **Confirmado: existe endpoint.** Falta registrar
-   aqui o path e o shape da resposta, e mapear os campos da API para os nomes
-   deste contrato. Enquanto isso não for feito, `cloudez_get_site` não é
-   implementável e os `TODO` de `ssh.host`/`ssh.user` continuam sendo digitados à
-   mão em cada `.cloudez.yaml`.
+   API, a partir do domínio?**~~ **Path confirmado:**
+   `GET /v3/website/?domain=<domínio>` (sobreponível por `CLOUDEZ_API_SITE_PATH`,
+   com `{domain}` interpolado).
+
+   **Estrutura confirmada:** a configuração vem em `values`, como pares
+   `slug`/`value`, e o domínio é o de `slug: "domain"`.
+
+   **Faltam os slugs do resto.** O mapeamento lê `root`, `stack`,
+   `current_release`, `ssh_host`, `ssh_user` e `ssh_port` — nomes assumidos, não
+   verificados. Enquanto não forem confirmados, o `.cloudez.yaml` continua saindo
+   com `ssh.host` e `ssh.user` em `TODO`, porque campo não reconhecido some do
+   retorno em vez de virar palpite.
+
+   Um `GET` de exemplo autenticado resolve: basta a lista de slugs que vêm em
+   `values`. Também vale confirmar se `?domain=` é filtro exato ou parcial — a
+   implementação assume o pior caso e confere por igualdade.
 3. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
    no document root (sem `releases/` e `current`), `begin`/`finalize` colapsam em
    uma tool só `cloudez_deploy(domain, ref)` e o rollback precisa de outra

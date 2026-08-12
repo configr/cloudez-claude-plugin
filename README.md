@@ -60,7 +60,10 @@ Depois de carregado:
 - `/cloudez:setup <domain> <environment>` — cria o `.cloudez.yaml` do projeto, se
   ainda não existir. Os dois argumentos são obrigatórios: o domínio identifica o
   site, o environment dá nome ao bloco gerado. Faltando algum, o comando pergunta.
-  Ele começa pelo `/cloudez:login`;
+  Antes de escrever qualquer coisa ele confirma o domínio contra a API
+  (`cloudez_get_site`), então **exige autenticação** e começa pelo
+  `/cloudez:login`. Domínio que não está na conta é erro, não config criada com
+  aviso: um typo aceito aqui só apareceria no deploy, longe da causa;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Também é acionado
   sozinho quando você pedir para publicar algo, sem precisar do comando.
 
@@ -272,7 +275,7 @@ depois é substituição, não reescrita.
 | Script | Tool MCP correspondente |
 |---|---|
 | `cloudez-login` | *(nenhuma — coleta exige TTY; o MCP lê o que ele grava)* |
-| `cloudez-setup` | *(nenhuma — a config é local)* |
+| `cloudez-setup` | *(nenhuma — escreve local; quem confirma o domínio é `cloudez_get_site`)* |
 | `cloudez-begin-deploy` | `cloudez_begin_deploy` |
 | `cloudez-sync` (Go) | *(nenhuma — o transporte fica sempre local)* |
 | `cloudez-finalize-deploy` | `cloudez_finalize_deploy` |
