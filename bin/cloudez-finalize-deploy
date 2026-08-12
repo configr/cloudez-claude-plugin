@@ -23,6 +23,8 @@ status=$(printf '%s' "$state" | jq -r .status)
 release_id=$(printf '%s' "$state" | jq -r .release_id)
 root=$(printf '%s' "$state" | jq -r .root)
 
+require_ssh_target "$site"
+
 previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r basename" || true)
 
 # A troca do symlink e atomica via rename(2): `ln -s` num nome temporario e

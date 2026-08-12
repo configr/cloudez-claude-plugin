@@ -29,8 +29,17 @@ deploy_id="dpl_$(printf '%s%s' "$release_id" "$idem" | shasum | cut -c1-8)"
 root=$(site_root "$site" "$environment")
 release_path="$root/releases/$release_id"
 
+require_ssh_target "$site"
+
+# Resolvido uma vez: o destino vai para o JSON de estado, e o cloudez-sync o le
+# de la. Sem isso, o sync precisaria receber as mesmas variaveis de ambiente que
+# o begin recebeu — e uma delas faltando produziria um envio para outro servidor.
+host=$(ssh_target "$site" .ssh.host CLOUDEZ_SSH_HOST)
+user=$(ssh_target "$site" .ssh.user CLOUDEZ_SSH_USER)
+port=$(ssh_target "$site" .ssh.port CLOUDEZ_SSH_PORT 22)
+
 if ! ssh_out=$(ssh_run "$site" "mkdir -p '$release_path' '$root/releases' '$root/shared'" 2>&1); then
-  die ssh_failed "Nao foi possivel preparar o diretorio de release em $(cfg "$site" .ssh.host)." \
+  die ssh_failed "Nao foi possivel preparar o diretorio de release em $host." \
     "$(jq -n --arg l "$ssh_out" '{logs: $l, retryable: true}')"
 fi
 
@@ -40,9 +49,9 @@ jq -n \
   --arg environment "$environment" \
   --arg ref "$ref" \
   --arg note "$note" \
-  --arg host "$(cfg "$site" .ssh.host)" \
-  --arg user "$(cfg "$site" .ssh.user)" \
-  --argjson port "$(cfg "$site" .ssh.port 22)" \
+  --arg host "$host" \
+  --arg user "$user" \
+  --argjson port "$port" \
   --arg path "$release_path/" \
   --arg root "$root" \
   '{

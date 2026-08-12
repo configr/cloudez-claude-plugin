@@ -44,8 +44,8 @@ três desfechos, e **em nenhum deles você segue sozinho**.
 ### `match: "exact"` — achou
 
 Diga que encontrou, mostrando o `domain` e o que mais veio (`name`, `stack`,
-`root`, `ssh.host`). **Peça confirmação ao usuário e espere a resposta** antes de
-ir para o passo 3.
+`ssh.host`). **Peça confirmação ao usuário e espere a resposta** antes de ir para
+o passo 3.
 
 Parece redundante confirmar um casamento exato, e não é: o domínio pode estar
 certo e ser o projeto errado — a mesma conta hospeda vários sites, e este é o
@@ -119,21 +119,16 @@ painel precisa apontar para `~/<domain>/www/claude/current`** — sem isso o sit
 continua servindo o que já estava em `www`, e o deploy parece não ter efeito. O
 `root` é explícito no arquivo justamente para o usuário poder discordar.
 
-Falta o `ssh` (o campo `todo` do retorno). O que fazer depende do que o
-`cloudez_get_site` do passo 2 devolveu:
+**Não há nada para o usuário preencher.** O arquivo sai completo: o destino ssh
+não mora nele — vem do `cloudez_get_site` a cada deploy, e o `/cloudez:deploy`
+o repassa aos adaptadores. Uma cópia do host num arquivo versionado envelheceria:
+se a Cloudez mover o site de servidor, o valor escrito continuaria apontando para
+o antigo.
 
-- **veio `ssh`** — ofereça preencher `host`, `user` e `port` com esses valores e
-  peça confirmação. Vieram da conta do usuário, não de palpite;
-- **veio `ssh_unavailable` dizendo que o usuário não tem SSH liberado
-  (`has_ssh: false`)** — **avise que o deploy não vai funcionar** enquanto isso
-  não for habilitado no painel da Cloudez. Deixe o `TODO` no arquivo e **não
-  peça** host e usuário: nenhum valor digitado contorna um acesso bloqueado, e
-  preencher só faria a falha aparecer bem mais tarde, como permissão negada no
-  meio de um deploy;
-- **veio `ssh_unavailable` dizendo que a API não trouxe os campos** — aí é
-  ausência de dado, não bloqueio. **Pergunte ao usuário**: `ssh.host` e
-  `ssh.user` vêm do painel da Cloudez e não são seus para inventar. Um host
-  plausível e errado vira um deploy que falha longe daqui.
+Se o `cloudez_get_site` do passo 2 trouxe `ssh_unavailable` dizendo que o usuário
+**não tem SSH liberado** (`has_ssh: false`), avise agora: a config está pronta,
+mas o deploy não vai funcionar até o acesso ser habilitado no painel da Cloudez.
+Não é algo que se resolva no arquivo.
 
 Se `gitignore` vier como `"updated"`, avise que `.cloudez/` foi acrescentado ao
 `.gitignore` — é onde fica o estado dos deploys.

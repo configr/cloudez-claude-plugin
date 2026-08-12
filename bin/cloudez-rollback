@@ -31,6 +31,8 @@ activate="set -e
   ln -sfn '$root/releases/$target' '$root/.current.tmp.\$\$'
   mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
 
+require_ssh_target "$site"
+
 if ! out=$(ssh_run "$site" "$activate" 2>&1); then
   die rollback_failed "Falha ao voltar para a release $target." \
     "$(jq -n --arg l "$out" '{logs: $l}')"

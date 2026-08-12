@@ -3,9 +3,9 @@
 #
 # Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
 # ainda nao existe um. Nao e um erro rodar duas vezes: com config presente ele
-# reporta e sai sem tocar no arquivo. Sobrescrever apagaria host, usuario e
-# caminho de servidor — dados que ninguem tem de cor e que nao dao para
-# adivinhar de volta.
+# reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os outros
+# environments — o root e a decisao mais destrutiva do deploy, e quem o ajustou
+# a mao nao vai reescrever o mesmo valor de memoria.
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
@@ -59,6 +59,11 @@ if [ -f "$target" ]; then
   exit 0
 fi
 
+# So domain e root. O destino ssh saiu daqui: ele vem da conta do usuario, pelo
+# cloudez_get_site, e uma copia num arquivo versionado envelheceria — a Cloudez
+# pode mover o site de servidor, e o host escrito continuaria apontando para o
+# antigo, mandando o deploy para o lugar errado sem reclamar.
+#
 # O arquivo gerado nao leva comentario nenhum: e config de projeto, versionada e
 # lida por quem ja sabe o que esta fazendo. O que os comentarios explicavam —
 # para onde o deploy publica, e que o document root no painel precisa apontar
@@ -70,10 +75,6 @@ cloudez:
   $environment:
     domain: $domain
     root: ~/$domain/www/claude
-    ssh:
-      host: TODO
-      user: TODO
-      port: 22
 YAML
 
 # O estado dos deploys mora em .cloudez/ e nao deveria ir para o repositorio.
@@ -89,6 +90,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   fi
 fi
 
+# Sem `todo`: nao sobra nada para o usuario preencher. O destino ssh vem do
+# cloudez_get_site, e o root ja sai escrito.
 jq -n --arg p "$target" --arg d "$domain" --arg e "$environment" --arg g "$gitignore" \
-  '{status: "created", path: $p, domain: $d, environment: $e, gitignore: $g,
-    todo: ["ssh.host", "ssh.user"]}'
+  '{status: "created", path: $p, domain: $d, environment: $e, gitignore: $g}'

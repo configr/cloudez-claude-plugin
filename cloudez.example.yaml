@@ -18,17 +18,11 @@ cloudez:
     # atomicamente.
     root: ~/staging.meusite.com.br/www/claude
 
-    # Temporário: estes dados vão passar a vir da API da Cloudez, pelo domínio.
-    ssh:
-      host: srv-12.cloudez.io
-      user: deploy
-      port: 22
+    # Não há bloco `ssh` aqui: host e usuário vêm da conta, pelo
+    # cloudez_get_site, a cada deploy. Uma cópia num arquivo versionado
+    # envelheceria se a Cloudez movesse o site de servidor.
 
   production:
     domain: meusite.com.br
     root: ~/meusite.com.br/www/claude
 
-    ssh:
-      host: srv-12.cloudez.io
-      user: deploy
-      port: 22

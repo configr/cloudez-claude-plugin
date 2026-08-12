@@ -120,8 +120,7 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] `/cloudez:deploy` como comando, com a skill reduzida a roteador
 - [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
 - [ ] Slugs de `stack` e `current_release` confirmados — informativos, não bloqueiam
-- [ ] Bloco `ssh` fora do `.cloudez.yaml` — hoje ele ainda é gravado lá, mesmo
-      vindo da API
+- [x] Bloco `ssh` fora do `.cloudez.yaml` — vem do `cloudez_get_site` a cada deploy
 - [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
 ## Autenticação
@@ -310,7 +309,6 @@ cloudez:
   staging:
     domain: staging.meusite.com.br
     root: ~/staging.meusite.com.br/www/claude
-    ssh: {host: srv-12.cloudez.io, user: deploy, port: 22}
 ```
 
 As chaves da config são todas em inglês — só os textos, ajudas e erros do plugin
@@ -334,8 +332,18 @@ simples, e dentro delas o shell do servidor não expande til (criaria um
 diretório chamado `~`). Caminho relativo resolve a partir do `$HOME` do usuário
 ssh, que é o que `~/` significa. Caminho absoluto continua absoluto.
 
-O bloco `ssh` é temporário: a intenção é buscar host, usuário e porta na API da
-Cloudez a partir do domínio, e aí ele sai da config.
+**Não há bloco `ssh` na config.** Host e usuário vêm da conta do usuário, pelo
+`cloudez_get_site` (`cloud.fqdn` e `user.username`), a cada deploy — o
+`/cloudez:deploy` os repassa aos adaptadores em `CLOUDEZ_SSH_HOST`,
+`CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`.
+
+Uma cópia do host num arquivo versionado envelhece: se a Cloudez mover o site de
+servidor, o valor escrito continua apontando para o antigo e o deploy vai para o
+lugar errado sem reclamar. Buscar a cada vez custa uma chamada e elimina a
+classe inteira de erro.
+
+Um bloco `ssh` presente na config ainda é aceito como fallback, para arquivos
+escritos antes desta mudança não pararem de funcionar.
 
 > Adicione `.cloudez/` ao `.gitignore` do projeto publicado — é onde vive o
 > estado dos deploys, que não deveria ir para o repositório.

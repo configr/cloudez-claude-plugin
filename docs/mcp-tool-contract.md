@@ -152,8 +152,12 @@ Detalhes de um site, incluindo o alvo de sincronização. Tem duas funções:
    escrever um `.cloudez.yaml` para ele. É o que impede um domínio com typo de
    virar uma config que só falha no deploy, longe da causa. Esta é a razão de o
    setup exigir autenticação: sem token não há como saber se o site existe.
-2. **Preencher o bloco `ssh` da config local**, que antes era digitado à mão no
-   `.cloudez.yaml`.
+2. **Fornecer o destino ssh a cada deploy.** O bloco `ssh` saiu do
+   `.cloudez.yaml`: quem publica busca host e usuário aqui e os passa aos
+   adaptadores em `CLOUDEZ_SSH_HOST`, `CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`.
+   Uma cópia do host num arquivo versionado envelhece — se a Cloudez mover o
+   site de servidor, o valor escrito segue apontando para o antigo e o deploy
+   vai para o lugar errado sem reclamar.
 
 Campo que a API não trouxer **some do retorno**, em vez de virar `null`, string
 vazia ou um default plausível. O bloco `ssh` só sai inteiro: meio bloco faria o

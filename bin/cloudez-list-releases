@@ -9,6 +9,8 @@ environment="${1:?uso: cloudez-list-releases <environment>}"
 site=$(site_config "$environment")
 root=$(site_root "$site" "$environment")
 
+require_ssh_target "$site"
+
 if ! out=$(ssh_run "$site" \
       "current=\$(readlink '$root/current' 2>/dev/null | xargs -r basename)
        echo \"CURRENT \$current\"

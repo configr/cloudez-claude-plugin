@@ -105,14 +105,56 @@ site_root() {
   printf '%s' "${root#\~/}"
 }
 
+# ------------------------------------------------------------------- destino --
+#
+# O destino ssh NAO mora mais no .cloudez.yaml. Ele vem da conta do usuario, via
+# cloudez_get_site (cloud.fqdn e user.username), e quem chama estes adaptadores
+# passa nas variaveis abaixo:
+#
+#   CLOUDEZ_SSH_HOST   CLOUDEZ_SSH_USER   CLOUDEZ_SSH_PORT
+#
+# Tirar isso da config elimina uma copia que envelhece: se a Cloudez mover o site
+# de servidor, um host escrito num arquivo versionado continua apontando para o
+# antigo, e o deploy vai para o lugar errado sem reclamar.
+#
+# O bloco `ssh` da config ainda e aceito como fallback, para .cloudez.yaml
+# escritos antes desta mudanca nao pararem de funcionar de um dia para o outro.
+
+# ssh_target <site_json> <campo> <variavel_de_ambiente> [default]
+ssh_target() {
+  local site="$1" field="$2" env_var="$3" default="${4:-}" value
+  value="${!env_var:-}"
+  [ -n "$value" ] || value=$(cfg "$site" "$field" "$default")
+  printf '%s' "$value"
+}
+
 # ssh_run <site_json> <comando...>
 # BatchMode=yes e deliberado: sem ele, um host sem chave configurada trava
 # esperando senha num prompt que o agente nao consegue responder.
 ssh_run() {
   local site="$1"; shift
+  local host user port
+  host=$(ssh_target "$site" .ssh.host CLOUDEZ_SSH_HOST)
+  user=$(ssh_target "$site" .ssh.user CLOUDEZ_SSH_USER)
+  port=$(ssh_target "$site" .ssh.port CLOUDEZ_SSH_PORT 22)
+
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      -p "$(cfg "$site" .ssh.port 22)" \
-      "$(cfg "$site" .ssh.user)@$(cfg "$site" .ssh.host)" "$@"
+      -p "$port" "$user@$host" "$@"
+}
+
+# require_ssh_target <site_json> — morre se nao houver destino
+#
+# Chame no nivel de cima do adaptador, NUNCA dentro de $( ). Os adaptadores
+# envolvem ssh_run em substituicao de comando para capturar os logs, e ali um
+# die morre no subshell: o `if !` de fora ve so o status nao-zero e reporta
+# ssh_failed, escondendo que o problema era nao ter para onde conectar. O
+# usuario iria depurar chave e rede em vez do que realmente falta.
+require_ssh_target() {
+  local site="$1"
+  { [ -n "$(ssh_target "$site" .ssh.host CLOUDEZ_SSH_HOST)" ] \
+    && [ -n "$(ssh_target "$site" .ssh.user CLOUDEZ_SSH_USER)" ]; } \
+    || die missing_ssh_target "Destino ssh desconhecido: host e usuario nao foram informados." \
+         '{"hint":"Estes dados vem do cloudez_get_site (cloud.fqdn e user.username) e sao passados em CLOUDEZ_SSH_HOST e CLOUDEZ_SSH_USER. Rode o deploy pelo /cloudez:deploy, que os obtem antes de chamar os adaptadores."}'
 }
 
 # is_fqdn <valor>

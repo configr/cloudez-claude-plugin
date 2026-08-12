@@ -46,7 +46,14 @@ Do bloco do environment, pegue o `domain` e busque o site:
 cloudez_get_site(domain: "<domain>")
 ```
 
-**`match: "exact"`** — é o alvo. Siga.
+**`match: "exact"`** — é o alvo. **Guarde o bloco `ssh`**: `host`, `user` e
+`port` são o destino do deploy, e os adaptadores os recebem por ambiente nos
+passos 5 a 8.
+
+Esses dados não estão no `.cloudez.yaml` de propósito. Uma cópia do host num
+arquivo versionado envelhece: se a Cloudez mover o site de servidor, o valor
+escrito continua apontando para o antigo e o deploy vai para o lugar errado sem
+reclamar. Buscá-los a cada deploy é o que evita isso.
 
 **`match: "candidates"` ou `site_not_found`** — **pare.** O `domain` veio de um
 arquivo versionado: se não casa exatamente com um site da conta, a config está
@@ -85,8 +92,13 @@ rode de novo antes de seguir.
 
 ## 5. Registrar a release
 
+Os adaptadores recebem o destino ssh por ambiente, com os valores do passo 2.
+**Passe as três variáveis em toda chamada** — sem elas o adaptador para com
+`missing_ssh_target`:
+
 ```sh
-cloudez-begin-deploy <environment> <sha> <idempotency_key>
+CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
+  cloudez-begin-deploy <environment> <sha> <idempotency_key>
 ```
 
 O `idempotency_key` é um UUID que **você gera uma vez por deploy** (`uuidgen`).
@@ -101,6 +113,11 @@ Guarde o `deploy_id` do retorno.
 cloudez-sync <deploy_id> <diretorio>
 ```
 
+**Este é o único que não leva as variáveis**, e não é esquecimento: o
+`begin-deploy` resolveu o destino uma vez e o gravou no estado do deploy, e é de
+lá que o `sync` o lê. Passá-las de novo aqui não teria efeito — e se uma delas
+viesse diferente, o envio iria para um servidor e a ativação para outro.
+
 Falha aqui é quase sempre SSH: chave não configurada, host desconhecido,
 permissão. O campo `logs` do erro traz a saída do `tar` e do `ssh`. Chave ausente
 é coisa que só o usuário resolve — reporte e pare, não tente contornar.
@@ -108,7 +125,8 @@ permissão. O campo `logs` do erro traz a saída do `tar` e do `ssh`. Chave ause
 ## 7. Ativar
 
 ```sh
-cloudez-finalize-deploy <deploy_id>
+CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
+  cloudez-finalize-deploy <deploy_id>
 ```
 
 Troca o symlink `current` de forma atômica. Se der `activation_failed`, a release
@@ -117,8 +135,10 @@ Troca o symlink `current` de forma atômica. Se der `activation_failed`, a relea
 ## 8. Rollback
 
 ```sh
-cloudez-rollback <environment>              # volta para a anterior
-cloudez-rollback <environment> <release_id> # volta para uma específica
+CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
+  cloudez-rollback <environment>              # volta para a anterior
+CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
+  cloudez-rollback <environment> <release_id> # volta para uma específica
 ```
 
 O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Se o
@@ -146,8 +166,11 @@ continua servindo o conteúdo antigo.
 Quando o usuário só quer saber o estado:
 
 ```sh
-cloudez-list-releases <environment>   # o que está no servidor, qual é a atual
+CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
+  cloudez-list-releases <environment>   # o que está no servidor, qual é a atual
 ```
+
+Também aqui o destino vem do `cloudez_get_site` — passos 0 a 2 antes.
 
 ---
 

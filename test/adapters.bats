@@ -70,7 +70,7 @@ setup() { make_project; }
   [ "$(jq_field "$json" '.cloudez | keys | join(",")')" = "homolog" ]
   [ "$(jq_field "$json" .sites)" = "null" ]
   [ "$(jq_field "$json" .cloudez.homolog.domain)" = "meusite.com.br" ]
-  [ "$(jq_field "$json" .cloudez.homolog.ssh.port)" = "22" ]
+  [ "$(jq_field "$json" .cloudez.homolog.root)" = "~/meusite.com.br/www/claude" ]
 }
 
 # O identificador do site e o dominio; site_id saiu da config.
@@ -89,13 +89,25 @@ setup() { make_project; }
     -lt "$(grep -n 'root:' .cloudez.yaml | cut -d: -f1)" ]
 }
 
-# Com dominio e environment em maos, so o ssh sobra para o usuario preencher.
-@test "o template gerado deixa apenas o ssh como TODO" {
+# Nada sobra para o usuario preencher: o destino ssh vem do cloudez_get_site, e o
+# root ja sai escrito. Um TODO no arquivo seria trabalho que ninguem precisa
+# fazer.
+@test "o template gerado nao deixa TODO nenhum" {
   rm .cloudez.yaml
   run cloudez-setup meusite.com.br staging
-  [ "$(jq_field "$output" '.todo | join(",")')" = "ssh.host,ssh.user" ]
-  [ "$(grep -cE ': *TODO$' .cloudez.yaml)" -eq 2 ]
-  [ "$(grep -cE '^ +(host|user): TODO$' .cloudez.yaml)" -eq 2 ]
+  ! grep -q TODO .cloudez.yaml
+  [ "$(jq_field "$output" .todo)" = "null" ]
+}
+
+# O bloco ssh saiu da config: uma copia do host num arquivo versionado envelhece
+# quando a Cloudez move o site de servidor, e o deploy iria para o antigo sem
+# reclamar.
+@test "o template gerado nao traz bloco ssh" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br staging >/dev/null
+  ! grep -q ssh .cloudez.yaml
+  json=$(bash -c "source '$PLUGIN_ROOT/bin/_yaml.sh'; yaml_to_json .cloudez.yaml")
+  [ "$(jq_field "$json" .cloudez.staging.ssh)" = "null" ]
 }
 
 # O arquivo gerado nao leva comentario: o que precisa ser dito ao usuario e dito
@@ -115,6 +127,59 @@ setup() { make_project; }
   [ "$(jq_field "$output" .domain)" = "meusite.com.br" ]
   grep -q 'domain: meusite.com.br' .cloudez.yaml
   grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
+}
+
+# ------------------------------------------------------------- destino ssh ---
+#
+# O destino saiu da config e passou a vir do cloudez_get_site, via ambiente. O
+# bloco `ssh` continua aceito como fallback para .cloudez.yaml escritos antes da
+# mudanca — e os testes de root/deploy deste arquivo ainda o usam, entao o
+# fallback esta coberto por eles.
+
+# config_sem_ssh — config no formato que o setup gera hoje
+config_sem_ssh() {
+  printf 'cloudez:\n  staging:\n    domain: staging.example.com\n    root: /srv/staging\n' > .cloudez.yaml
+}
+
+@test "destino ssh vem do ambiente quando a config nao tem bloco ssh" {
+  config_sem_ssh
+  CLOUDEZ_SSH_HOST=srv-9.cloudez.io CLOUDEZ_SSH_USER=deployer \
+    run cloudez-begin-deploy staging abc1234def K1
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .ssh.host)" = "srv-9.cloudez.io" ]
+  [ "$(jq_field "$output" .ssh.user)" = "deployer" ]
+  [ "$(jq_field "$output" .ssh.port)" = "22" ]
+  grep -q 'deployer@srv-9.cloudez.io' "$MOCK_LOG"
+}
+
+@test "CLOUDEZ_SSH_PORT sobrepoe o 22 padrao" {
+  config_sem_ssh
+  CLOUDEZ_SSH_HOST=srv-9.cloudez.io CLOUDEZ_SSH_USER=deployer CLOUDEZ_SSH_PORT=2222 \
+    run cloudez-begin-deploy staging abc1234def K1
+  [ "$(jq_field "$output" .ssh.port)" = "2222" ]
+  grep -q '\-p 2222' "$MOCK_LOG"
+}
+
+# O ambiente vence: a config pode ter um host antigo, de antes de a Cloudez mover
+# o site de servidor, e o valor recem-buscado na API e o que vale.
+@test "ambiente vence o bloco ssh da config" {
+  make_config 'domain: staging.example.com
+root: /srv/staging
+ssh: {host: antigo.example.com, user: velho, port: 22}'
+  CLOUDEZ_SSH_HOST=novo.cloudez.io CLOUDEZ_SSH_USER=deployer \
+    run cloudez-begin-deploy staging abc1234def K1
+  [ "$(jq_field "$output" .ssh.host)" = "novo.cloudez.io" ]
+  ! grep -q antigo.example.com "$MOCK_LOG"
+}
+
+# Sem destino, o erro precisa dizer o que falta. Um erro de ssh generico mandaria
+# o usuario depurar chave e rede em vez do que realmente falta.
+@test "sem destino em lugar nenhum: missing_ssh_target" {
+  config_sem_ssh
+  run cloudez-begin-deploy staging abc1234def K1
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "missing_ssh_target" ]
+  [[ "$(jq_field "$output" .error.hint)" == *cloudez_get_site* ]]
 }
 
 # ------------------------------------------------------------------- root ---
