@@ -198,21 +198,31 @@ como array puro: ligar a paginação um dia não pode quebrar o setup de todo mu
 }
 ```
 
-O domínio é o `value` da entrada com `slug: "domain"` — é por ele que se compara,
-não pelo `name` nem por campo de topo. Quando os dois existem, `values` vence:
-é onde mora a configuração efetiva.
+Para os campos de configuração em geral, `values` vence o campo de topo quando os
+dois existem: é onde mora a configuração efetiva.
+
+**O domínio é a exceção: as duas origens contam.** Um site é reconhecido tanto
+pelo atributo `domain` do recurso quanto pelo `value` da entrada com
+`slug: "domain"`, e casar por qualquer uma basta. Preferir uma delas faria a
+busca falhar justamente quando o usuário digita o domínio que está na outra — e
+ele não tem como saber qual das duas o painel mostrou. O `name` nunca entra nessa
+comparação.
+
+Quando as duas divergem, o candidato sai com o `domain` principal (o de `values`)
+e as demais em `other_domains`, para o usuário reconhecer o site por qualquer uma.
+Origens iguais não viram duplicata.
 
 **Três desfechos, e a diferença entre eles é quem decide:**
 
-**Item sem `slug: "domain"` é descartado antes de qualquer decisão.** A busca
-inteira gira em torno de comparar domínios: um item que não declara o seu não
-casa, não é oferecível ao usuário e não tem como ser confirmado por ele. Só
-poderia virar palpite.
+**Item que não declara domínio em nenhuma das duas origens é descartado antes de
+qualquer decisão.** A busca inteira gira em torno de comparar domínios: um item
+sem domínio não casa, não é oferecível ao usuário e não tem como ser confirmado
+por ele. Só poderia virar palpite.
 
 | Resposta da API | Retorno | Quem decide |
 |---|---|---|
-| nada com `slug: "domain"` (inclusive lista vazia) | erro `site_not_found` | ninguém: terminal |
-| há um `slug: "domain"` igual ao pedido | `{match: "exact", site}` | o usuário confirma |
+| nenhum item com domínio (inclusive lista vazia) | erro `site_not_found` | ninguém: terminal |
+| algum domínio, de qualquer origem, igual ao pedido | `{match: "exact", site}` | o usuário confirma |
 | só domínios aproximados | `{match: "candidates", requested_domain, candidates}` | o usuário escolhe |
 
 Uma resposta cheia de itens sem domínio cai no mesmo `site_not_found` de uma

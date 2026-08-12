@@ -56,9 +56,10 @@ própria: pergunte o domínio correto e volte ao passo 1.
 
 ### `match: "candidates"` — não achou exato, mas achou parecidos
 
-**Liste os candidatos**, mostrando o `domain` de cada um. Use AskUserQuestion
-quando forem poucos, com uma opção por site, e pergunte se o site dele é algum
-daqueles.
+**Liste os candidatos**, mostrando o `domain` de cada um — e também os de
+`other_domains`, quando vierem: o site é conhecido por mais de um domínio, e o
+usuário pode reconhecê-lo por qualquer um deles. Use AskUserQuestion quando forem
+poucos, com uma opção por site, e pergunte se o site dele é algum daqueles.
 
 - **Escolheu um** — siga com o domínio **daquele candidato**, não com o que ele
   digitou no passo 1. Refaça o `cloudez_get_site` com o domínio escolhido para
