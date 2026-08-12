@@ -53,16 +53,16 @@ previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r base
 #
 # O diretorio e movido, nunca apagado. Ele e o site que estava no ar.
 #
-# `.current.old` so e reusado se estiver livre. Se ja existir — segundo deploy
-# depois de alguem recriar o diretorio a mao — o nome ganha o release_id, porque
-# sobrescrever aqui apagaria um backup que o usuario pode nao ter conferido.
+# O destino leva o release_id: `.current-<release_id>`. Um nome fixo precisaria
+# decidir o que fazer quando ja estivesse ocupado, e as duas saidas sao ruins —
+# sobrescrever apaga um backup que o usuario pode nao ter conferido, e abortar
+# trava o deploy por causa de um diretorio antigo. Com o release_id o problema
+# nao existe, e de quebra da para saber qual deploy pos aquilo de lado.
 activate="set -e
   ln -sfn 'releases/$release_id' '$root/.current.tmp.\$\$'
   if [ -d '$root/current' ] && [ ! -L '$root/current' ]; then
-    backup='$root/.current.old'
-    [ -e \"\$backup\" ] && backup='$root/.current.old.$release_id'
-    mv '$root/current' \"\$backup\"
-    echo \"MOVED \$backup\"
+    mv '$root/current' '$root/.current-$release_id'
+    echo 'MOVED $root/.current-$release_id'
   fi
   mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
 

@@ -541,7 +541,9 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
   run cloudez-finalize-deploy "$d"
   [ "$status" -eq 0 ]
   grep -q "mv '/srv/staging/current'" "$MOCK_LOG"
-  grep -q '.current.old' "$MOCK_LOG"
+  # O destino leva o release_id: nome fixo teria que decidir o que fazer quando
+  # ja estivesse ocupado, e as duas saidas sao ruins.
+  grep -qE "mv '/srv/staging/current' '/srv/staging/\.current-[0-9TZ]+-abc1234'" "$MOCK_LOG"
 }
 
 # A condicao PRECISA das duas metades. Um symlink que aponta para diretorio
@@ -571,9 +573,10 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
   d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
   mkdir -p dist && touch dist/index.html
   cloudez-sync "$d" dist >/dev/null
-  MOCK_SSH_STDOUT='MOVED /srv/staging/.current.old' run cloudez-finalize-deploy "$d"
+  MOCK_SSH_STDOUT='MOVED /srv/staging/.current-20260101T000000Z-abc1234' \
+    run cloudez-finalize-deploy "$d"
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .replaced_directory)" = "/srv/staging/.current.old" ]
+  [ "$(jq_field "$output" .replaced_directory)" = "/srv/staging/.current-20260101T000000Z-abc1234" ]
 }
 
 @test "sem diretorio movido, o campo nao aparece" {
