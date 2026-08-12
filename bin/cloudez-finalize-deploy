@@ -41,8 +41,29 @@ previous=$(ssh_run "$site" "readlink '$root/current' 2>/dev/null | xargs -r base
 # O resultado e um link quebrado, `ls` e `ln` nao reclamam, e o site responde
 # 404 depois de um deploy que se declarou bem-sucedido. `releases/<id>` e
 # relativo ao proprio `$root/`, que e onde o link fica.
+# `current` pode ser um DIRETORIO de verdade, e nao um symlink nosso: e o caso do
+# site que ja tinha conteudo antes de o plugin entrar. `mv -T` de um link sobre
+# um diretorio nao substitui — o rename(2) falha —, entao sem tratar isso o
+# primeiro deploy morre em activation_failed sem dizer o motivo real.
+#
+# O teste precisa das DUAS condicoes. Um symlink que aponta para um diretorio
+# tambem satisfaz `-d`: e exatamente o que o nosso `current` e depois do primeiro
+# deploy. Com `-d` sozinho, todo deploy seguinte moveria o link valido para
+# .current.old e o site cairia entre um comando e outro.
+#
+# O diretorio e movido, nunca apagado. Ele e o site que estava no ar.
+#
+# `.current.old` so e reusado se estiver livre. Se ja existir — segundo deploy
+# depois de alguem recriar o diretorio a mao — o nome ganha o release_id, porque
+# sobrescrever aqui apagaria um backup que o usuario pode nao ter conferido.
 activate="set -e
   ln -sfn 'releases/$release_id' '$root/.current.tmp.\$\$'
+  if [ -d '$root/current' ] && [ ! -L '$root/current' ]; then
+    backup='$root/.current.old'
+    [ -e \"\$backup\" ] && backup='$root/.current.old.$release_id'
+    mv '$root/current' \"\$backup\"
+    echo \"MOVED \$backup\"
+  fi
   mv -Tf '$root/.current.tmp.\$\$' '$root/current'"
 
 if ! out=$(ssh_run "$site" "$activate" 2>&1); then
@@ -55,7 +76,14 @@ ssh_run "$site" \
   "ls -1dt '$root/releases/'*/ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -rf" \
   >/dev/null 2>&1 || true
 
+# Ter movido um diretorio precisa chegar a quem chamou. E conteudo do usuario
+# posto de lado, e ninguem alem dele decide se aquilo ainda serve para alguma
+# coisa — silenciar aqui deixaria um diretorio orfao no servidor que so aparece
+# quando alguem for olhar.
+moved=$(printf '%s\n' "$out" | awk '/^MOVED /{print $2}')
+
 printf '%s' "$state" \
-  | jq --arg prev "${previous:-}" \
-      '.status = "succeeded" | .previous_release_id = $prev' \
+  | jq --arg prev "${previous:-}" --arg moved "${moved:-}" \
+      '.status = "succeeded" | .previous_release_id = $prev
+       | if $moved == "" then . else .replaced_directory = $moved end' \
   | tee "$(state_path "$deploy_id")"

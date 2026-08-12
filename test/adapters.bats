@@ -527,6 +527,63 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
   ! grep -q "ln -sfn 'staging.example.com/www/claude/releases" "$MOCK_LOG"
 }
 
+# `current` pode ser um diretorio de verdade — o site que ja estava no ar antes
+# do plugin. `mv -T` de um link sobre um diretorio nao substitui, entao sem
+# tratar isso o primeiro deploy morre em activation_failed sem dizer o motivo.
+#
+# O mock de ssh nao executa o comando remoto (mv -T e GNU, nao roda no macOS do
+# desenvolvedor), entao estes testes afirmam sobre o comando ENVIADO. E a mesma
+# estrategia dos outros testes de ativacao.
+@test "a ativacao trata current que e diretorio, nao symlink" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-finalize-deploy "$d"
+  [ "$status" -eq 0 ]
+  grep -q "mv '/srv/staging/current'" "$MOCK_LOG"
+  grep -q '.current.old' "$MOCK_LOG"
+}
+
+# A condicao PRECISA das duas metades. Um symlink que aponta para diretorio
+# tambem satisfaz -d, e e exatamente o que o nosso current e depois do primeiro
+# deploy: com `-d` sozinho, todo deploy seguinte moveria o link valido para
+# .current.old e derrubaria o site entre um comando e outro.
+@test "o guard exige diretorio E nao-symlink" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  cloudez-finalize-deploy "$d" >/dev/null
+  grep -q "\[ ! -L '/srv/staging/current' \]" "$MOCK_LOG"
+}
+
+# O diretorio e movido, nunca apagado: e o conteudo que estava no ar.
+@test "a ativacao nunca apaga o current" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  cloudez-finalize-deploy "$d" >/dev/null
+  ! grep -qE "rm -rf '?/srv/staging/current" "$MOCK_LOG"
+}
+
+# Ter posto conteudo do usuario de lado precisa chegar a quem chamou, senao vira
+# um diretorio orfao que so aparece quando alguem for olhar o servidor.
+@test "diretorio movido e reportado no JSON" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  MOCK_SSH_STDOUT='MOVED /srv/staging/.current.old' run cloudez-finalize-deploy "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .replaced_directory)" = "/srv/staging/.current.old" ]
+}
+
+@test "sem diretorio movido, o campo nao aparece" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-finalize-deploy "$d"
+  [ "$(jq_field "$output" .replaced_directory)" = "null" ]
+}
+
 @test "o alvo do current no rollback tambem e relativo" {
   make_config 'domain: staging.example.com
 root: ~/staging.example.com/www/claude

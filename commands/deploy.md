@@ -145,6 +145,13 @@ CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.po
 Troca o symlink `current` de forma atômica. Se der `activation_failed`, a release
 **não** foi ativada e o site continua no ar na versão anterior — reporte e pare.
 
+Se vier `replaced_directory` no retorno, o `current` era um **diretório de
+verdade** e não um symlink: o site já tinha conteúdo antes de o plugin entrar.
+Ele foi **movido**, nunca apagado, para o caminho que o campo informa. **Diga
+isso ao usuário** — é conteúdo dele posto de lado, e só ele decide se ainda
+serve para alguma coisa. Sem esse aviso vira um diretório órfão no servidor que
+só aparece quando alguém for olhar.
+
 ## 8. Rollback
 
 ```sh
