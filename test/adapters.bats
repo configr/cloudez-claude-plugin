@@ -94,9 +94,18 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup meusite.com.br staging
   [ "$(jq_field "$output" '.todo | join(",")')" = "ssh.host,ssh.user" ]
-  # Só linhas de valor: o comentário do topo também cita TODO.
   [ "$(grep -cE ': *TODO$' .cloudez.yaml)" -eq 2 ]
   [ "$(grep -cE '^ +(host|user): TODO$' .cloudez.yaml)" -eq 2 ]
+}
+
+# O arquivo gerado nao leva comentario: o que precisa ser dito ao usuario e dito
+# na conversa pelo /cloudez:setup, nao num texto dentro da config que ninguem
+# rele e que envelhece sozinho.
+@test "o template gerado nao tem comentario nenhum" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br staging >/dev/null
+  ! grep -q '#' .cloudez.yaml
+  [ "$(head -c 8 .cloudez.yaml)" = "cloudez:" ]
 }
 
 # DNS nao diferencia maiuscula, mas o caminho no servidor diferencia.

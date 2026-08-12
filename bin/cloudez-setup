@@ -59,23 +59,17 @@ if [ -f "$target" ]; then
   exit 0
 fi
 
+# O arquivo gerado nao leva comentario nenhum: e config de projeto, versionada e
+# lida por quem ja sabe o que esta fazendo. O que os comentarios explicavam —
+# para onde o deploy publica, e que o document root no painel precisa apontar
+# para <root>/current — e trabalho do /cloudez:setup dizer na conversa, onde o
+# usuario ainda pode perguntar. No arquivo, viravam texto que ninguem rele e que
+# envelhece sozinho.
 cat > "$target" <<YAML
-# Configuração de deploy Cloudez. Preencha os TODO do bloco ssh.
-#
-# O document root do site no painel da Cloudez precisa apontar para
-# <root>/current — é o symlink que o deploy troca atomicamente. Com o root
-# abaixo, isso é ~/$domain/www/claude/current.
-
 cloudez:
   $environment:
-    # O domínio identifica o site.
     domain: $domain
-
-    # Onde o deploy publica. O document root do site na Cloudez é
-    # ~/$domain/www; a estrutura de releases fica no subdiretório claude/
-    # dele, para o deploy não tomar conta do www inteiro.
     root: ~/$domain/www/claude
-
     ssh:
       host: TODO
       user: TODO
