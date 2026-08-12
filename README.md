@@ -9,8 +9,8 @@ Três camadas, deliberadamente separadas:
 | Camada | O quê | Onde |
 |---|---|---|
 | **MCP** | capacidade — verbos primitivos da API Cloudez | repositório separado; contrato em [`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md) |
-| **Comandos** | entradas explícitas, pedidas pelo usuário | `commands/` |
-| **Skill** | procedimento — a sequência do deploy | `skills/deploy/SKILL.md` |
+| **Comandos** | procedimento — a sequência de cada operação | `commands/` |
+| **Skill** | porta de entrada em linguagem natural; encaminha ao comando | `skills/deploy/SKILL.md` |
 | **Transporte** | envio dos arquivos | `cmd/sync/` (Go) |
 | **Adaptadores** | resto da execução, até o MCP chegar | `bin/` (shell, transitório) |
 
@@ -64,8 +64,16 @@ Depois de carregado:
   (`cloudez_get_site`), então **exige autenticação** e começa pelo
   `/cloudez:login`. Domínio que não está na conta é erro, não config criada com
   aviso: um typo aceito aqui só apareceria no deploy, longe da causa;
-- `/cloudez:deploy [environment] [diretório]` — o deploy. Também é acionado
-  sozinho quando você pedir para publicar algo, sem precisar do comando.
+- `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
+  Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
+  acionado quando você pedir em linguagem natural ("sobe o site", "publica em
+  staging"): a skill `skills/deploy/` não tem procedimento próprio, ela só
+  encaminha para este comando.
+
+> **O procedimento do deploy mora num lugar só**, em `commands/deploy.md`. A
+> skill existe para dar a porta de entrada em linguagem natural, e nada mais —
+> duas descrições do mesmo deploy divergem, e a errada acaba sendo justamente a
+> que ninguém está lendo na hora.
 
 Os executáveis de `bin/` entram no `PATH` da tool Bash enquanto o plugin está
 ativo.
@@ -103,12 +111,13 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 
 - [x] Contrato das tools MCP (`docs/mcp-tool-contract.md`)
 - [x] Esqueleto do plugin (`plugin.json`, `.mcp.json`, `/deploy`)
-- [x] Skill de deploy (`skills/deploy/SKILL.md`)
+- [x] Skill de deploy como porta em linguagem natural (`skills/deploy/SKILL.md`)
 - [x] Comandos `/cloudez:setup` e `/cloudez:login` (`commands/`)
 - [x] Adaptadores `bin/` para trabalhar antes do MCP ficar pronto
 - [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
 - [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
 - [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
+- [x] `/cloudez:deploy` como comando, com a skill reduzida a roteador
 - [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
 - [ ] Slugs de `stack` e `current_release` confirmados — informativos, não bloqueiam
 - [ ] Bloco `ssh` fora do `.cloudez.yaml` — hoje ele ainda é gravado lá, mesmo
