@@ -120,28 +120,69 @@ repositórios, em vez de uma cópia do mesmo segredo em cada um. E fica fora da
 token de verdade.
 
 ```sh
-bin/cloudez-login          # cola um token gerado no painel da Cloudez e salva
-bin/cloudez-login --check  # só verifica; é o que os outros adaptadores chamam
+pbpaste | bin/cloudez-login --stdin   # token do clipboard, sem prompt e sem TTY
+bin/cloudez-login                     # pergunta o token. Exige terminal
+bin/cloudez-login --hint              # como autenticar nesta máquina
 ```
 
-**Token é a única forma de autenticar.** Gere no painel da Cloudez, cole no prompt.
+**Token é a única forma de autenticar.** Gere no painel da Cloudez.
 
-O login **exige TTY** e isso é o ponto central do desenho: rodado pela tool Bash de
-um agente, ele falha. Um token colado na conversa entra no contexto do modelo e no
-transcript da sessão — um lugar que você não controla e não consegue limpar. O
-prompt roda no seu terminal, não ecoa o que é digitado, e o token não aparece em
-nenhuma saída dos adaptadores.
+O `cloudez-login` só **coleta e grava**. Quem responde se você está autenticado é
+a tool `cloudez_auth_status` do MCP, porque é o MCP que usa o token contra a API —
+duas noções de "estou autenticado" em lugares diferentes acabam divergindo, e a
+que erra é sempre a que ninguém está olhando. Nenhum adaptador em `bin/` exige
+token: o deploy inteiro fala com o servidor por `ssh`, com a sua chave.
 
-**Dentro do Claude Code, chame com `!` na frente**, que executa no terminal da
-sessão:
+O `--hint` fica no shell porque a resposta é local — onde o plugin foi instalado e
+se existe clipboard nesta máquina. O MCP não tem como saber isso.
+
+O `--stdin` é o caminho que funciona onde o agente está: um pipe não precisa de
+terminal, e o segredo vai da origem (clipboard, arquivo, variável, gerenciador de
+senhas) direto para o processo, sem passar pelo contexto de ninguém. Quem monta o
+pipe nunca vê o valor — e é isso que permite rodar pela tool Bash sem vazar nada.
+
+> O que **não** vale é o próprio agente montar o pipe com um token que ele
+> conhece: se ele conhece, já vazou. Vale pipe de fonte opaca, não `echo`.
+
+`--stdin` em si é portátil — é um pipe. O **clipboard como fonte** não é, e a dica
+do erro só o oferece quando existe de verdade:
+
+| Ambiente | Clipboard |
+|---|---|
+| macOS | `pbpaste`, sempre presente |
+| Linux com sessão gráfica | `wl-paste` / `xclip` / `xsel`, se instalado |
+| Windows via WSL ou Git Bash | `powershell.exe Get-Clipboard` |
+| SSH, container, CI, Claude Code remoto | **nenhum** — a dica cai para o prompt |
+
+`wl-paste` e `xclip` **instalados** não significam clipboard **disponível**: X11 e
+Wayland guardam o clipboard no servidor gráfico, e sem `DISPLAY`/`WAYLAND_DISPLAY`
+o comando existe e falha. A detecção checa a sessão gráfica antes de sugerir
+qualquer coisa — sugerir um comando que quebra é pior que não sugerir nada.
+
+Onde não há clipboard, as fontes que sempre funcionam:
+
+```sh
+cloudez-login --stdin < caminho/para/o/token   # arquivo
+echo "$CLOUDEZ_TOKEN" | cloudez-login --stdin  # variável, CI
+```
+
+O modo **interativo** exige TTY, e isso é deliberado: um token colado na conversa
+entra no contexto do modelo e no transcript da sessão — um lugar que você não
+controla e não consegue limpar. O prompt roda no seu terminal, não ecoa o que é
+digitado, e o token não aparece em nenhuma saída dos adaptadores.
+
+**Dentro do Claude Code, chame o modo interativo com `!` na frente**, que executa
+no terminal da sessão:
 
 ```
 ! /caminho/para/o/plugin/bin/cloudez-login
 ```
 
-A tool Bash não serve, e não é conservadorismo do plugin: ali não existe terminal
-de controle nenhum — `/dev/tty` aparece mas responde `Device not configured`. O
-erro `no_tty` já traz o comando pronto, com o `!`, no campo `claude_code_command`.
+A tool Bash não serve para o prompt, e não é conservadorismo do plugin: ali não
+existe terminal de controle nenhum — `/dev/tty` aparece mas responde
+`Device not configured`. Medido, não presumido. O erro `no_tty` traz os dois
+comandos prontos: `claude_code_command` (com o `!`) e `clipboard_command` (o pipe,
+quando há clipboard).
 
 Login por e-mail e senha **foi abandonado**: exigia o mesmo TTY, mais a senha do
 usuário e um 2FA que só funciona com terminal. O que foi descoberto da API nessa
@@ -171,7 +212,13 @@ um pty, e alocar um em `bats` de forma portátil significa `script`, cuja sintax
 divergente entre macOS e Linux é exatamente o tipo de coisa que já quebrou esta
 suíte. O que fica sem teste é só a leitura do terminal: o que tem consequência —
 escrever o segredo com 0600, validar depois do write, desfazer quando a Cloudez
-recusa — mora em `save_token` (`bin/_lib.sh`) e é chamado direto pelos testes.
+recusa — mora em `save_token` (`bin/_lib.sh`) e é chamado direto pelos testes. O
+`--stdin`, que não precisa de pty, é testado de ponta a ponta.
+
+**A detecção de clipboard só foi verificada em macOS e em Linux headless.** O
+caminho macOS foi testado de verdade; o "sem sessão gráfica → não oferece nada" é
+exercitado pelo CI em `ubuntu-latest`, onde não há clipboard algum. Os ramos
+`xclip`, `xsel` e `powershell.exe` seguem por raciocínio — ninguém rodou.
 
 **A validação do token só foi exercitada contra a API real à mão** — os testes usam
 um mock de `curl`. Verificado manualmente: um token inventado devolve `401` de
@@ -224,7 +271,7 @@ depois é substituição, não reescrita.
 
 | Script | Tool MCP correspondente |
 |---|---|
-| `cloudez-login` | *(nenhuma — o token é local, e o MCP o lê)* |
+| `cloudez-login` | *(nenhuma — coleta exige TTY; o MCP lê o que ele grava)* |
 | `cloudez-setup` | *(nenhuma — a config é local)* |
 | `cloudez-begin-deploy` | `cloudez_begin_deploy` |
 | `cloudez-sync` (Go) | *(nenhuma — o transporte fica sempre local)* |
@@ -323,6 +370,14 @@ O token **não** é passado por argumento nem colocado no `.mcp.json`: o servido
 MCP lê `~/.cloudez/token`, o mesmo arquivo que o `cloudez-login` escreve, e aceita
 `CLOUDEZ_TOKEN` no ambiente como sobreposição. Uma fonte da verdade, escrita por
 um comando que exige TTY.
+
+O servidor relê esse arquivo **a cada chamada**, nunca na inicialização. Um
+servidor stdio sobe junto com a sessão e só morre com ela; token lido no boot
+congelaria o estado de autenticação, e quem rodasse `cloudez-login` no meio da
+sessão continuaria vendo "não autenticado" sem entender por quê. É pela mesma
+razão que o `.mcp.json` não injeta `CLOUDEZ_TOKEN` via `env` — o ambiente do
+subprocesso é fixado no `spawn`. Em uso headless, escreva o arquivo em vez de
+exportar a variável.
 
 Um token com escopo por ambiente (staging que não alcança produção) seria melhor
 para limitar estrago, mas depende de a Cloudez emitir tokens escopados — está

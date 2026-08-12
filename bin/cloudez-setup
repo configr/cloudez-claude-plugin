@@ -9,11 +9,13 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-# Autenticacao antes de tudo, inclusive antes de validar os argumentos: sem token
-# nao ha o que fazer com um .cloudez.yaml, e o proximo passo do setup (buscar os
-# dados de ssh na API pelo dominio) depende dela. Morre com not_authenticated ou
-# token_invalid, ambos trazendo o caminho do cloudez-login.
-require_token >/dev/null
+# Este script nao exige token. Ele escreve um arquivo local a partir dos
+# argumentos e nao fala com a Cloudez — exigir credencial para isso era barrar o
+# usuario numa etapa que funciona offline.
+#
+# Quando o setup passar a buscar host, user e port pelo dominio, quem faz essa
+# busca e o MCP (`cloudez_get_site`), e e la que a autenticacao e cobrada. O
+# comando /cloudez:setup checa `cloudez_auth_status` antes de chegar aqui.
 
 domain="${1:-}"
 environment="${2:-}"

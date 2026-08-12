@@ -3,9 +3,7 @@
     "cloudez": {
       "command": "node",
       "args": ["${CLOUDEZ_MCP_PATH}/dist/index.js"],
-      "env": {
-        "CLOUDEZ_TOKEN": "${CLOUDEZ_TOKEN}"
-      }
+      "env": {}
     }
   }
 }

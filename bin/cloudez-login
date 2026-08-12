@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
-# Uso: cloudez-login [--check]
+# Uso: cloudez-login [--hint | --stdin]
 #
-#   --check      nao pergunta nada e nao exige terminal. Sai 0 se ha token
-#                utilizavel, 1 se nao. E o que os outros adaptadores chamam.
-#   (sem flag)   le um token gerado no painel da Cloudez e salva.
+#   --hint       imprime como autenticar nesta maquina (caminho do plugin,
+#                comando de clipboard se houver). Nao le token nem chama a API.
+#   --stdin      le o token de um pipe, sem prompt e sem terminal:
+#                  pbpaste | cloudez-login --stdin        (macOS, token no clipboard)
+#                  echo "$CLOUDEZ_TOKEN" | ... --stdin    (CI)
+#   (sem flag)   pergunta o token e salva. Exige terminal.
 #
 # Token e a unica forma de autenticar. Existiu um modo --password (e-mail, senha e
 # 2FA, batendo em POST /auth/login/); foi removido de proposito — veja a nota em
 # docs/mcp-tool-contract.md, que guarda o que ja foi descoberto da API para nao ser
 # redescoberto do zero.
 #
-# Ler o token EXIGE TTY, e isso e o ponto central deste script: rodado pela tool
-# Bash de um agente, ele falha. Um token digitado na conversa entra no contexto do
-# modelo e no transcript da sessao — ou seja, vaza para um lugar que o usuario nao
-# controla e nao consegue limpar. O prompt roda no terminal dele.
+# O modo interativo EXIGE TTY: um token digitado na conversa entra no contexto do
+# modelo e no transcript da sessao, que o usuario nao controla e nao consegue
+# limpar. No Claude Code o jeito de chamar e prefixar com `!`, que executa no
+# terminal da sessao — a tool Bash nao serve, ali /dev/tty responde "Device not
+# configured".
 #
-# No Claude Code, o jeito de chamar isso e prefixar com `!`, que executa no
-# terminal da sessao. A tool Bash nao serve: ali /dev/tty existe mas responde
-# "Device not configured" — nao ha terminal de controle nenhum.
+# O --stdin existe porque um pipe resolve o mesmo problema sem terminal: o segredo
+# vai da origem (clipboard, arquivo, variavel) direto para o processo, sem passar
+# pelo contexto de ninguem. Quem chama nunca ve o valor — e e isso que permite rodar
+# pela tool Bash sem vazar nada. O que NAO vale e o proprio agente montar o pipe com
+# um token que ele conhece: se ele conhece, ja vazou.
 #
 # O token nao aparece em nenhuma saida deste script, nem truncado.
+#
+# Este script SO coleta e grava. Consultar o estado da autenticacao e com a tool
+# `cloudez_auth_status` do MCP: e o MCP que usa o token contra a API, e ter duas
+# nocoes de "estou autenticado" em lugares diferentes so cria a divergencia em
+# que uma diz sim e a outra diz nao.
 
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
@@ -35,11 +46,34 @@ status_json() {
        end'
 }
 
-# ------------------------------------------------------------------- --check --
+# ------------------------------------------------------------------- --stdin --
 
-if [ "$mode" = "--check" ]; then
-  token=$(require_token)   # morre com not_authenticated ou token_invalid
-  case "$(verify_token "$token")" in
+if [ "$mode" = "--stdin" ]; then
+  # Sem pipe isso travaria esperando entrada que nunca vem, e o usuario nao teria
+  # como saber por que. O modo interativo e o default, sem flag.
+  [ ! -t 0 ] \
+    || die usage "--stdin espera o token num pipe, nao num terminal." \
+         '{"hint":"Ex.: pbpaste | cloudez-login --stdin. Para digitar o token, rode cloudez-login sem argumento."}'
+
+  token=$(cat)
+  token=$(printf '%s' "$token" | tr -d '\r\n')
+  token="${token#"${token%%[![:space:]]*}"}"
+  token="${token%"${token##*[![:space:]]}"}"
+
+  [ -n "$token" ] \
+    || die empty_token "Nada chegou pelo pipe. Nada foi salvo." \
+         '{"hint":"Se o token vinha do clipboard, confira se ele foi copiado."}'
+
+  # Espaco no meio nao e token: e uma linha inteira copiada por engano, ou o
+  # clipboard com outra coisa. Recusar aqui evita gastar uma chamada de API para
+  # descobrir o obvio.
+  case "$token" in
+    *[[:space:]]*) die invalid_token "O que chegou pelo pipe tem espacos — nao parece um token." \
+                     '{"hint":"Copie apenas o token, sem rotulo nem URL em volta."}' ;;
+  esac
+
+  verdict=$(save_token "$token")
+  case "$verdict" in
     valid) status_json authenticated true ;;
     *)     status_json authenticated false ;;
   esac
@@ -53,9 +87,28 @@ if [ "$mode" = "--password" ]; then
     '{"hint":"Gere um token no painel da Cloudez e rode cloudez-login sem argumento."}'
 fi
 
+if [ "$mode" = "--hint" ]; then
+  # Como autenticar NESTA maquina — nao se ja se esta autenticado, que e pergunta
+  # para o cloudez_auth_status. Sao coisas diferentes: o estado do token e global
+  # e vive na API, enquanto o caminho para obte-lo e local (onde o plugin foi
+  # instalado, se ha clipboard e qual utilitario o le). O MCP nao tem como saber
+  # nada disso.
+  #
+  # Nao le o token, nao chama a API e nao escreve nada.
+  login_hint
+  exit 0
+fi
+
+if [ "$mode" = "--check" ]; then
+  # Erro nomeado em vez de "argumento desconhecido": quem tentar isso vem de uma
+  # versao anterior, e o substituto nao e obvio — nao e outra flag, e uma tool.
+  die check_moved_to_mcp "O --check saiu: quem responde pelo estado da autenticacao e o MCP." \
+    '{"hint":"Use a tool cloudez_auth_status para saber se ha token. Para os comandos de login desta maquina, use cloudez-login --hint."}'
+fi
+
 if [ -n "$mode" ]; then
   die usage "Argumento desconhecido: '$mode'." \
-    '{"hint":"Uso: cloudez-login [--check]"}'
+    '{"hint":"Uso: cloudez-login [--hint | --stdin]"}'
 fi
 
 # --------------------------------------------------------------------- tty ---

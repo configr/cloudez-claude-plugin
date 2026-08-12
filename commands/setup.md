@@ -1,17 +1,18 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
 ---
 
-## 0. Autenticação, antes de qualquer coisa
+## 0. Autenticação
 
-Siga `/cloudez:login` — na prática: rode `cloudez-login --check` e, se falhar,
-repasse o `claude_code_command` do erro (o caminho com `!` na frente, para ele
-enviar como mensagem) e **pare aqui**. Nunca peça o token na conversa.
+Chame `cloudez_auth_status`. Se vier `authenticated: false`, **avise e siga
+adiante mesmo assim**: escrever o `.cloudez.yaml` é operação local e não fala com
+a Cloudez, então bloquear aqui seria inventar um impedimento. O login é
+necessário para o deploy, não para a config — encaminhe `/cloudez:login` no fim,
+junto com o que mais ficou pendente.
 
-Só siga adiante com o `--check` passando. O `cloudez-setup` também exige o token,
-então tentar antes só produz o mesmo erro mais tarde.
+Nunca peça o token na conversa.
 
 ## 1. Domínio e environment
 

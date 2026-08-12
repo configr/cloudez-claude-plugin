@@ -197,31 +197,77 @@ verify_token() {
   esac
 }
 
-# login_hint -> JSON com o caminho absoluto do cloudez-login
+# graphical_session — ha sessao grafica local, e portanto clipboard?
 #
-# Absoluto porque bin/ so esta no PATH da tool Bash, nao no terminal do usuario —
-# e e no terminal dele que o login roda.
+# X11 e Wayland guardam o clipboard no servidor grafico. Sem DISPLAY nem
+# WAYLAND_DISPLAY o utilitario esta instalado e falha: e o caso de SSH, container,
+# CI e Claude Code rodando em maquina remota.
+graphical_session() { [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; }
+
+# clipboard_read_cmd -> comando que imprime o clipboard, ou vazio se nao houver
 #
-# O `!` na frente e o que resolve isso dentro do Claude Code: ele executa no
-# terminal da sessao, onde existe TTY. Pela tool Bash nao ha terminal de controle
-# nenhum (/dev/tty responde "Device not configured"), entao nao e questao de
-# permissao ou de flag — nao tem onde perguntar.
+# Serve para montar a dica do caminho sem TTY: o token sai do clipboard direto para
+# o pipe, sem passar por prompt nem por contexto de modelo.
+#
+# Vazio nao e falha: quem chama simplesmente nao oferece esse caminho. Sugerir um
+# comando que existe e nao funciona e pior do que nao sugerir nada — o usuario
+# tentaria, veria um erro do xclip e nao saberia de quem e a culpa.
+clipboard_read_cmd() {
+  # macOS: presente sempre, e nao depende de variavel de sessao grafica.
+  if command -v pbpaste >/dev/null 2>&1; then printf 'pbpaste'; return 0; fi
+
+  # Windows, via WSL ou Git Bash.
+  if command -v powershell.exe >/dev/null 2>&1; then
+    printf 'powershell.exe -NoProfile -Command Get-Clipboard'; return 0
+  fi
+
+  graphical_session || return 0
+
+  if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-paste >/dev/null 2>&1; then
+    printf 'wl-paste'
+  elif command -v xclip >/dev/null 2>&1; then
+    printf 'xclip -selection clipboard -o'
+  elif command -v xsel >/dev/null 2>&1; then
+    printf 'xsel --clipboard --output'
+  fi
+}
+
+# login_hint -> JSON com as duas formas de autenticar
+#
+# Caminho absoluto porque bin/ so esta no PATH da tool Bash, nao no terminal do
+# usuario.
+#
+# Duas saidas, e a ordem importa: a primeira nao precisa de terminal nenhum (o
+# token vai do clipboard para o pipe) e por isso funciona onde o agente esta; a
+# segunda e o prompt interativo, que exige TTY e, no Claude Code, o prefixo `!`
+# para rodar no terminal da sessao — pela tool Bash nao ha terminal de controle
+# (/dev/tty responde "Device not configured").
 login_hint() {
-  local bin
+  local bin clip pipe
   bin="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/cloudez-login"
-  jq -n --arg b "$bin" \
-    '{hint: ("No Claude Code, peca ao usuario para enviar uma mensagem com: ! " + $b
-             + "  (o ! executa no terminal da sessao, onde existe TTY). Fora do Claude Code, e rodar o comando no terminal dele."),
+  clip=$(clipboard_read_cmd)
+  [ -n "$clip" ] && pipe="$clip | $bin --stdin"
+
+  jq -n --arg b "$bin" --arg p "${pipe:-}" \
+    '{hint: (if $p == "" then
+               ("Peca ao usuario para rodar: ! " + $b + " (o ! executa no terminal da sessao, onde existe TTY).")
+             else
+               ("Peca ao usuario para copiar o token e autorize rodar: " + $p
+                + "  — o token vai do clipboard direto para o processo, sem passar pela conversa. Alternativa com prompt: ! " + $b)
+             end),
       login_command: $b,
-      claude_code_command: ("! " + $b)}'
+      claude_code_command: ("! " + $b)}
+     | if $p == "" then . else . + {clipboard_command: $p} end'
 }
 
 # save_token <token> -> veredito em stdout ("valid" | "unknown")
 #
 # A ordem aqui e deliberada: escreve primeiro, valida depois, contra o token que
-# ja esta no arquivo — e nao contra o que estava na memoria. Quem valida e a mesma
-# verify_token que o --check usa, para nao existirem duas nocoes de "token bom"
-# divergindo com o tempo.
+# ja esta no arquivo — e nao contra o que estava na memoria.
+#
+# A verify_token daqui e a unica do lado shell. Ela precisa concordar com a do
+# MCP, que reimplementa a mesma tabela (2xx valido, 401/403 recusado, o resto
+# inconclusivo): sao duas implementacoes de um contrato, nao duas opinioes.
 #
 # Se a Cloudez recusar, o token anterior volta: perder uma credencial que
 # funcionava por causa de um paste errado seria pior do que o paste errado. O
@@ -253,16 +299,14 @@ save_token() {
   printf '%s' "$verdict"
 }
 
-# require_token -> token em stdout; morre se nao houver, ou se a API recusar
-require_token() {
-  local t
-  t=$(resolve_token)
-  [ -n "$t" ] \
-    || die not_authenticated "Nenhum token da Cloudez encontrado em $(token_file)." "$(login_hint)"
-  [ "$(verify_token "$t")" != invalid ] \
-    || die token_invalid "A Cloudez recusou o token salvo (expirado ou revogado)." "$(login_hint)"
-  printf '%s' "$t"
-}
+# Nao ha require_token aqui. O gate de autenticacao e a tool `cloudez_auth_status`
+# do MCP, que e quem de fato usa o token contra a API — nenhum adaptador deste
+# diretorio precisa dele. O deploy inteiro (begin, sync, finalize, rollback,
+# list-releases) fala com o servidor por ssh, com a chave do usuario.
+#
+# O que sobrou de token neste arquivo serve so ao cloudez-login: resolve_token e
+# token_source para o relatorio, verify_token e save_token para gravar e conferir
+# o que foi gravado.
 
 # -------------------------------------------------------------------- state --
 

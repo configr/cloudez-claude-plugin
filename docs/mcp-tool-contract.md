@@ -80,7 +80,40 @@ mesmo ambiente e deixa a origem óbvia no log de tool calls.
 
 ## 3. Tools
 
-### 3.1 `cloudez_list_sites` — read-only
+### 3.1 `cloudez_auth_status` — read-only
+
+Diz se há um token utilizável nesta máquina. É a tool que aposenta o
+`cloudez-login --check`: o gate de autenticação deixa de ser um adaptador em
+shell e passa a ser o MCP, que é quem realmente usa a credencial.
+
+Não recebe nem devolve o token — veja a seção 5.
+
+```jsonc
+// input
+{ "type": "object", "properties": {}, "additionalProperties": false }
+```
+
+```jsonc
+// output
+{
+  "authenticated": true,
+  "source": "file",                  // "env" | "file" | "none"
+  "token_file": "/home/ana/.cloudez/token",
+  "verified": true                   // false quando a API não pôde confirmar
+}
+```
+
+A distinção entre `authenticated` e `verified` é a mesma da tabela na seção 5, e
+é contrato: `authenticated: true, verified: false` significa "há um token e a
+Cloudez não desmentiu" — offline ou API fora. Reportar `authenticated: false` aí
+mandaria o usuário refazer um login que já estava correto.
+
+Quando não há token, o retorno traz um `hint` mandando pedir ao usuário que rode
+`! cloudez-login` no terminal. O modelo **não** deve pedir o token na conversa.
+
+---
+
+### 3.2 `cloudez_list_sites` — read-only
 
 Lista os sites/aplicações da conta.
 
@@ -111,7 +144,7 @@ Lista os sites/aplicações da conta.
 
 ---
 
-### 3.2 `cloudez_get_site` — read-only
+### 3.3 `cloudez_get_site` — read-only
 
 Detalhes de um site, incluindo o alvo de sincronização. **É a tool que aposenta o
 bloco `ssh` da config local** (veja o roadmap no README): hoje host, user e port
@@ -151,7 +184,7 @@ expande til. Quando o `.cloudez.yaml` define `root`, o valor local vence.
 
 ---
 
-### 3.3 `cloudez_begin_deploy` — **mutating**
+### 3.4 `cloudez_begin_deploy` — **mutating**
 
 Registra a intenção de deploy e devolve o diretório de release onde o transporte
 deve escrever. Não move nenhum byte.
@@ -204,7 +237,7 @@ deploy aninhado um nível errado.
 
 ---
 
-### 3.4 `cloudez_finalize_deploy` — **mutating**
+### 3.5 `cloudez_finalize_deploy` — **mutating**
 
 Ativa a release já sincronizada: troca o symlink `current` de forma atômica e
 limpa releases antigas.
@@ -254,7 +287,7 @@ não pode compartilhar código com essa.
 
 ---
 
-### 3.5 `cloudez_get_deploy_status` — read-only
+### 3.6 `cloudez_get_deploy_status` — read-only
 
 Consulta o estado de um deploy. Usado para polling quando `finalize` é
 assíncrono, e para inspeção posterior.
@@ -281,7 +314,7 @@ assíncrono, e para inspeção posterior.
 
 ---
 
-### 3.6 `cloudez_list_releases` — read-only
+### 3.7 `cloudez_list_releases` — read-only
 
 Necessária para o rollback ser dirigível pelo modelo (escolher para qual release
 voltar) e para auditoria.
@@ -311,7 +344,7 @@ o alvo de um rollback já foi limpo, `rollback` precisa falhar com
 
 ---
 
-### 3.7 `cloudez_rollback` — **mutating**
+### 3.8 `cloudez_rollback` — **mutating**
 
 Volta o symlink `current` para uma release anterior.
 
@@ -341,7 +374,7 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.8 Fora do escopo, por enquanto
+### 3.9 Fora do escopo, por enquanto
 
 Duas tools saíram desta proposta junto com as features correspondentes do
 plugin. Ficam registradas para não serem redescobertas do zero:
@@ -414,6 +447,24 @@ do zero.
 a mesma precedência que os adaptadores em `bin/` aplicam. O plugin não repassa o
 token ao servidor; os dois leem o mesmo lugar.
 
+**O servidor lê o token a cada chamada, nunca na inicialização.** Um servidor
+stdio é um processo longo: sobe junto com a sessão do Claude Code e só morre com
+ela. Um token lido uma vez no boot congela o estado de autenticação pelo resto da
+sessão — o usuário que rodar `cloudez-login` no meio dela continuaria vendo "não
+autenticado", sem nenhuma pista do motivo. É um `readFile` de poucos bytes por
+tool call, irrelevante perto do request HTTP que vem depois.
+
+Pela mesma razão, **o token não é injetado via `env` no `.mcp.json`**: o ambiente
+do subprocesso é fixado no spawn, o que recria o congelamento acima, e um
+`CLOUDEZ_TOKEN` obsoleto no shell do usuário venceria o arquivo para sempre. Em
+ambiente headless, prefira escrever o arquivo a exportar a variável.
+
+**O token nunca é argumento de tool, nem opcionalmente.** Um servidor em stdio
+não tem terminal de controle e portanto não pode coletar segredo nenhum; a
+tentação é aceitá-lo como argumento, e isso o colocaria no transcript da sessão —
+exatamente o que a exigência de TTY no `cloudez-login` existe para impedir. O
+`cloudez-login` coleta, o MCP consome.
+
 Quem escreve o arquivo é um comando que **exige TTY**: rodado pela tool Bash de um
 agente, ele falha. Um token colado na conversa entra no transcript da sessão, que
 o usuário não controla e não consegue limpar.
@@ -449,9 +500,12 @@ Confirmar antes de implementar:
 1. **A Cloudez emite tokens com escopo?** Um token que alcance staging mas não
    produção daria à seção 5 um token por environment, limitando estrago. Hoje é um
    token de usuário, gerado no painel, com acesso a tudo que a conta acessa.
-2. **Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
-   API, a partir do domínio?** Hoje eles são digitados à mão em cada
-   `.cloudez.yaml`, e `cloudez_get_site` é o que elimina isso.
+2. ~~**Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
+   API, a partir do domínio?**~~ **Confirmado: existe endpoint.** Falta registrar
+   aqui o path e o shape da resposta, e mapear os campos da API para os nomes
+   deste contrato. Enquanto isso não for feito, `cloudez_get_site` não é
+   implementável e os `TODO` de `ssh.host`/`ssh.user` continuam sendo digitados à
+   mão em cada `.cloudez.yaml`.
 3. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
    no document root (sem `releases/` e `current`), `begin`/`finalize` colapsam em
    uma tool só `cloudez_deploy(domain, ref)` e o rollback precisa de outra
