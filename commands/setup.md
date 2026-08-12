@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -177,5 +177,55 @@ com ela vai parecer não ter efeito.
 **Se recusar**, tudo bem: registre que o `app_root_path` continua em outro valor
 e que o primeiro deploy não vai aparecer no site até isso mudar. Não insista e
 não ajuste mesmo assim.
+
+## 6. Chave SSH desta máquina
+
+O deploy conecta por SSH com a chave desta máquina. Se ela não estiver autorizada
+na conta, o `sync` falha com permissão negada — no meio do deploy, depois de o
+build já ter rodado.
+
+O `cloudez_get_site` do passo 2 devolveu as chaves autorizadas do usuário. Liste
+as desta máquina:
+
+```sh
+cloudez-pubkey
+```
+
+Ele lê só arquivos `.pub` e devolve, para cada chave, o `key` (tipo e material,
+sem comentário), o `comment` e o `fingerprint`.
+
+**Se alguma das chaves locais já estiver autorizada**, diga qual, pelo
+`fingerprint`, e siga. Nada a fazer.
+
+**Se nenhuma estiver:**
+
+- **uma chave local só** — proponha autorizá-la, mostrando `fingerprint` e
+  `comment`;
+- **mais de uma** — pergunte com AskUserQuestion qual usar, identificando cada
+  opção pelo `fingerprint` e pelo `comment`. Não escolha por conta própria;
+- **`no_public_key`** — não há chave nesta máquina. Diga para ele gerar uma com
+  `ssh-keygen -t ed25519` e rodar o `/cloudez:setup` de novo. Não gere a chave
+  por ele: o par tem que nascer na máquina de quem vai usá-lo.
+
+**Peça aceite explícito antes de autorizar.** Isto concede acesso SSH permanente
+à conta a partir desta máquina — não é o mesmo que escrever um arquivo local, e
+não é decisão sua.
+
+**Se aceitar:**
+
+```
+cloudez_authorize_ssh_key(domain: "<domain>", public_key: "<key completa>")
+```
+
+Passe a linha da chave **pública**. Nunca leia nem envie um arquivo sem `.pub` —
+esse é a chave privada, e ela não sai da máquina.
+
+Confirme pelo retorno: `added: true` é chave autorizada agora, `added: false` é
+chave que já estava lá. Se vier erro dizendo que **outras chaves sumiram**,
+avise o usuário imediatamente: outras pessoas podem ter perdido acesso SSH à
+conta, e isso se confere no painel da Cloudez.
+
+**Se recusar**, registre que o deploy vai falhar na conexão até a chave ser
+autorizada — pelo painel, se ele preferir fazer à mão.
 
 Quando o arquivo estiver completo, o deploy é `/cloudez:deploy <environment>`.

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Uso: cloudez-pubkey
+#
+# Lista as chaves publicas SSH desta maquina, em JSON. Nao fala com a Cloudez,
+# nao escreve nada, nao pergunta nada.
+#
+# So le arquivos .pub. A chave PRIVADA nunca e aberta, nem para checar se existe:
+# o par dela e o que autentica o usuario, e um adaptador que a le e um adaptador
+# que pode vaza-la. O que este script imprime — a chave publica — e material
+# publico por definicao, feito para ser distribuido.
+#
+# Cada chave sai com o `fingerprint` calculado por ssh-keygen quando ele existe.
+# E o que o usuario reconhece: comparar base64 de 400 caracteres na tela nao e
+# algo que alguem faca de verdade.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+ssh_dir="${CLOUDEZ_SSH_DIR:-$HOME/.ssh}"
+
+[ -d "$ssh_dir" ] \
+  || die no_ssh_dir "Nao ha diretorio $ssh_dir nesta maquina." \
+       '{"hint":"Gere um par de chaves com: ssh-keygen -t ed25519"}'
+
+entries="[]"
+for pub in "$ssh_dir"/*.pub; do
+  [ -f "$pub" ] || continue
+
+  # A primeira linha basta: um .pub tem uma chave. Arquivo com varias e coisa
+  # montada a mao, e pegar so a primeira e melhor do que enviar um blob.
+  line=$(head -n 1 "$pub" | tr -d '\r')
+  [ -n "$line" ] || continue
+
+  type=$(printf '%s' "$line" | awk '{print $1}')
+  body=$(printf '%s' "$line" | awk '{print $2}')
+  comment=$(printf '%s' "$line" | cut -d' ' -f3-)
+
+  # Sem os dois primeiros campos nao e chave: e um arquivo com outra coisa
+  # dentro, e mandar isso para a API so gastaria uma requisicao para descobrir.
+  case "$type" in
+    ssh-*|ecdsa-*|sk-*) ;;
+    *) continue ;;
+  esac
+  [ -n "$body" ] || continue
+
+  # O `|| true` nao e defensivo por gosto: ssh-keygen sai nao-zero em chave que
+  # ele nao entende, e sob `set -e` a atribuicao herdaria esse status e mataria o
+  # script no meio da lista. Fingerprint e conforto, nao requisito.
+  fingerprint=""
+  if command -v ssh-keygen >/dev/null 2>&1; then
+    fingerprint=$(ssh-keygen -lf "$pub" 2>/dev/null | awk '{print $2}' || true)
+  fi
+
+  entries=$(printf '%s' "$entries" | jq \
+    --arg path "$pub" --arg type "$type" --arg key "$type $body" \
+    --arg comment "$comment" --arg fp "$fingerprint" \
+    '. + [{path: $path, type: $type, key: $key, comment: $comment}
+          | if $fp == "" then . else . + {fingerprint: $fp} end]')
+done
+
+[ "$(printf '%s' "$entries" | jq 'length')" -gt 0 ] \
+  || die no_public_key "Nenhuma chave publica SSH encontrada em $ssh_dir." \
+       '{"hint":"Gere um par com: ssh-keygen -t ed25519 — e rode este comando de novo."}'
+
+printf '%s' "$entries" | jq '{keys: .}'

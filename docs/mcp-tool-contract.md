@@ -273,6 +273,8 @@ devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
 | `cloud.fqdn` | `ssh.host` — o servidor onde o site está hospedado |
 | `user.username` | `ssh.user` |
 | `user.has_ssh` | porteiro: `false` impede o bloco `ssh` de existir |
+| `user.authorized_keys` | lido pelo `cloudez_authorize_ssh_key` (seção 3.5) |
+| `user.id` | necessário para escrever no usuário |
 
 A porta não vem no recurso. O default é `22`.
 
@@ -366,14 +368,14 @@ PATCH /v3/website/<id>/
    efeito é pior do que uma que falha: manda o usuário fazer deploy confiante num
    document root errado, e o sintoma que volta é "publiquei e o site não mudou",
    o mais difícil de ligar à causa;
-2. **nenhum outro slug sumiu.** Não está confirmado se o serializador trata
-   `values` como atualização ou como substituição. Se for substituição, mandar um
-   item só apaga o resto da configuração do site — perda que só apareceria depois,
-   em algum comportamento que ninguém liga a este comando;
-3. **o site ainda é encontrável pelo domínio.** Se a substituição levar o slug
-   `domain` junto, a busca deixa de achá-lo. Isso **não** vira `site_not_found`:
-   mandaria o usuário procurar no painel um site que ele acabou de danificar, sem
-   saber que a causa fomos nós.
+2. **nenhum outro slug sumiu.** Sob a semântica confirmada isso nunca dispara —
+   e é por isso que fica: se um dia disparar, a API mudou de comportamento, e o
+   sintoma seria a configuração do site apagada em silêncio por um comando que só
+   queria ajustar o document root;
+3. **o site ainda é encontrável pelo domínio.** Se a busca deixar de achá-lo logo
+   depois da escrita, isso **não** vira `site_not_found`: ele respondeu um
+   instante antes, e o erro mandaria o usuário procurar no painel um problema que
+   a ferramenta pode ter causado.
 
 **A tool não decide sozinha.** Quem chama precisa ter perguntado ao usuário: a
 mudança vale na hora, e até o primeiro deploy o diretório `claude/current` ainda
@@ -382,7 +384,86 @@ intervalo.
 
 ---
 
-### 3.5 `cloudez_begin_deploy` — **mutating**
+### 3.5 `cloudez_authorize_ssh_key` — **mutating**
+
+Acrescenta uma chave pública SSH às chaves autorizadas do usuário da conta, para
+que o deploy consiga conectar. Sem isso o `sync` falha com permissão negada — no
+meio do deploy, depois de o build já ter rodado.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "domain": { "type": "string" },
+    "public_key": { "type": "string", "description": "Linha completa da chave pública" }
+  },
+  "required": ["domain", "public_key"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{ "domain": "meusite.com.br", "username": "deploy",
+  "added": true, "authorized_key_count": 2 }
+```
+
+`added: false` significa que a chave já estava autorizada e nada foi escrito.
+
+**Endpoint:**
+
+```
+PATCH /v3/cloud-user/<id>/
+{ "authorized_keys": "<texto multilinha, uma chave por linha>" }
+```
+
+> **As duas escritas desta API têm semânticas opostas, e confundi-las apaga
+> dados.** O `values` do site (seção 3.4) é **atualização**: mandar um item mexe
+> só naquele slug. O `authorized_keys` do cloud-user é **substituição**: o que
+> for enviado troca o campo inteiro. Antes de acrescentar qualquer escrita nova
+> ao servidor, confirme de qual lado ela está.
+
+**O campo não tem semântica de append.** O que for enviado **substitui** o
+conteúdo inteiro. Acrescentar uma chave é, obrigatoriamente:
+
+```
+ler o valor atual  ->  montar o texto completo com a nova no fim  ->  PATCH
+```
+
+Mandar só a chave nova apaga as de todo mundo. Isso não é cuidado opcional: é a
+única forma correta de usar este endpoint.
+
+**Esta é a operação mais privilegiada do servidor**, e uma regra vale acima de
+todas as outras aqui: **nunca remover uma chave que já estava lá.** O campo é
+compartilhado por quem mais tenha acesso à conta, e uma escrita descuidada tira
+o acesso de outras pessoas — possivelmente de todas, e possivelmente sem ninguém
+perceber até precisar entrar.
+
+Disso saem três decisões:
+
+- **o valor atual vai inteiro, literal**, com a chave nova numa linha no fim.
+  Remontá-lo só a partir do que sabemos interpretar descartaria linhas que não
+  reconhecemos — opções de `authorized_keys`, comentários, tipos de chave novos —
+  e descartar ali é remover acesso;
+- **a releitura confere que nenhuma chave anterior sumiu**, além de conferir que
+  a nova entrou. A leitura inicial pode ter vindo incompleta, e perder uma chave
+  alheia em silêncio é o pior desfecho possível desta tool;
+- **a comparação ignora o comentário** (`ana@maquina`). Ele é livre e muda ao
+  trocar de máquina; comparar a linha inteira faria a mesma chave virar uma
+  segunda entrada idêntica.
+
+**Chave pública não é segredo** — existe para ser distribuída. Nada aqui toca a
+chave privada, e a `description` da tool instrui explicitamente a nunca enviar
+arquivo sem `.pub`.
+
+**Quem chama precisa ter perguntado ao usuário.** Autorizar uma chave concede
+acesso SSH permanente à conta a partir daquela máquina; não é o mesmo que
+escrever um arquivo local.
+
+---
+
+### 3.6 `cloudez_begin_deploy` — **mutating**
 
 Registra a intenção de deploy e devolve o diretório de release onde o transporte
 deve escrever. Não move nenhum byte.
@@ -435,7 +516,7 @@ deploy aninhado um nível errado.
 
 ---
 
-### 3.6 `cloudez_finalize_deploy` — **mutating**
+### 3.7 `cloudez_finalize_deploy` — **mutating**
 
 Ativa a release já sincronizada: troca o symlink `current` de forma atômica e
 limpa releases antigas.
@@ -485,7 +566,7 @@ não pode compartilhar código com essa.
 
 ---
 
-### 3.7 `cloudez_get_deploy_status` — read-only
+### 3.8 `cloudez_get_deploy_status` — read-only
 
 Consulta o estado de um deploy. Usado para polling quando `finalize` é
 assíncrono, e para inspeção posterior.
@@ -512,7 +593,7 @@ assíncrono, e para inspeção posterior.
 
 ---
 
-### 3.8 `cloudez_list_releases` — read-only
+### 3.9 `cloudez_list_releases` — read-only
 
 Necessária para o rollback ser dirigível pelo modelo (escolher para qual release
 voltar) e para auditoria.
@@ -542,7 +623,7 @@ o alvo de um rollback já foi limpo, `rollback` precisa falhar com
 
 ---
 
-### 3.9 `cloudez_rollback` — **mutating**
+### 3.10 `cloudez_rollback` — **mutating**
 
 Volta o symlink `current` para uma release anterior.
 
@@ -572,7 +653,7 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.10 Fora do escopo, por enquanto
+### 3.11 Fora do escopo, por enquanto
 
 Duas tools saíram desta proposta junto com as features correspondentes do
 plugin. Ficam registradas para não serem redescobertas do zero:
@@ -723,10 +804,13 @@ Confirmar antes de implementar:
    `slug`/`value`, e o domínio é o de `slug: "domain"` ou do atributo `domain`.
    O destino do ssh vem de `cloud.fqdn`, `user.username` e `user.has_ssh`.
 
-   **O corpo do `PATCH` está confirmado** (seção 3.4): `values` com o par
-   `slug`/`value`. Fica em aberto se o serializador **substitui** a lista em vez
-   de atualizá-la — a tool compara os slugs antes e depois para não deixar isso
-   passar em silêncio.
+   **O `PATCH` do site está confirmado** (seção 3.4): `values` com o par
+   `slug`/`value`, tratado como **atualização** — mandar um item mexe só naquele
+   slug.
+
+   **As chaves autorizadas estão confirmadas** (seção 3.5):
+   `PATCH /v3/cloud-user/<id>/` com `authorized_keys`, sem semântica de append.
+   Sobreponível por `CLOUDEZ_API_CLOUD_USER_PATCH_PATH`.
 
    **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
    nomes e não verificados. Campo não reconhecido some do retorno em vez de virar

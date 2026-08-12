@@ -129,6 +129,69 @@ setup() { make_project; }
   grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
 }
 
+# ----------------------------------------------------------------- pubkey ---
+#
+# A chave PRIVADA nunca e aberta: o par dela e o que autentica o usuario, e um
+# adaptador que a le e um adaptador que pode vaza-la.
+
+setup_keys() {
+  KEYDIR="$TEST_TMP/ssh"
+  mkdir -p "$KEYDIR"
+  export CLOUDEZ_SSH_DIR="$KEYDIR"
+}
+
+@test "pubkey lista as chaves publicas, sem tocar na privada" {
+  setup_keys
+  printf 'ssh-ed25519 AAAAC3ANA ana@maquina\n' > "$KEYDIR/id_ed25519.pub"
+  printf 'PRIVADA-NAO-PODE-SAIR\n' > "$KEYDIR/id_ed25519"
+  run cloudez-pubkey
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" '.keys | length')" = "1" ]
+  [ "$(jq_field "$output" '.keys[0].key')" = "ssh-ed25519 AAAAC3ANA" ]
+  [ "$(jq_field "$output" '.keys[0].comment')" = "ana@maquina" ]
+  [[ "$output" != *PRIVADA* ]]
+}
+
+# O `key` sai sem o comentario: e por ele que se compara com o que a conta ja
+# tem, e o comentario muda de maquina para maquina sem a chave mudar.
+@test "pubkey separa o material do comentario" {
+  setup_keys
+  printf 'ssh-rsa AAAAB3BETO\n' > "$KEYDIR/sem_comentario.pub"
+  run cloudez-pubkey
+  [ "$(jq_field "$output" '.keys[0].key')" = "ssh-rsa AAAAB3BETO" ]
+  [ "$(jq_field "$output" '.keys[0].comment')" = "" ]
+}
+
+@test "pubkey ignora .pub que nao contem chave" {
+  setup_keys
+  printf 'ssh-ed25519 AAAAC3ANA ana\n' > "$KEYDIR/boa.pub"
+  printf 'isto nao e uma chave\n' > "$KEYDIR/ruim.pub"
+  run cloudez-pubkey
+  [ "$(jq_field "$output" '.keys | length')" = "1" ]
+}
+
+@test "pubkey lista varias chaves" {
+  setup_keys
+  printf 'ssh-ed25519 AAAAC3ANA ana\n' > "$KEYDIR/a.pub"
+  printf 'ssh-rsa AAAAB3BETO beto\n' > "$KEYDIR/b.pub"
+  run cloudez-pubkey
+  [ "$(jq_field "$output" '.keys | length')" = "2" ]
+}
+
+@test "pubkey sem chave nenhuma: no_public_key" {
+  setup_keys
+  run cloudez-pubkey
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "no_public_key" ]
+  [[ "$(jq_field "$output" .error.hint)" == *ssh-keygen* ]]
+}
+
+@test "pubkey sem diretorio .ssh: no_ssh_dir" {
+  CLOUDEZ_SSH_DIR="$TEST_TMP/nao-existe" run cloudez-pubkey
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "no_ssh_dir" ]
+}
+
 # ------------------------------------------------------------- destino ssh ---
 #
 # O destino saiu da config e passou a vir do cloudez_get_site, via ambiente. O
