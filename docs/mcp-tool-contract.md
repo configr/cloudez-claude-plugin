@@ -353,13 +353,27 @@ feita.
 porque as outras mutating criam recursos, e repetir cria dois. Esta atribui um
 valor fixo: repetir dá no mesmo. A chave existiria só para cumprir formalidade.
 
-**A tool relê o site depois de escrever** e falha se o valor não mudou de fato.
-O formato do corpo do `PATCH` ainda não foi confirmado contra a API real — se ela
-esperar o campo dentro de `values` em vez de no topo, pode responder `200` e
-ignorar. Uma escrita que se declara bem-sucedida sem ter efeito é pior do que uma
-que falha: manda o usuário fazer deploy confiante num document root errado, e o
-sintoma que volta é "publiquei e o site não mudou", o mais difícil de ligar à
-causa.
+**O corpo do `PATCH` repete a forma em que a configuração é lida:**
+
+```jsonc
+PATCH /v3/website/<id>/
+{ "values": [ { "slug": "app_root_path", "value": "claude/current" } ] }
+```
+
+**A tool relê o site depois de escrever**, e a releitura confere três coisas:
+
+1. **o valor mudou de fato.** Uma escrita que se declara bem-sucedida sem ter
+   efeito é pior do que uma que falha: manda o usuário fazer deploy confiante num
+   document root errado, e o sintoma que volta é "publiquei e o site não mudou",
+   o mais difícil de ligar à causa;
+2. **nenhum outro slug sumiu.** Não está confirmado se o serializador trata
+   `values` como atualização ou como substituição. Se for substituição, mandar um
+   item só apaga o resto da configuração do site — perda que só apareceria depois,
+   em algum comportamento que ninguém liga a este comando;
+3. **o site ainda é encontrável pelo domínio.** Se a substituição levar o slug
+   `domain` junto, a busca deixa de achá-lo. Isso **não** vira `site_not_found`:
+   mandaria o usuário procurar no painel um site que ele acabou de danificar, sem
+   saber que a causa fomos nós.
 
 **A tool não decide sozinha.** Quem chama precisa ter perguntado ao usuário: a
 mudança vale na hora, e até o primeiro deploy o diretório `claude/current` ainda
@@ -709,10 +723,10 @@ Confirmar antes de implementar:
    `slug`/`value`, e o domínio é o de `slug: "domain"` ou do atributo `domain`.
    O destino do ssh vem de `cloud.fqdn`, `user.username` e `user.has_ssh`.
 
-   **Falta o formato do corpo do `PATCH`** que altera o `app_root_path`
-   (seção 3.4). Hoje é `PATCH /v3/website/<id>/` com `{"app_root_path": "..."}`
-   no topo, sobreponível por `CLOUDEZ_API_SITE_PATCH_PATH`. A tool relê o site
-   depois de escrever justamente porque isso está aberto.
+   **O corpo do `PATCH` está confirmado** (seção 3.4): `values` com o par
+   `slug`/`value`. Fica em aberto se o serializador **substitui** a lista em vez
+   de atualizá-la — a tool compara os slugs antes e depois para não deixar isso
+   passar em silêncio.
 
    **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
    nomes e não verificados. Campo não reconhecido some do retorno em vez de virar
