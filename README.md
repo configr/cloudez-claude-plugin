@@ -124,7 +124,7 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] `/cloudez:setup` completo: confirma o site, ajusta o document root e
       autoriza a chave SSH da máquina — exercitado contra a API real
 - [x] Deploy rodado de ponta a ponta contra um servidor de verdade, várias vezes
-- [ ] Rollback exercitado contra um servidor de verdade
+- [x] Rollback exercitado contra um servidor de verdade
 - [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
 - [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
