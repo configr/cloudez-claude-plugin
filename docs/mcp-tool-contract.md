@@ -819,7 +819,14 @@ Confirmar antes de implementar:
 
    **As chaves autorizadas estão confirmadas** (seção 3.5):
    `PATCH /v3/cloud-user/<id>/` com `authorized_keys`, sem semântica de append.
-   Sobreponível por `CLOUDEZ_API_CLOUD_USER_PATCH_PATH`.
+   Sobreponível por `CLOUDEZ_API_CLOUD_USER_PATCH_PATH`. O `<id>` é o `user.id`
+   que vem na resposta do *website*: são recursos de rotas diferentes, mas a
+   mesma numeração — verificado contra a API real.
+
+   **Este caminho já rodou de ponta a ponta contra a Cloudez**, com a chave indo
+   parar na conta certa. Isso exercita, junto, o `cloudez_auth_status`, o
+   `cloudez_get_site` e o mapeamento de `user`. O que ainda não foi exercitado
+   contra a API real é o `cloudez_set_app_root_path` e o deploy em si.
 
    **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
    nomes e não verificados. Campo não reconhecido some do retorno em vez de virar

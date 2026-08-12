@@ -121,6 +121,9 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
 - [ ] Slugs de `stack` e `current_release` confirmados — informativos, não bloqueiam
 - [x] Bloco `ssh` fora do `.cloudez.yaml` — vem do `cloudez_get_site` a cada deploy
+- [x] `/cloudez:setup` completo: confirma o site, ajusta o document root e
+      autoriza a chave SSH da máquina — exercitado contra a API real
+- [ ] Deploy rodado de ponta a ponta contra um servidor de verdade
 - [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
 ## Autenticação
