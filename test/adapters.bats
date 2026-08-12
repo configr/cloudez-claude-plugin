@@ -444,6 +444,18 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
 
 # "-C dist ." envia o CONTEUDO do diretorio. Sem isso o site sobe aninhado um
 # nivel — o mesmo erro que a barra final resolvia no rsync.
+# O tar do macOS empacota metadados AppleDouble — `._index.html`, `._style.css`,
+# um `._.` por diretorio. Nao quebram o site, mas viajam em toda release e sujam
+# o servidor. COPYFILE_DISABLE=1 resolve na origem; fora do macOS o tar ignora a
+# variavel, entao nao ha condicional por plataforma.
+@test "sync desliga os metadados AppleDouble do macOS" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  run cloudez-sync "$d" dist
+  [ "$status" -eq 0 ]
+  grep -q 'tar-env COPYFILE_DISABLE=1' "$MOCK_LOG"
+}
+
 @test "sync envia o CONTEUDO do diretorio, nao o diretorio" {
   d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
   mkdir -p dist && touch dist/index.html

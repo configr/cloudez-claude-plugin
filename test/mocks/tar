@@ -2,6 +2,11 @@
 # Mock de tar (lado local do transporte). Registra a invocacao e emite alguns
 # bytes para o pipe, para que o fluxo ate o ssh seja realmente exercitado.
 printf 'tar %s\n' "$*" >> "${MOCK_LOG:-/dev/null}"
+
+# O ambiente tambem e contrato: COPYFILE_DISABLE decide se os metadados
+# AppleDouble do macOS viajam junto. Sem registrar isso aqui, nenhum teste
+# consegue afirmar sobre ele.
+printf 'tar-env COPYFILE_DISABLE=%s\n' "${COPYFILE_DISABLE:-}" >> "${MOCK_LOG:-/dev/null}"
 [ -n "${MOCK_TAR_STDERR:-}" ] && printf '%s\n' "$MOCK_TAR_STDERR" >&2
 printf 'MOCK_TAR_STREAM'
 exit "${MOCK_TAR_EXIT:-0}"

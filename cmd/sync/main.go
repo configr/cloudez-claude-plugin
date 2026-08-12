@@ -92,6 +92,19 @@ func transfer(dep *cloudez.Deploy, localDir string) (string, string, error) {
 	tarCmd := exec.Command("tar", tarArgs...)
 	sshCmd := exec.Command("ssh", sshArgs...)
 
+	// COPYFILE_DISABLE=1 impede o tar do macOS de empacotar os metadados
+	// AppleDouble — os arquivos `._index.html`, `._style.css` e um `._.` por
+	// diretorio. Eles nao quebram o site, mas viajam em toda release e sujam o
+	// que o usuario ve no servidor.
+	//
+	// A variavel nao existe fora do macOS, e um tar que nao a conhece a ignora:
+	// nao ha condicional por plataforma aqui de proposito.
+	//
+	// Vale a origem e nao o destino: excluir por padrao no tar remoto exigiria
+	// um --exclude que o bsdtar e o GNU tar escrevem diferente, e mandar bytes
+	// para depois descarta-los e pior do que nao mandar.
+	tarCmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
+
 	var tarErr, sshErr bytes.Buffer
 	tarCmd.Stderr = &tarErr
 	sshCmd.Stderr = &sshErr
