@@ -101,6 +101,10 @@ CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.po
   cloudez-begin-deploy <environment> <sha> <idempotency_key>
 ```
 
+Este passo **já conecta por ssh** — ele prepara o diretório de release no
+servidor. Uma falha de permissão aqui é o mesmo caso descrito no passo 6, com a
+mesma exceção para a chave recém-autorizada.
+
 O `idempotency_key` é um UUID que **você gera uma vez por deploy** (`uuidgen`).
 Se precisar repetir o comando por qualquer motivo, reuse a mesma chave — ela é o
 que impede um retry seu de virar dois deploys.
@@ -121,6 +125,15 @@ viesse diferente, o envio iria para um servidor e a ativação para outro.
 Falha aqui é quase sempre SSH: chave não configurada, host desconhecido,
 permissão. O campo `logs` do erro traz a saída do `tar` e do `ssh`. Chave ausente
 é coisa que só o usuário resolve — reporte e pare, não tente contornar.
+
+**Uma exceção, antes de reportar chave ausente.** Se a chave desta máquina
+acabou de ser autorizada — pelo `/cloudez:setup` ou pelo painel —, um `Permission
+denied (publickey)` é esperado: a conta registra a autorização na hora, mas
+propagá-la até o servidor do site leva um tempo, em geral menos de um minuto e
+eventualmente mais. Diga isso ao usuário e **tente novamente em alguns minutos**,
+reusando a mesma `idempotency_key`. Só trate como chave ausente se continuar
+falhando depois disso — mandá-lo conferir o cadastro que ele acabou de fazer o
+faz procurar defeito onde não há.
 
 ## 7. Ativar
 

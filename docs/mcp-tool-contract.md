@@ -461,6 +461,15 @@ arquivo sem `.pub`.
 acesso SSH permanente à conta a partir daquela máquina; não é o mesmo que
 escrever um arquivo local.
 
+**O `added: true` não significa que o ssh já funciona.** A escrita e a releitura
+confirmam o estado *na conta*; chegar ao servidor do site é um passo assíncrono da
+Cloudez, em geral abaixo de um minuto e eventualmente mais. Nesse intervalo o
+servidor responde `Permission denied (publickey)` — indistinguível de chave
+errada. Por isso a tool não tenta confirmar o acesso conectando: um teste
+imediato falharia quase sempre e transformaria um sucesso em erro. Quem chama
+avisa o usuário e, se o deploy seguinte falhar assim, tenta novamente em alguns
+minutos.
+
 ---
 
 ### 3.6 `cloudez_begin_deploy` — **mutating**

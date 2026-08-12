@@ -225,6 +225,13 @@ chave que já estava lá. Se vier erro dizendo que **outras chaves sumiram**,
 avise o usuário imediatamente: outras pessoas podem ter perdido acesso SSH à
 conta, e isso se confere no painel da Cloudez.
 
+**A chave não passa a valer no mesmo instante.** A conta registra a autorização na
+hora, mas propagá-la até o servidor do site leva um tempo — em geral menos de um
+minuto, eventualmente mais. Diga isso ao confirmar que autorizou: se o deploy
+seguinte falhar com `Permission denied (publickey)`, a resposta é **tentar
+novamente em alguns minutos**, e não investigar a chave. O sintoma é idêntico ao
+de chave errada, e é justamente por isso que ele precisa saber antes de vê-lo.
+
 **Se recusar**, registre que o deploy vai falhar na conexão até a chave ser
 autorizada — pelo painel, se ele preferir fazer à mão.
 
