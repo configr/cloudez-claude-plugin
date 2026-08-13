@@ -126,6 +126,9 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Deploy rodado de ponta a ponta contra um servidor de verdade, várias vezes
 - [x] Rollback exercitado contra um servidor de verdade
 - [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
+- [ ] Deploy via Docker: o `/cloudez:setup` já detecta o arquivo de Compose e
+      confere contra o `stack` do site, mas o deploy ainda publica arquivos —
+      falta a chamada que manda a Cloudez subir o container
 - [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
 ## Autenticação

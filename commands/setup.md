@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Bash(cloudez-compose:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -234,5 +234,39 @@ de chave errada, e é justamente por isso que ele precisa saber antes de vê-lo.
 
 **Se recusar**, registre que o deploy vai falhar na conexão até a chave ser
 autorizada — pelo painel, se ele preferir fazer à mão.
+
+## 7. Como a aplicação roda
+
+O site na Cloudez pode ser um app em container ou uma aplicação tradicional, e o
+que decide é o arquivo de Compose no projeto. Descubra qual dos dois:
+
+```sh
+cloudez-compose
+```
+
+Ele procura os quatro nomes que o Compose aceita, **na ordem que o próprio
+Compose usa** — `compose.yaml`, `compose.yml`, `docker-compose.yaml`,
+`docker-compose.yml` — e devolve o que seria efetivamente usado.
+
+Compare com o `stack` que o `cloudez_get_site` devolveu no passo 2. São quatro
+combinações, e duas delas são problema:
+
+| Projeto | Site na Cloudez | O que dizer |
+|---|---|---|
+| tem Compose | tipo Docker | Combina. Diga qual arquivo será usado e siga |
+| não tem | tipo tradicional | Combina. Siga sem comentar |
+| **tem Compose** | **tipo tradicional** | O container **não vai subir**: a Cloudez vai servir os arquivos como estáticos. O tipo do site se corrige no painel |
+| **não tem** | **tipo Docker** | O deploy vai publicar arquivos que ninguém executa. Falta o arquivo de Compose no projeto |
+
+Nos dois casos de divergência, **avise e não tente corrigir por conta própria**:
+o tipo do site é decisão do painel, e escrever um Compose pelo usuário seria
+inventar como a aplicação dele sobe.
+
+Se vier `ignored`, o projeto tem mais de um arquivo de Compose. Diga qual será
+usado e quais serão ignorados — um arquivo editado que nunca entra em nada é
+caro de diagnosticar.
+
+Isto é diagnóstico, não bloqueio: a config já está escrita e o deploy é que vai
+sofrer a consequência. Encerre relatando o que encontrou.
 
 Quando o arquivo estiver completo, o deploy é `/cloudez:deploy <environment>`.

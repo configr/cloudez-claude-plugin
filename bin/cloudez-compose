@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Uso: cloudez-compose [diretorio]
+#
+# Diz se o diretorio tem um arquivo de Compose, e QUAL deles. Sem argumento,
+# olha o diretorio atual. Nao le o conteudo, nao valida o YAML, nao fala com a
+# Cloudez.
+#
+# A ordem de busca e a MESMA que o `docker compose` usa, e isso e o ponto do
+# script. Sao quatro nomes aceitos, e um projeto pode ter mais de um: reportar
+# um arquivo que o Compose nao vai usar seria descrever uma aplicacao diferente
+# da que sobe. `compose.yaml` e o nome que a spec atual prefere; os `docker-`
+# sao a forma legada, ainda suportada.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+dir="${1:-.}"
+
+[ -d "$dir" ] \
+  || die dir_not_found "Diretorio '$dir' nao existe." \
+       '{"hint":"Informe o diretorio que sera publicado, ou nenhum para usar o atual."}'
+
+found=""
+for name in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  if [ -f "$dir/$name" ]; then
+    found="$name"
+    break
+  fi
+done
+
+# Ter mais de um nao e erro — o Compose escolhe o primeiro da ordem —, mas quem
+# le a config precisa saber que os outros existem e serao ignorados. Um arquivo
+# editado que nunca entra em nada e caro de diagnosticar.
+#
+# O `|| true` nao e decoracao: sob `set -e`, a atribuicao herda o status do
+# ultimo comando do loop, e ele e FALSO justamente no caso comum — quando o
+# ultimo nome da lista nao existe, ou e o proprio escolhido. Sem isso o script
+# morre calado antes de imprimir qualquer coisa.
+others=$(for name in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  [ -f "$dir/$name" ] && [ "$name" != "$found" ] && printf '%s\n' "$name"
+done || true)
+
+jq -n --arg dir "$dir" --arg file "$found" --arg others "$others" \
+  '{directory: $dir, compose: ($file != "")}
+   | if $file == "" then . else . + {file: $file} end
+   | if $others == "" then . else
+       . + {ignored: ($others | split("\n") | map(select(length > 0)))}
+     end'

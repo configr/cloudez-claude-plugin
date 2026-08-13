@@ -192,6 +192,59 @@ setup_keys() {
   [ "$(jq_field "$output" .error.code)" = "no_ssh_dir" ]
 }
 
+# ---------------------------------------------------------------- compose ---
+#
+# A ordem de busca e a MESMA do `docker compose`. Reportar um arquivo que o
+# Compose nao vai usar descreveria uma aplicacao diferente da que sobe.
+
+@test "compose: projeto sem arquivo nenhum" {
+  run cloudez-compose
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .compose)" = "false" ]
+  [ "$(jq_field "$output" .file)" = "null" ]
+}
+
+@test "compose: encontra o nome legado" {
+  touch docker-compose.yml
+  run cloudez-compose
+  [ "$(jq_field "$output" .compose)" = "true" ]
+  [ "$(jq_field "$output" .file)" = "docker-compose.yml" ]
+}
+
+# compose.yaml e o nome que a spec atual prefere, e vence os legados.
+@test "compose: respeita a precedencia do proprio Compose" {
+  touch docker-compose.yml docker-compose.yaml compose.yml compose.yaml
+  run cloudez-compose
+  [ "$(jq_field "$output" .file)" = "compose.yaml" ]
+}
+
+# Um arquivo editado que nunca entra em nada e caro de diagnosticar.
+@test "compose: reporta os que serao ignorados" {
+  touch compose.yaml docker-compose.yml
+  run cloudez-compose
+  [ "$(jq_field "$output" '.ignored | join(",")')" = "docker-compose.yml" ]
+}
+
+@test "compose: sem ambiguidade, nao ha campo ignored" {
+  touch compose.yaml
+  run cloudez-compose
+  [ "$(jq_field "$output" 'has("ignored")')" = "false" ]
+}
+
+# O deploy publica um diretorio, que nem sempre e a raiz do projeto.
+@test "compose: aceita um diretorio como argumento" {
+  mkdir -p build && touch build/compose.yaml
+  run cloudez-compose build
+  [ "$(jq_field "$output" .compose)" = "true" ]
+  [ "$(jq_field "$output" .directory)" = "build" ]
+}
+
+@test "compose: diretorio inexistente e erro nomeado" {
+  run cloudez-compose nao-existe
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "dir_not_found" ]
+}
+
 # ------------------------------------------------------------- destino ssh ---
 #
 # O destino saiu da config e passou a vir do cloudez_get_site, via ambiente. O
