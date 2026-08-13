@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Bash(cloudez-compose:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Bash(cloudez-compose:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -72,11 +72,27 @@ dado, porque não haveria como o usuário reconhecê-los.
 
 ### `site_not_found` — a busca não devolveu nada identificável
 
-**Encerre.** Diga que o site não foi encontrado na conta. Não crie o arquivo e não
-sugira criar o site por aqui. Duas causas prováveis, ofereça as duas:
+Antes de encerrar, **ofereça procurar**. O domínio pode estar com typo, ou o
+usuário pode lembrar do site por outro nome:
 
-- typo no domínio — confirme a grafia com ele;
-- o site ainda não existe na Cloudez — aí ele cria no painel primeiro.
+```
+cloudez_list_sites(query: "<parte do nome ou do domínio>")
+```
+
+Pergunte a ele que parte usar — uma palavra do nome do projeto costuma bastar, e
+a busca casa parcialmente (`claude` encontra `claudetest.cloudez.io` e
+`claudetestdocker.cloudez.io`). **Não invente termos** nem tente varreduras
+amplas: não existe listagem completa da conta, e adivinhar gasta chamadas sem
+convergir.
+
+- **Achou o site dele na lista** — siga com aquele domínio e refaça o
+  `cloudez_get_site` para obter os dados completos.
+- **Não achou, ou veio vazio** — **encerre.** Duas causas prováveis, ofereça as
+  duas: typo no domínio, ou site que ainda não existe na Cloudez, e aí ele cria
+  no painel primeiro.
+
+Se o retorno trouxer `truncated`, repasse: a busca veio incompleta, e um domínio
+ausente dela ainda pode existir na conta.
 
 **`upstream_unavailable`** — leia o `hint` antes de dizer qualquer coisa. Se ele
 disser que a **rota** não existe, o problema é o endpoint do servidor MCP, não o

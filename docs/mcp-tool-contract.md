@@ -115,15 +115,19 @@ Quando não há token, o retorno traz um `hint` mandando pedir ao usuário que r
 
 ### 3.2 `cloudez_list_sites` — read-only
 
-Lista os sites/aplicações da conta.
+Busca sites da conta por um termo. **Não existe listagem completa**, e a ausência
+é decisão: devolver a conta inteira significa percorrer todas as páginas da API e
+despejar o resultado no contexto do modelo — caro dos dois lados, e pior quanto
+maior a conta, que é justamente quando alguém precisa procurar.
 
 ```jsonc
 // input
 {
   "type": "object",
   "properties": {
-    "query": { "type": "string", "description": "Filtro por nome ou domínio (opcional)" }
+    "query": { "type": "string", "description": "Parte do domínio ou do nome" }
   },
+  "required": ["query"],
   "additionalProperties": false
 }
 ```
@@ -139,11 +143,19 @@ Lista os sites/aplicações da conta.
 }
 ```
 
-**Endpoint:** `GET /v3/website/` — a mesma coleção do `cloudez_get_site`, sem o
-`?domain=`. E é essa diferença que traz a paginação para dentro do problema:
-filtrando por domínio uma página basta, listando tudo não.
+**Endpoint:** `GET /v3/website/?domain=<termo>` — o mesmo do `cloudez_get_site`.
 
-**A listagem segue o `next` até o fim**, com um teto de páginas para uma API que
+O filtro daquele endpoint casa **parcialmente**: é por isso que o `get_site`
+confere igualdade exata por conta própria depois, e é o que aqui vira a
+funcionalidade. `claude` encontra `claudetest.cloudez.io` e
+`claudetestdocker.cloudez.io`.
+
+**O resultado da API não é refiltrado no cliente.** Refiltrar só poderia remover
+algo que o servidor considerou casamento — se ele buscar num campo que não
+lemos, descartaríamos um acerto legítimo, e o usuário veria "não achei" sobre o
+site dele.
+
+**A busca segue o `next` até o fim**, com um teto de páginas para uma API que
 responda sempre a mesma página não virar laço. Atingido o teto, o retorno traz
 `truncated` — **parar em silêncio faria o modelo afirmar que um domínio não
 existe na conta quando ele só estava depois do corte**, que é o oposto do que
@@ -152,10 +164,6 @@ esta tool existe para fazer.
 Do `next` aproveita-se apenas `pathname` e `search`. Ele vem como URL absoluta, e
 seguir o host que veio no corpo da resposta seria deixar a API escolher para onde
 mandamos o token.
-
-**O `query` é aplicado no cliente**, não na API: o único parâmetro de busca
-conhecido é `?domain=`, e a query também casa nome. Filtrar aqui custa percorrer
-as páginas, mas não inventa um parâmetro que talvez não exista.
 
 **Esta tool não serve para verificar se um domínio existe.** Para isso é o
 `cloudez_get_site`, que filtra no servidor e não depende de a lista caber. Item
