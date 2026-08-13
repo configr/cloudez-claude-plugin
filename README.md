@@ -118,7 +118,8 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Esqueleto do plugin (`plugin.json`, `.mcp.json`, `/deploy`)
 - [x] Skill de deploy como porta em linguagem natural (`skills/deploy/SKILL.md`)
 - [x] Comandos `/cloudez:setup` e `/cloudez:login` (`commands/`)
-- [x] Control plane inteiro no MCP; o `bin/` fica só com o que é local
+- [x] Control plane inteiro no MCP; no `bin/` sobra o que exige TTY, escreve no
+      projeto, ou é o transporte
 - [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
 - [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
 - [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
@@ -311,11 +312,19 @@ precisarem da **máquina local** — nenhum fala com a Cloudez.
 
 | Script | Por que não é uma tool |
 |---|---|
-| `cloudez-login` | Coletar o token exige TTY; em argumento de tool ele entraria no transcript |
-| `cloudez-pubkey` | Lê as chaves públicas de `~/.ssh` |
-| `cloudez-setup` | Escreve o `.cloudez.yaml` do projeto |
-| `cloudez-compose` | Inspeciona o diretório publicado |
+| `cloudez-login` | Coletar o token exige TTY, e um servidor stdio não tem terminal de controle |
+| `cloudez-setup` | **Escreve** no projeto do usuário |
 | `cloudez-sync` (Go) | O transporte fica sempre local, por decisão do contrato |
+
+Ler a máquina local nunca foi razão para ficar fora do MCP — o servidor roda na
+mesma máquina, e já lê `~/.cloudez/token`. Por isso `cloudez-pubkey` e
+`cloudez-compose` viraram `cloudez_list_local_ssh_keys` e `cloudez_find_compose`:
+o que se ganha é permissão, porque um comando que precisava de
+`Bash(cloudez-pubkey:*)` autorizava executar shell, e uma tool autoriza uma
+leitura.
+
+O `cloudez-setup` fica porque **escrever** no projeto é decisão de outra ordem, e
+merece a discussão de onde o servidor tem permissão para gravar antes de migrar.
 
 Sucesso vai para stdout, erro para stderr — ambos JSON. Exit code não-zero em
 qualquer falha.

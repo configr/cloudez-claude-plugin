@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, Bash(cloudez-setup:*), Bash(cloudez-login:*), Bash(cloudez-pubkey:*), Bash(cloudez-compose:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Bash(cloudez-login:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -203,11 +203,11 @@ build já ter rodado.
 O `cloudez_get_site` do passo 2 devolveu as chaves autorizadas do usuário. Liste
 as desta máquina:
 
-```sh
-cloudez-pubkey
+```
+cloudez_list_local_ssh_keys()
 ```
 
-Ele lê só arquivos `.pub` e devolve, para cada chave, o `key` (tipo e material,
+Ela lê só arquivos `.pub` e devolve, para cada chave, o `key` (tipo e material,
 sem comentário), o `comment` e o `fingerprint`.
 
 **Se alguma das chaves locais já estiver autorizada**, diga qual, pelo
@@ -256,11 +256,11 @@ autorizada — pelo painel, se ele preferir fazer à mão.
 O site na Cloudez pode ser um app em container ou uma aplicação tradicional, e o
 que decide é o arquivo de Compose no projeto. Descubra qual dos dois:
 
-```sh
-cloudez-compose
+```
+cloudez_find_compose()
 ```
 
-Ele procura os quatro nomes que o Compose aceita, **na ordem que o próprio
+Ela procura os quatro nomes que o Compose aceita, **na ordem que o próprio
 Compose usa** — `compose.yaml`, `compose.yml`, `docker-compose.yaml`,
 `docker-compose.yml` — e devolve o que seria efetivamente usado.
 

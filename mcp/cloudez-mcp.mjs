@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.13 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 1.0.16 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
 var __defProp2 = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -46,7 +46,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   enumerable: true
 }) : target, mod));
 
-// node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
 var DRAFT_2020_12_URIS = /* @__PURE__ */ new Set(["https://json-schema.org/draft/2020-12/schema", "http://json-schema.org/draft/2020-12/schema"]);
 var DRAFT_2019_09_URIS = /* @__PURE__ */ new Set(["https://json-schema.org/draft/2019-09/schema", "http://json-schema.org/draft/2019-09/schema"]);
 var DRAFT_07_URIS = /* @__PURE__ */ new Set(["https://json-schema.org/draft-07/schema", "http://json-schema.org/draft-07/schema"]);
@@ -63,7 +63,7 @@ function declaredDialect(schema, remedy) {
   throw new Error(`JSON Schema declares an unsupported dialect ("$schema": "${schema.$schema.slice(0, 200)}"). The default validator supports JSON Schema 2020-12, 2019-09, draft-07, and draft-06; ${remedy}`);
 }
 
-// node_modules/zod/v4/core/core.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
 var _a;
 var NEVER = /* @__PURE__ */ Object.freeze({
   status: "aborted"
@@ -140,7 +140,7 @@ function config(newConfig) {
   return globalConfig;
 }
 
-// node_modules/zod/v4/core/util.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -836,7 +836,7 @@ var Class = class {
   }
 };
 
-// node_modules/zod/v4/core/errors.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
 var initializer = (inst, def) => {
   inst.name = "$ZodError";
   Object.defineProperty(inst, "_zod", {
@@ -905,7 +905,7 @@ function formatError(error2, mapper = (issue2) => issue2.message) {
   return fieldErrors;
 }
 
-// node_modules/zod/v4/core/parse.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
@@ -983,7 +983,7 @@ var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
 
-// node_modules/zod/v4/core/regexes.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
@@ -1042,7 +1042,7 @@ var _null = /^null$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// node_modules/zod/v4/core/checks.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a3;
   inst._zod ?? (inst._zod = {});
@@ -1432,7 +1432,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// node_modules/zod/v4/core/doc.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
 var Doc = class {
   constructor(args = []) {
     this.content = [];
@@ -1468,14 +1468,14 @@ var Doc = class {
   }
 };
 
-// node_modules/zod/v4/core/versions.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 4,
   patch: 3
 };
 
-// node_modules/zod/v4/core/schemas.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a3;
   inst ?? (inst = {});
@@ -3020,7 +3020,7 @@ function handleRefineResult(result, payload, input, inst) {
   }
 }
 
-// node_modules/zod/v4/locales/en.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/locales/en.js
 var error = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
@@ -3133,7 +3133,7 @@ function en_default() {
   };
 }
 
-// node_modules/zod/v4/core/registries.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
 var _a2;
 var $output = Symbol("ZodOutput");
 var $input = Symbol("ZodInput");
@@ -3183,7 +3183,7 @@ function registry() {
 (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
 
-// node_modules/zod/v4/core/api.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
 // @__NO_SIDE_EFFECTS__
 function _string(Class2, params) {
   return new Class2({
@@ -3746,7 +3746,7 @@ function _check(fn, params) {
   return ch;
 }
 
-// node_modules/zod/v4/core/to-json-schema.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
 function initializeContext(params) {
   let target = params?.target ?? "draft-2020-12";
   if (target === "draft-4")
@@ -4105,7 +4105,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
   return finalize(ctx, schema);
 };
 
-// node_modules/zod/v4/core/json-schema-processors.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
 var formatMap = {
   guid: "uuid",
   url: "uri",
@@ -4649,7 +4649,7 @@ function toJSONSchema(input, params) {
   return finalize(ctx, input);
 }
 
-// node_modules/zod/v4/classic/iso.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
 var iso_exports = {};
 __export(iso_exports, {
   ZodISODate: () => ZodISODate,
@@ -4690,7 +4690,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// node_modules/zod/v4/classic/errors.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
 var initializer2 = (inst, issues) => {
   $ZodError.init(inst, issues);
   inst.name = "ZodError";
@@ -4729,7 +4729,7 @@ var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
-// node_modules/zod/v4/classic/parse.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
 var parse2 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse2 = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -4743,7 +4743,7 @@ var safeDecode = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// node_modules/zod/v4/classic/schemas.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
 var _installedGroups = /* @__PURE__ */ new WeakMap();
 function _installLazyMethods(inst, group, methods) {
   const proto = Object.getPrototypeOf(inst);
@@ -5640,7 +5640,7 @@ function preprocess(fn, schema) {
   });
 }
 
-// node_modules/zod/v4/classic/compat.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/compat.js
 var ZodIssueCode = {
   invalid_type: "invalid_type",
   too_big: "too_big",
@@ -5658,7 +5658,7 @@ var ZodFirstPartyTypeKind;
 /* @__PURE__ */ (function(ZodFirstPartyTypeKind2) {
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
 
-// node_modules/zod/v4/classic/coerce.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/coerce.js
 var coerce_exports = {};
 __export(coerce_exports, {
   bigint: () => bigint2,
@@ -5683,10 +5683,10 @@ function date3(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// node_modules/zod/v4/classic/external.js
+// node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// node_modules/@modelcontextprotocol/core/dist/auth-CUe6YdwF.mjs
+// node_modules/.pnpm/@modelcontextprotocol+core@2.0.0/node_modules/@modelcontextprotocol/core/dist/auth-CUe6YdwF.mjs
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [
   LATEST_PROTOCOL_VERSION,
@@ -6624,7 +6624,7 @@ var OAuthTokenRevocationRequestSchema = object({
   token_type_hint: string2().optional()
 }).strip();
 
-// node_modules/@modelcontextprotocol/server/dist/src-CX2iR2pK.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/src-CX2iR2pK.mjs
 var BRANDS = Symbol.for("mcp.sdk.errorBrands");
 function stampErrorBrands(instance, ctor) {
   const brands = /* @__PURE__ */ new Set();
@@ -11191,7 +11191,7 @@ function normalizeRawShapeSchema(schema) {
   return schema;
 }
 
-// node_modules/@modelcontextprotocol/server/dist/ajvProvider-CEoC__sr.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/ajvProvider-CEoC__sr.mjs
 var require_code$1 = /* @__PURE__ */ __commonJSMin((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
@@ -18201,10 +18201,10 @@ var AjvJsonSchemaValidator = class {
 };
 var Ajv = import_ajv.Ajv;
 
-// node_modules/@modelcontextprotocol/server/dist/shimsNode.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/shimsNode.mjs
 import process3 from "node:process";
 
-// node_modules/@modelcontextprotocol/server/dist/mcp-DXXb3Vv3.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/mcp-DXXb3Vv3.mjs
 var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
@@ -19535,7 +19535,7 @@ function unwrapOptionalSchema(schema) {
   return schema.def?.innerType ?? schema;
 }
 
-// node_modules/@modelcontextprotocol/server/dist/stdio.mjs
+// node_modules/.pnpm/@modelcontextprotocol+server@2.0.0/node_modules/@modelcontextprotocol/server/dist/stdio.mjs
 var StdioServerTransport = class {
   _readBuffer;
   _started = false;
@@ -20380,10 +20380,82 @@ ${publicKey.trim()}`;
   return { domain: before.site.domain, username, added: true, authorized_key_count: applied.length };
 }
 
+// src/local.ts
+import { createHash as createHash2 } from "node:crypto";
+import { readdir, readFile as readFile2, stat } from "node:fs/promises";
+import { join as join2 } from "node:path";
+var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+async function findCompose(directory = ".") {
+  const encontrados = [];
+  for (const nome of COMPOSE_FILES) {
+    try {
+      if ((await stat(join2(directory, nome))).isFile()) encontrados.push(nome);
+    } catch {
+    }
+  }
+  if (encontrados.length === 0) {
+    try {
+      if (!(await stat(directory)).isDirectory()) throw new Error("nao e diretorio");
+    } catch {
+      throw new ToolError("dir_not_found", `Diret\xF3rio '${directory}' n\xE3o existe.`, {
+        hint: "Informe o diret\xF3rio que ser\xE1 publicado, ou nenhum para usar o atual."
+      });
+    }
+    return { directory, compose: false };
+  }
+  const [file, ...ignored] = encontrados;
+  const result = { directory, compose: true, file };
+  if (ignored.length > 0) result.ignored = ignored;
+  return result;
+}
+function fingerprint(material) {
+  const blob = Buffer.from(material, "base64");
+  return "SHA256:" + createHash2("sha256").update(blob).digest("base64").replace(/=+$/, "");
+}
+async function listLocalSshKeys() {
+  const directory = process.env.CLOUDEZ_SSH_DIR || join2(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
+  let entradas;
+  try {
+    entradas = await readdir(directory);
+  } catch {
+    throw new ToolError("no_ssh_dir", `N\xE3o h\xE1 diret\xF3rio ${directory} nesta m\xE1quina.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par de chaves com: ssh-keygen -t ed25519"
+    });
+  }
+  const keys = [];
+  for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
+    const caminho = join2(directory, nome);
+    let conteudo;
+    try {
+      conteudo = await readFile2(caminho, "utf8");
+    } catch {
+      continue;
+    }
+    const [linha] = conteudo.split("\n");
+    const partes = (linha ?? "").trim().split(/\s+/);
+    const [type, material, ...resto] = partes;
+    if (!type || !material || !/^(ssh|ecdsa|sk)-/.test(type)) continue;
+    const comment = resto.join(" ");
+    keys.push({
+      path: caminho,
+      type,
+      key: `${type} ${material}`,
+      ...comment ? { comment } : {},
+      fingerprint: fingerprint(material)
+    });
+  }
+  if (keys.length === 0) {
+    throw new ToolError("no_public_key", `Nenhuma chave p\xFAblica SSH em ${directory}.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par com: ssh-keygen -t ed25519 \u2014 e n\xE3o gere por ele: o par tem que nascer na m\xE1quina de quem vai us\xE1-lo."
+    });
+  }
+  return { directory, keys };
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "Cloudez MCP",
-  version: "1.0.13"
+  version: "1.0.16"
 });
 server.registerTool(
   "cloudez_auth_status",
@@ -20594,6 +20666,40 @@ server.registerTool(
   async ({ domain, root, to_release_id }) => {
     try {
       return okResult({ ...await rollback(domain, root, to_release_id) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_find_compose",
+  {
+    title: "Arquivo de Compose do projeto",
+    description: "Diz se um diret\xF3rio tem arquivo de Compose e QUAL deles o `docker compose` usaria. Chame para descobrir se a aplica\xE7\xE3o roda em container \u2014 \xE9 o que decide o que publicar: contexto de build para container, sa\xEDda de build para aplica\xE7\xE3o tradicional. Procura os quatro nomes aceitos na ordem do pr\xF3prio Compose, ent\xE3o o `file` devolvido \xE9 o que de fato sobe; os demais v\xEAm em `ignored`. N\xE3o l\xEA o conte\xFAdo nem valida o YAML.",
+    inputSchema: object({
+      directory: string2().optional().describe("Diret\xF3rio a inspecionar. Sem ele, o diret\xF3rio atual do projeto.")
+    }),
+    annotations: { readOnlyHint: true }
+  },
+  async ({ directory }) => {
+    try {
+      return okResult({ ...await findCompose(directory) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_list_local_ssh_keys",
+  {
+    title: "Chaves SSH p\xFAblicas desta m\xE1quina",
+    description: "Lista as chaves p\xFAblicas SSH da m\xE1quina de quem publica \u2014 N\xC3O as autorizadas na conta Cloudez. Chame antes do cloudez_authorize_ssh_key, para saber qual chave oferecer, e para comparar com as que a conta j\xE1 tem. Identifique cada uma ao usu\xE1rio pelo `fingerprint` e pelo `comment`: ningu\xE9m reconhece uma chave por 400 caracteres de base64. Havendo mais de uma, pergunte qual usar em vez de escolher. L\xEA apenas arquivos .pub; a chave privada nunca \xE9 aberta.",
+    inputSchema: object({}),
+    annotations: { readOnlyHint: true }
+  },
+  async () => {
+    try {
+      return okResult({ ...await listLocalSshKeys() });
     } catch (err) {
       return errorResult(err);
     }
