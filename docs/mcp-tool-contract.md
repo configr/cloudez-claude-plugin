@@ -4,8 +4,13 @@ Especificação da interface que o servidor MCP (repositório separado) deve exp
 para este plugin. Este documento é a fonte da verdade do contrato: o plugin é
 escrito contra ele, e o servidor MCP o implementa.
 
-Status: **proposta**. As seções marcadas com ⚠️ dependem de confirmação sobre o
-que a API da Cloudez suporta hoje.
+Status: **implementado**. As treze tools descritas existem no servidor e são
+chamadas pelos comandos do plugin; o que segue em aberto está na seção 7.
+
+Boa parte do que está escrito aqui foi aprendido apanhando — endpoints
+confirmados por tentativa, semânticas de escrita que diferem entre si, modos de
+falha que só apareceram em deploy real. Quando um trecho parece detalhe
+excessivo, é porque custou uma sessão descobri-lo.
 
 **Convenções que valem para tudo abaixo:**
 
@@ -982,9 +987,10 @@ A chave SSH usada pelo transporte é do usuário, em `~/.ssh/`. O MCP nunca a v�
 
 ---
 
-## 7. ⚠️ Pendências para o time do MCP
+## 7. Pendências
 
-Confirmar antes de implementar:
+O que segue aberto, e o que a prática já respondeu. As respostas ficam aqui, e
+não apagadas, porque uma pergunta removida volta a ser feita.
 
 1. **A Cloudez emite tokens com escopo?** Um token que alcance staging mas não
    produção daria à seção 5 um token por environment, limitando estrago. Hoje é um
@@ -1020,18 +1026,24 @@ Confirmar antes de implementar:
 
    Também vale confirmar se `?domain=` é filtro exato ou parcial — a
    implementação assume o pior caso e confere por igualdade.
-3. **A Cloudez suporta o padrão de releases + symlink?** Se o deploy for direto
-   no document root (sem `releases/` e `current`), `begin`/`finalize` colapsam em
-   uma tool só `cloudez_deploy(domain, ref)` e o rollback precisa de outra
-   estratégia (backup do diretório anterior, ou re-deploy do SHA antigo).
-4. **Alguma stack precisa de restart/reload depois da troca do symlink?** Para
-   site estático, não — e é por isso que os hooks saíram do plugin. Se `php` ou
-   `node` precisarem, isso vira uma tool própria (`cloudez_restart(domain)`), não
-   um campo de configuração no `finalize`.
-5. **O `finalize` é síncrono?** Se demorar mais que ~30s, precisa ser assíncrono
-   com polling via `cloudez_get_deploy_status`.
-6. **Quantas releases o servidor retém?** O plugin em shell mantém 5. Se o
-   servidor tiver limite próprio, `list_releases` precisa refleti-lo.
+3. ~~**A Cloudez suporta o padrão de releases + symlink?**~~ **Sim.** Deploys e
+   rollbacks rodaram contra servidor real, várias vezes. O `begin`/`finalize`
+   continua em duas etapas, e o rollback troca o symlink.
+4. ~~**Alguma stack precisa de restart/reload depois da troca do symlink?**~~
+   **Container precisa; estático não.** É por isso que existe o
+   `cloudez_compose_up` (seção 3.8) e não um campo no `finalize`: a troca do
+   symlink diz ao Docker QUAL código usar, e subir o container é um passo
+   próprio, com falhas próprias.
+5. ~~**O `finalize` é síncrono?**~~ **É.** Nenhuma execução real precisou de
+   polling. O `cloudez_get_deploy_status` segue especificado e não implementado,
+   por não ter consumidor: o deploy termina dentro da própria chamada.
+6. ~~**Quantas releases o servidor retém?**~~ **A retenção é nossa**, não do
+   servidor: `KEEP_RELEASES = 5` no `finalize`, mais `KEEP_REPLACED = 2` para os
+   diretórios `.current-<release_id>` postos de lado.
+
+Restou aberta apenas a **1**. As demais foram respondidas por uso, não por
+consulta — e é por isso que ficam registradas: quem ler o contrato sem esta
+seção perguntaria de novo.
 
 ---
 
