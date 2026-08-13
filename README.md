@@ -78,7 +78,14 @@ Depois de carregado:
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
   acionado quando você pedir em linguagem natural ("sobe o site", "publica em
   staging"): a skill `skills/deploy/` não tem procedimento próprio, ela só
-  encaminha para este comando.
+  encaminha para este comando;
+- `/cloudez:rollback [environment] [release_id]` — volta o site para uma release
+  anterior. Existe separado porque a operação de emergência não pode morar dentro
+  do procedimento que a causou: quem precisa dela não vai rolar um documento longo
+  no pior momento. Não exige working tree limpo — nada é publicado a partir do
+  disco local, as releases já estão no servidor. Em site de container ele
+  reconstrói a imagem depois de trocar o symlink, sem o que o rollback não surte
+  efeito nenhum.
 
 > **O procedimento do deploy mora num lugar só**, em `commands/deploy.md`. A
 > skill existe para dar a porta de entrada em linguagem natural, e nada mais —
@@ -159,19 +166,19 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
       `cloudez_compose_up` deixa de reconstruir. Encurta a janela em que o disco e
       o container discordam, de "o build inteiro" para "a recriação do container",
       e faz build quebrado ser deploy que não começou (contrato §3.8)
-- [ ] Comando `/cloudez:rollback`. Hoje o rollback é o passo 10 do
-      `commands/deploy.md`, o que significa que a operação de emergência mora
-      dentro do procedimento que a causou — quem precisa dela tem de rolar um
-      documento longo, no pior momento possível. As tools já existem
-      (`cloudez_list_releases`, `cloudez_rollback`); falta a porta.
-
-      Duas coisas exercitadas contra servidor de verdade que o comando precisa
-      carregar: em site de container, `cloudez_rollback` **não** basta — ele
-      troca o symlink e o container segue na imagem anterior, então o site
-      continua servindo justamente o que se tentava tirar do ar. Fechar exige
-      `cloudez_compose_build` + `cloudez_compose_up` com o `deploy_id` da release
-      de destino. E o `cloudez_health_check` depois é obrigatório: rollback que
-      não devolve o site ao ar é o pior estado para se declarar resolvido.
+- [x] Comando `/cloudez:rollback`, para a operação de emergência não morar dentro
+      do procedimento que a causou. Carrega o que foi exercitado contra servidor
+      de verdade: em site de container o `cloudez_rollback` não basta — ele troca
+      o symlink e o container segue na imagem anterior, servindo justamente o que
+      se tentava tirar do ar —, então o comando reconstrói com
+      `cloudez_compose_build` + `cloudez_compose_up` e fecha com
+      `cloudez_health_check`
+- [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
+      chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
+      `compose_up` são chaveados por `deploy_id` (estado em `.cloudez/state/`).
+      Voltar de outra máquina, ou depois da poda de 7 dias, deixa a release
+      alcançável e a imagem não — hoje o contorno é refazer o deploy no commit
+      correspondente. Chavear as duas por release resolveria
 
 ## Autenticação
 

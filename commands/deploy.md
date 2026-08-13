@@ -135,6 +135,18 @@ deploy bem-sucedido enquanto o site servia o conteúdo velho.
 Uma falha aqui **não interrompe o deploy**: site fora do ar antes de publicar é
 justamente o que se está tentando consertar. Só registre e siga.
 
+**Do que esta medição devolve, guarde só o `body_sha256`.** O `attempts: 1` é
+deliberado e assimétrico em relação ao passo 9, que usa o padrão: lá as
+tentativas existem porque um container recém-recriado leva segundos para
+escutar, e aqui não há nada subindo — insistir só atrasaria o deploy quando o
+site já está fora do ar.
+
+A consequência é que **`latency_ms` e `attempts` das duas medições não são
+comparáveis**, e a diferença entre elas não diz nada sobre a aplicação. Na
+prática a primeira requisição a um domínio costuma vir bem mais lenta que as
+seguintes — cache frio de borda e handshake de TLS, não o seu deploy. Não
+apresente essa queda ao usuário como melhora.
+
 ## 5. Registrar a release
 
 ```
@@ -337,7 +349,17 @@ ou pode ser um deploy que não surtiu efeito.
 **`attempts` maior que 1** — vale mencionar. A aplicação demorou a subir, e isso
 é informação sobre ela que só este passo revela.
 
+**Não compare `latency_ms` nem `attempts` com os do passo 4b.** As duas medições
+usam número de tentativas diferente, de propósito, e a primeira requisição a um
+domínio vem inflada por cache frio e handshake de TLS. O único campo comparável
+entre os dois passos é o `body_sha256`.
+
 ## 10. Rollback
+
+Fora de um deploy, isto é o `/cloudez:rollback` — que confirma o alvo com o
+usuário e verifica o resultado. Aqui está inline porque um rollback disparado no
+meio de um deploy que falhou acontece dentro deste fluxo, e não há como invocar
+outro comando daqui. **Os dois textos precisam mudar juntos.**
 
 O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 5.
 
