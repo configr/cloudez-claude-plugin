@@ -132,15 +132,34 @@ Lista os sites/aplicações da conta.
 // output
 {
   "sites": [
-    {
-      "domain": "meusite.com.br",
-      "name": "meusite",
-      "stack": "static",             // "static" | "php" | "node" | ...
-      "current_release": "20260807T143000Z-a1b2c3d"
-    }
-  ]
+    { "domain": "meusite.com.br", "name": "meusite", "stack": "static" }
+  ],
+  "total": 42,                       // o que a API declara ter, quando declara
+  "truncated": "…"                   // só quando a listagem parou antes do fim
 }
 ```
+
+**Endpoint:** `GET /v3/website/` — a mesma coleção do `cloudez_get_site`, sem o
+`?domain=`. E é essa diferença que traz a paginação para dentro do problema:
+filtrando por domínio uma página basta, listando tudo não.
+
+**A listagem segue o `next` até o fim**, com um teto de páginas para uma API que
+responda sempre a mesma página não virar laço. Atingido o teto, o retorno traz
+`truncated` — **parar em silêncio faria o modelo afirmar que um domínio não
+existe na conta quando ele só estava depois do corte**, que é o oposto do que
+esta tool existe para fazer.
+
+Do `next` aproveita-se apenas `pathname` e `search`. Ele vem como URL absoluta, e
+seguir o host que veio no corpo da resposta seria deixar a API escolher para onde
+mandamos o token.
+
+**O `query` é aplicado no cliente**, não na API: o único parâmetro de busca
+conhecido é `?domain=`, e a query também casa nome. Filtrar aqui custa percorrer
+as páginas, mas não inventa um parâmetro que talvez não exista.
+
+**Esta tool não serve para verificar se um domínio existe.** Para isso é o
+`cloudez_get_site`, que filtra no servidor e não depende de a lista caber. Item
+sem domínio é descartado, como lá e pela mesma razão.
 
 ---
 
