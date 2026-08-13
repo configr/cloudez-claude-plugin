@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -53,7 +53,7 @@ cloudez_get_site(domain: "<domain>")
 
 **`match: "exact"`** — é o alvo. **Guarde o bloco `ssh`**: `host`, `user` e
 `port` são o destino do deploy, e os adaptadores os recebem por ambiente nos
-passos 5 a 9.
+passos 5 a 10.
 
 Esses dados não estão no `.cloudez.yaml` de propósito. Uma cópia do host num
 arquivo versionado envelhece: se a Cloudez mover o site de servidor, o valor
@@ -117,6 +117,22 @@ resto do código-fonte para um servidor que só vai servir arquivos.
 Se o build falhar, **pare** — não sincronize um build quebrado. Mostre o erro e,
 se for algo que você consegue corrigir (import faltando, erro de tipo), corrija e
 rode de novo antes de seguir.
+
+## 4b. Medir o site antes de publicar
+
+```
+cloudez_health_check(domain: "<domain>", attempts: 1)
+```
+
+**Guarde o `body_sha256`.** É a referência: comparado com o de depois, ele é o
+único sinal independente de stack sobre a publicação ter mudado alguma coisa.
+
+Sem essa medição, o passo 9 só consegue dizer que o site responde — e a release
+anterior também responde. Foi assim que um `app_root_path` errado passou por
+deploy bem-sucedido enquanto o site servia o conteúdo velho.
+
+Uma falha aqui **não interrompe o deploy**: site fora do ar antes de publicar é
+justamente o que se está tentando consertar. Só registre e siga.
 
 ## 5. Registrar a release
 
@@ -243,7 +259,41 @@ contexto de build. O container continua rodando a versão anterior.
 pelo próprio retorno: o container pode subir e a aplicação não responder. Bata no
 domínio e confira o que voltou antes de declarar o deploy pronto.
 
-## 9. Rollback
+## 9. Verificar que o site responde
+
+Ativar a release, ou subir o container, **não prova que a aplicação está no ar**.
+Este é o passo que fecha essa lacuna.
+
+```
+cloudez_health_check(domain: "<domain>")
+```
+
+Ele tenta mais de uma vez por padrão. Um container recém-recriado leva segundos
+para escutar, e uma checagem única logo depois do deploy pega o intervalo em que
+ele ainda está subindo.
+
+**`healthy: false`** — o deploy **fracassou**, mesmo com todos os passos
+anteriores em `succeeded`. Reporte assim, sem suavizar. O que o `status_code`
+sugere:
+
+| Sintoma | Provável causa |
+|---|---|
+| `502` em site container | O container não está escutando. Confira o `state` do passo 8 e os logs do build |
+| `404` | O document root aponta para o lugar errado, ou o symlink `current` está quebrado |
+| sem `status_code`, com `error` | DNS, TLS ou o servidor fora — pode não ter relação com o deploy |
+
+Ofereça o rollback (passo 10, e em site container o passo 8 de novo depois dele).
+
+**`healthy: true`, mas `body_sha256` igual ao do passo 4b** — o site responde e
+está servindo **exatamente o mesmo conteúdo de antes do deploy**. Não afirme que
+a publicação deu certo. Diga isso ao usuário e pergunte se a release deveria ter
+alterado a página consultada: pode ser legítimo — nem toda release muda a home —
+ou pode ser um deploy que não surtiu efeito.
+
+**`attempts` maior que 1** — vale mencionar. A aplicação demorou a subir, e isso
+é informação sobre ela que só este passo revela.
+
+## 10. Rollback
 
 O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 5.
 
@@ -264,6 +314,10 @@ site continua servindo o que você acabou de tentar tirar do ar. É preciso roda
 dela — e ela precisa de um `deploy_id`. Se não houver um deploy ativo para essa
 release, um `cloudez_begin_deploy` novo apontando para o mesmo `ref`, seguido de
 sync + finalize + compose_up, é o caminho que reconstrói e religa tudo.
+
+**Rode o passo 9 de novo depois do rollback.** Voltar o symlink é o remédio, não
+a confirmação — e um rollback que não devolve o site ao ar é o pior estado
+possível para se declarar resolvido.
 
 ## Como reportar
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.16 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 1.0.17 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -20452,10 +20452,67 @@ async function listLocalSshKeys() {
   return { directory, keys };
 }
 
+// src/health.ts
+import { createHash as createHash3 } from "node:crypto";
+var EXCERPT_LIMIT = 500;
+var dorme = (ms) => new Promise((r) => setTimeout(r, ms));
+async function tentativa(url2, timeout) {
+  return fetch(url2, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeout),
+    // Sem credencial nenhuma: isto é o que um visitante vê.
+    headers: { "User-Agent": "cloudez-mcp/health-check" }
+  });
+}
+async function healthCheck(domain, opts = {}) {
+  const caminho = opts.path?.startsWith("/") ? opts.path : `/${opts.path ?? ""}`;
+  const tentativas = Math.max(1, Math.min(opts.attempts ?? 3, 10));
+  const timeout = apiTimeoutMs();
+  const inicio = Date.now();
+  let ultimoErro = "";
+  let ultimo;
+  let usadas = 0;
+  for (let i = 0; i < tentativas; i++) {
+    usadas = i + 1;
+    for (const esquema of ["https", "http"]) {
+      const url2 = `${esquema}://${domain}${caminho}`;
+      try {
+        const resposta = await tentativa(url2, timeout);
+        const corpo = await resposta.text();
+        const esperado = opts.expectStatus;
+        const status = resposta.status;
+        ultimo = {
+          url: url2,
+          ...resposta.url && resposta.url !== url2 ? { final_url: resposta.url } : {},
+          healthy: esperado === void 0 ? status >= 200 && status < 400 : status === esperado,
+          status_code: status,
+          latency_ms: Date.now() - inicio,
+          attempts: usadas,
+          body_sha256: createHash3("sha256").update(corpo).digest("hex"),
+          body_excerpt: corpo.slice(0, EXCERPT_LIMIT)
+        };
+        break;
+      } catch (err) {
+        ultimoErro = err instanceof Error ? err.message : String(err);
+      }
+    }
+    if (ultimo?.healthy) return ultimo;
+    if (i < tentativas - 1) await dorme(2e3 * (i + 1));
+  }
+  if (ultimo) return { ...ultimo, attempts: usadas, latency_ms: Date.now() - inicio };
+  return {
+    url: `https://${domain}${caminho}`,
+    healthy: false,
+    latency_ms: Date.now() - inicio,
+    attempts: usadas,
+    error: ultimoErro || "O site n\xE3o respondeu."
+  };
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "Cloudez MCP",
-  version: "1.0.16"
+  version: "1.0.17"
 });
 server.registerTool(
   "cloudez_auth_status",
@@ -20700,6 +20757,27 @@ server.registerTool(
   async () => {
     try {
       return okResult({ ...await listLocalSshKeys() });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_health_check",
+  {
+    title: "O site responde?",
+    description: "Faz uma requisi\xE7\xE3o HTTP ao site e devolve o que voltou. Chame DEPOIS de todo deploy: ativar a release ou subir o container n\xE3o prova que a aplica\xE7\xE3o est\xE1 no ar. `healthy: false` \xE9 deploy fracassado \u2014 reporte, n\xE3o ignore. Tenta mais de uma vez por padr\xE3o, porque um container rec\xE9m-recriado leva segundos para escutar; `attempts` maior que 1 diz que a aplica\xE7\xE3o demora a subir. ATEN\xC7\xC3O: status 2xx N\xC3O prova que a vers\xE3o nova est\xE1 no ar \u2014 a release anterior tamb\xE9m responde 200. Para saber isso, chame esta tool ANTES do deploy e compare o `body_sha256`: igual antes e depois significa que a publica\xE7\xE3o n\xE3o mudou o que o site entrega.",
+    inputSchema: object({
+      domain: string2().describe("FQDN do site, sem protocolo. Ex.: meusite.com.br"),
+      path: string2().optional().describe("Caminho a consultar. Padr\xE3o: /"),
+      expect_status: number2().optional().describe("Status esperado. Sem ele, qualquer 2xx ou 3xx conta como saud\xE1vel."),
+      attempts: number2().optional().describe("Tentativas antes de desistir. Padr\xE3o 3, m\xE1ximo 10.")
+    }),
+    annotations: { readOnlyHint: true, openWorldHint: true }
+  },
+  async ({ domain, path, expect_status, attempts }) => {
+    try {
+      return okResult({ ...await healthCheck(domain, { path, expectStatus: expect_status, attempts }) });
     } catch (err) {
       return errorResult(err);
     }

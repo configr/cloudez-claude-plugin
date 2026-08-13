@@ -791,16 +791,72 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.12 Fora do escopo, por enquanto
+### 3.12 `cloudez_health_check` — read-only
 
-Duas tools saíram desta proposta junto com as features correspondentes do
-plugin. Ficam registradas para não serem redescobertas do zero:
+Faz uma requisição HTTP ao site e devolve o que voltou. **Única tool que fala com
+o site, e não com a API** — e a única que não manda credencial nenhuma: o que se
+busca é o que qualquer visitante veria.
 
-- **`cloudez_health_check`** — verificação HTTP pós-deploy. O plugin não faz mais
-  health check (nem rollback automático a partir dele), então especificar a tool
-  seria pedir trabalho para ninguém consumir. Se voltar, volta como read-only:
-  `{domain, path, expect_status}` → `{healthy, status_code, latency_ms,
-  body_excerpt}`.
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "domain": { "type": "string" },
+    "path": { "type": "string", "description": "Padrão: /" },
+    "expect_status": { "type": "number", "description": "Sem ele, 2xx e 3xx contam como saudável" },
+    "attempts": { "type": "number", "description": "Padrão 3, máximo 10" }
+  },
+  "required": ["domain"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "url": "https://meusite.com.br/",
+  "final_url": "https://meusite.com.br/home",   // só quando houve redirecionamento
+  "healthy": true,
+  "status_code": 200,
+  "latency_ms": 214,
+  "attempts": 1,
+  "body_sha256": "9f86d0…",
+  "body_excerpt": "<!doctype html>…"
+}
+```
+
+**Um `200` não prova que o deploy surtiu efeito.** A release anterior também
+responde `200`, e foi exatamente assim que um `app_root_path` errado passou por
+deploy bem-sucedido enquanto o site servia o conteúdo antigo.
+
+Por isso existe o `body_sha256`. Comparado com o de uma chamada **antes** do
+deploy, ele é o único sinal independente de stack sobre a publicação ter mudado
+alguma coisa. Não é prova — uma release pode legitimamente não alterar a página
+consultada —, mas "o corpo é byte a byte o mesmo de antes" é um alerta que
+nenhum código de status dá. O hash cobre o corpo **inteiro**, não o trecho: duas
+páginas que só divergem depois do limite pareceriam iguais.
+
+**Repete também em resposta ruim, não só em erro de conexão.** Um container
+recém-recriado responde `502` pelo nginx da frente enquanto sobe — resposta HTTP
+válida, e o caso exato para o qual a repetição existe. Parar no primeiro `502`
+reportaria falha num deploy que deu certo. O `attempts` usado volta no retorno:
+precisar de três diz algo sobre a aplicação que uma resposta imediata não diz.
+
+**Tenta `https` e cai para `http`.** Site recém-criado pode ainda não ter
+certificado, e falhar aí seria reportar como quebrado algo que só espera o TLS.
+
+**Site fora do ar não é erro de tool.** É a resposta à pergunta, e devolvê-la
+como resultado preserva a latência e as tentativas — que é o que distingue
+"morreu" de "está subindo".
+
+---
+
+### 3.13 Fora do escopo, por enquanto
+
+Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
+registrada para não ser redescoberta do zero:
+
 - **`cloudez_get_logs`** — logs de app/erro/acesso do servidor. Útil para o
   modelo diagnosticar um deploy que subiu quebrado, mas nada no procedimento
   atual chama. Se voltar: `{domain, kind, lines, since}` → `{content,
