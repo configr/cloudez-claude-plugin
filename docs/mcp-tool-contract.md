@@ -635,6 +635,16 @@ containers do outro, e o `--remove-orphans` terminaria o serviço. A consequênc
 aceita é sobrepor um `name:` que o usuário tenha no compose dele — perder o nome
 escolhido é barato, derrubar o site de outra pessoa não é.
 
+**De onde vem o domínio, já que esta tool recebe só `deploy_id`:** o
+`cloudez_begin_deploy` persiste o `domain` no estado do deploy, e é dali que o
+`compose_up` o lê — fonte autoritativa. Quando o estado não o tem (deploys cujo
+`begin` foi o adaptador shell, que nunca gravou o campo, ou estados anteriores a
+esta tool), o **primeiro segmento do `root`** serve de origem: o `cloudez-setup`
+grava `root` como `~/<domain>/www/claude`, então esse segmento É o domínio e a
+derivação produz o mesmo nome de projeto — não orfana um container já no ar.
+Exigir o `domain` no estado com hard-fail foi uma regressão da porta shell→MCP: o
+adaptador shell nunca precisou dele no estado porque lia do `.cloudez.yaml`.
+
 **O `state` de cada container faz parte do retorno** porque `up` bem-sucedido não
 é aplicação no ar: um container em `restarting` ou `exited` é deploy fracassado
 com JSON de sucesso. Quem chama confere.

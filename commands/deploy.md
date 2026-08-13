@@ -1,16 +1,21 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-login:*), Bash(cloudez-compose:*), Bash(cloudez-begin-deploy:*), Bash(cloudez-sync:*), Bash(cloudez-finalize-deploy:*), Bash(cloudez-compose-up:*), Bash(cloudez-rollback:*), Bash(cloudez-list-releases:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-compose:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
 a publicar.
 
 O deploy acontece em três etapas com estado entre elas: registrar a release,
-sincronizar os arquivos, ativar. Os adaptadores `cloudez-*` fazem cada etapa e
-imprimem JSON — **leia esse JSON, não presuma sucesso pelo exit code.** Eles
-estão no `PATH` enquanto o plugin está ativo; chame pelo nome, sem caminho.
+sincronizar os arquivos, ativar. As duas pontas de control plane —
+`cloudez_begin_deploy` e `cloudez_finalize_deploy` (mais `cloudez_compose_up` em
+site de container) — são **tools do MCP**; o transporte do meio (`cloudez-sync`)
+segue local, porque o MCP nunca move bytes. Tanto a tool quanto o adaptador
+devolvem JSON estruturado — **leia esse JSON, não presuma sucesso pelo exit code
+nem por a chamada ter retornado.** O único adaptador em shell que resta é o
+transporte, `cloudez-sync`; ele está no `PATH` enquanto o plugin está ativo,
+chame pelo nome, sem caminho.
 
 Todos os caminhos são relativos à raiz do projeto sendo publicado, que precisa
 ter um `.cloudez.yaml`. Se não tiver, pare e mande o usuário rodar
@@ -115,24 +120,31 @@ rode de novo antes de seguir.
 
 ## 5. Registrar a release
 
-Os adaptadores recebem o destino ssh por ambiente, com os valores do passo 2.
-**Passe as três variáveis em toda chamada** — sem elas o adaptador para com
-`missing_ssh_target`:
-
-```sh
-CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
-  cloudez-begin-deploy <environment> <sha> <idempotency_key>
+```
+cloudez_begin_deploy(
+  domain: "<domain>",
+  root: "<root do bloco do environment no .cloudez.yaml>",
+  ref: "<sha>",
+  idempotency_key: "<uuid>",
+  environment: "<environment>"
+)
 ```
 
+A tool resolve o destino ssh sozinha, pelo `domain` (o mesmo `cloudez_get_site`
+do passo 2) — **não passe host, user nem port**. O `root` vem do `.cloudez.yaml`
+(o bloco do environment): é a única fonte dele, e a tool não o busca na API de
+propósito.
+
 Este passo **já conecta por ssh** — ele prepara o diretório de release no
-servidor. Uma falha de permissão aqui é o mesmo caso descrito no passo 6, com a
-mesma exceção para a chave recém-autorizada.
+servidor. Uma falha de permissão aqui volta como `ssh_failed` (retryable), o
+mesmo caso descrito no passo 6, com a mesma exceção para a chave recém-autorizada.
 
 O `idempotency_key` é um UUID que **você gera uma vez por deploy** (`uuidgen`).
-Se precisar repetir o comando por qualquer motivo, reuse a mesma chave — ela é o
+Se precisar repetir a chamada por qualquer motivo, reuse a mesma chave — ela é o
 que impede um retry seu de virar dois deploys.
 
-Guarde o `deploy_id` do retorno.
+Guarde o `deploy_id` do retorno. O destino ssh já foi gravado no estado do
+deploy, e é de lá que o `cloudez-sync` o lê no passo 6.
 
 ## 6. Sincronizar
 
@@ -160,9 +172,8 @@ faz procurar defeito onde não há.
 
 ## 7. Ativar
 
-```sh
-CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
-  cloudez-finalize-deploy <deploy_id>
+```
+cloudez_finalize_deploy(deploy_id: "<deploy_id>")
 ```
 
 Troca o symlink `current` de forma atômica. Se der `activation_failed`, a release
@@ -195,9 +206,8 @@ escuta ali é o container do usuário. Sem este passo o deploy termina em
 **release anterior** nos seguintes — falha que não aparece em nenhum JSON de
 retorno, só no navegador.
 
-```sh
-CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
-  cloudez-compose-up <deploy_id>
+```
+cloudez_compose_up(deploy_id: "<deploy_id>")
 ```
 
 Roda `docker compose up -d --build` na release recém-ativada. **Depois do
@@ -235,22 +245,25 @@ domínio e confira o que voltou antes de declarar o deploy pronto.
 
 ## 9. Rollback
 
-```sh
-CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
-  cloudez-rollback <environment>              # volta para a anterior
-CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
-  cloudez-rollback <environment> <release_id> # volta para uma específica
+O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 5.
+
+```
+cloudez_rollback(domain: "<domain>", root: "<root>")                          # volta para a anterior
+cloudez_rollback(domain: "<domain>", root: "<root>", to_release_id: "<id>")   # volta para uma específica
 ```
 
-O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Se o
-rollback também falhar, isso é um incidente — reporte imediatamente com todos os
-logs que você tiver, sem tentar mais nada.
+O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Alvo
+que não existe mais volta `release_not_found` com a lista do que sobrou — não
+escolha outro por conta. Se o rollback também falhar (`rollback_failed`), isso é
+um incidente — reporte imediatamente com todos os logs, sem tentar mais nada.
 
 **Em aplicação em container, o rollback não termina aqui.** Ele troca o symlink,
 e só: o container segue rodando a imagem construída no deploy anterior, então o
-site continua servindo o que você acabou de tentar tirar do ar. Rode o passo 8
-novamente, com o `deploy_id` da release para onde voltou, para reconstruir a
-imagem a partir dela.
+site continua servindo o que você acabou de tentar tirar do ar. É preciso rodar
+`cloudez_compose_up` para a release de destino reconstruir a imagem a partir
+dela — e ela precisa de um `deploy_id`. Se não houver um deploy ativo para essa
+release, um `cloudez_begin_deploy` novo apontando para o mesmo `ref`, seguido de
+sync + finalize + compose_up, é o caminho que reconstrói e religa tudo.
 
 ## Como reportar
 
@@ -272,9 +285,8 @@ continua servindo o conteúdo antigo.
 
 Quando o usuário só quer saber o estado:
 
-```sh
-CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
-  cloudez-list-releases <environment>   # o que está no servidor, qual é a atual
+```
+cloudez_list_releases(domain: "<domain>", root: "<root>")   # o que está no servidor, qual é a atual
 ```
 
 Também aqui o destino vem do `cloudez_get_site` — passos 0 a 2 antes.
@@ -287,9 +299,7 @@ O `root` vem **sempre** do `.cloudez.yaml`, nunca da API: duas fontes para o
 destino dos arquivos criariam a pergunta "qual vale?" para a decisão mais
 destrutiva daqui, e ela só apareceria quando as duas divergissem.
 
-Os adaptadores `cloudez-begin-deploy`, `cloudez-finalize-deploy`,
-`cloudez-rollback` e `cloudez-list-releases` são temporários: viram as tools
-`cloudez_*` correspondentes quando o servidor MCP as tiver. O formato de retorno
-é o mesmo de propósito (veja `docs/mcp-tool-contract.md`), então o procedimento
-acima não muda. A exceção é o passo 6: o transporte continua local, já que o MCP
-nunca transporta arquivos.
+Todo o control plane já é tool do servidor MCP: `cloudez_begin_deploy`,
+`cloudez_finalize_deploy`, `cloudez_compose_up`, `cloudez_list_releases` e
+`cloudez_rollback`. O passo 6 é a exceção permanente: o transporte (`cloudez-sync`)
+continua local, já que o MCP nunca transporta arquivos.

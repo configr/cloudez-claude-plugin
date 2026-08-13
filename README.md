@@ -119,19 +119,30 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
 - [x] `/cloudez:deploy` como comando, com a skill reduzida a roteador
 - [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
-- [ ] Slugs de `stack` e `current_release` confirmados — informativos, não bloqueiam
+- [x] Slugs de `stack` e `current_release` confirmados contra a API real — e o
+      contrato assumia errado: `stack` não é slug de `values`, é `type.slug`
+      (`html`, `container_docker`); `current_release` não existe na resposta do
+      site (só o symlink `current` no servidor sabe). `mapSite` já lê `stack` de
+      `type.slug` (com `values` como precedência); `current_release` continua fora
 - [x] Bloco `ssh` fora do `.cloudez.yaml` — vem do `cloudez_get_site` a cada deploy
 - [x] `/cloudez:setup` completo: confirma o site, ajusta o document root e
       autoriza a chave SSH da máquina — exercitado contra a API real
 - [x] Deploy rodado de ponta a ponta contra um servidor de verdade, várias vezes
 - [x] Rollback exercitado contra um servidor de verdade
-- [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
 - [x] Deploy via Docker, parte 1: os arquivos do container (Compose, Dockerfile,
       código) chegam ao servidor — o `/cloudez:deploy` publica o contexto de
       build em vez do resultado de um build local
-- [ ] Deploy via Docker, parte 2: a chamada que manda a Cloudez subir o
-      container, e o health check que confirma que ele está de pé
-- [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
+- [x] Deploy via Docker, parte 2: `cloudez_compose_up` sobe o container depois do
+      finalize, no fluxo do `/cloudez:deploy` — exercitado contra um servidor de
+      verdade (o health check ficou fora de escopo: o modelo confere batendo no
+      domínio, contrato §3.12)
+- [x] Tools de ciclo de vida no MCP, 1ª leva: `cloudez_begin_deploy`,
+      `cloudez_finalize_deploy`, `cloudez_compose_up` (SSH via child_process,
+      estado compartilhado com o `cloudez-sync` pelo arquivo `.cloudez/state/`)
+- [x] Tools de ciclo de vida no MCP, 2ª leva: `cloudez_list_releases` e
+      `cloudez_rollback` — todo o control plane agora é MCP; em `bin/` só resta o
+      transporte `cloudez-sync`. Suíte do MCP em 113 testes (ssh e API falsos)
+- [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
 
 ## Autenticação
 
