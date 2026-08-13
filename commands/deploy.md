@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-login:*), Bash(cloudez-begin-deploy:*), Bash(cloudez-sync:*), Bash(cloudez-finalize-deploy:*), Bash(cloudez-rollback:*), Bash(cloudez-list-releases:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-login:*), Bash(cloudez-compose:*), Bash(cloudez-begin-deploy:*), Bash(cloudez-sync:*), Bash(cloudez-finalize-deploy:*), Bash(cloudez-rollback:*), Bash(cloudez-list-releases:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -79,12 +79,35 @@ Colete o SHA com `git rev-parse HEAD`.
 
 ## 4. Decidir o que subir
 
-O diretório publicado vem dos argumentos. Sem ele: se o projeto tem build
-(`package.json` com script `build`, por exemplo), rode o build e use o diretório
-de saída; se não tem, pergunte ao usuário qual diretório subir.
+O diretório publicado vem dos argumentos. Sem ele, **o que se publica depende de
+a aplicação rodar em container ou não**, e são decisões opostas:
 
-Não chute a raiz do repositório — ela levaria `.git` e `node_modules` para o
-servidor. O `sync` envia o diretório inteiro, sem filtro.
+```sh
+cloudez-compose
+```
+
+### `compose: true` — aplicação em container
+
+Publique o **diretório do arquivo de Compose**, que é o contexto de build — em
+geral a raiz do projeto. É lá que estão o `Dockerfile` e o `compose`, e sem eles
+não há o que subir do outro lado.
+
+**Não rode o build local.** Quem constrói a imagem é o Docker, a partir do
+`Dockerfile`; rodar `npm run build` aqui e publicar o `dist/` mandaria um
+diretório sem `Dockerfile` e sem `compose`, e o container não teria como existir.
+
+O `sync` exclui o `.git`, então publicar a raiz não carrega o histórico do
+repositório. O resto vai inteiro: o que não deve entrar na imagem é assunto do
+`.dockerignore`, aplicado no build.
+
+### `compose: false` — aplicação tradicional
+
+Como antes: se o projeto tem build (`package.json` com script `build`, por
+exemplo), rode o build e use o diretório de saída; se não tem, pergunte ao
+usuário qual diretório subir.
+
+Aqui **não** publique a raiz do repositório — ela levaria `node_modules` e o
+resto do código-fonte para um servidor que só vai servir arquivos.
 
 Se o build falhar, **pare** — não sincronize um build quebrado. Mostre o erro e,
 se for algo que você consegue corrigir (import faltando, erro de tipo), corrija e

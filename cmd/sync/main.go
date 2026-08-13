@@ -78,7 +78,21 @@ func run() int {
 func transfer(dep *cloudez.Deploy, localDir string) (string, string, error) {
 	// "-C dir ." envia o CONTEUDO do diretorio, nao o diretorio. E o mesmo
 	// motivo da barra final no rsync: sem isso o site sobe aninhado um nivel.
-	tarArgs := []string{"-czf", "-", "-C", localDir, "."}
+	//
+	// --exclude=.git existe porque o diretorio publicado deixou de ser sempre um
+	// build: numa aplicacao em container o que se envia e o contexto de build, e
+	// ele costuma ser a raiz do repositorio — onde moram o Dockerfile e o
+	// compose. Sem a exclusao, todo deploy carregaria o historico inteiro do git
+	// pela rede, e ele nao serve para nada dentro de uma imagem.
+	//
+	// O padrao e o nome puro, sem barra: os dois tar tratam exclusao como
+	// NAO-ancorada por padrao, entao `.git` casa tanto `./.git` quanto o `.git`
+	// de um submodulo, e NAO casa `.gitignore` nem `.github/` — que precisam
+	// sobreviver. Uma exclusao por prefixo comeria os dois.
+	//
+	// --exclude vem antes de `-C`: o bsdtar exige que a opcao preceda os
+	// caminhos a que se aplica.
+	tarArgs := []string{"-czf", "-", "--exclude", ".git", "-C", localDir, "."}
 
 	remote := fmt.Sprintf("tar xzf - -C %s", shellQuote(dep.SSH.Path))
 	sshArgs := []string{

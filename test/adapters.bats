@@ -501,6 +501,40 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
 # um `._.` por diretorio. Nao quebram o site, mas viajam em toda release e sujam
 # o servidor. COPYFILE_DISABLE=1 resolve na origem; fora do macOS o tar ignora a
 # variavel, entao nao ha condicional por plataforma.
+# O diretorio publicado deixou de ser sempre um build: numa aplicacao em
+# container o que se envia e o CONTEXTO, que costuma ser a raiz do repositorio.
+# Sem exclusao, todo deploy levaria o historico inteiro do git pela rede.
+@test "sync exclui o .git do que empacota" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  run cloudez-sync "$d" dist
+  [ "$status" -eq 0 ]
+  grep -q -- '--exclude .git' "$MOCK_LOG"
+}
+
+# Este roda o tar DE VERDADE, nao o mock. O comportamento de --exclude difere
+# entre bsdtar (macOS) e GNU tar (Linux), e a matriz do CI cobre os dois: um
+# padrao que funcione so num deles passaria despercebido de outra forma.
+#
+# O que precisa sobreviver importa tanto quanto o que precisa sair: uma exclusao
+# por prefixo levaria .gitignore e .github/ junto.
+@test "o padrao de exclusao pega .git e poupa .gitignore e .github" {
+  mkdir -p ctx/.git/objects ctx/sub/.git ctx/.github ctx/src
+  touch ctx/.git/config ctx/.git/objects/abc ctx/sub/.git/x \
+        ctx/.github/w.yml ctx/.gitignore ctx/src/app.js ctx/Dockerfile ctx/compose.yaml
+
+  # PATH reduzido: `tar` no PATH da suite e o MOCK, que nao empacota nada. Sem
+  # isto o teste passa vazio, afirmando sobre uma listagem que nunca existiu.
+  real_tar() { PATH=/usr/bin:/bin tar "$@"; }
+  listagem=$(real_tar -czf - --exclude .git -C ctx . | real_tar -tzf -)
+
+  [ "$(printf '%s\n' "$listagem" | grep -c '/\.git/')" -eq 0 ]
+  printf '%s\n' "$listagem" | grep -q '\./\.gitignore'
+  printf '%s\n' "$listagem" | grep -q '\./\.github/'
+  printf '%s\n' "$listagem" | grep -q '\./Dockerfile'
+  printf '%s\n' "$listagem" | grep -q '\./compose\.yaml'
+}
+
 @test "sync desliga os metadados AppleDouble do macOS" {
   d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
   mkdir -p dist && touch dist/index.html

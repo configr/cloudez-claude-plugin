@@ -126,9 +126,11 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Deploy rodado de ponta a ponta contra um servidor de verdade, várias vezes
 - [x] Rollback exercitado contra um servidor de verdade
 - [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
-- [ ] Deploy via Docker: o `/cloudez:setup` já detecta o arquivo de Compose e
-      confere contra o `stack` do site, mas o deploy ainda publica arquivos —
-      falta a chamada que manda a Cloudez subir o container
+- [x] Deploy via Docker, parte 1: os arquivos do container (Compose, Dockerfile,
+      código) chegam ao servidor — o `/cloudez:deploy` publica o contexto de
+      build em vez do resultado de um build local
+- [ ] Deploy via Docker, parte 2: a chamada que manda a Cloudez subir o
+      container, e o health check que confirma que ele está de pé
 - [ ] Resto das tools MCP: `begin_deploy`, `finalize_deploy`, `rollback`
 
 ## Autenticação
