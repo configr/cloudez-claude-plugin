@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -9,8 +9,9 @@ a publicar.
 
 O deploy acontece em três etapas com estado entre elas: registrar a release,
 sincronizar os arquivos, ativar. As duas pontas de control plane —
-`cloudez_begin_deploy` e `cloudez_finalize_deploy` (mais `cloudez_compose_up` em
-site de container) — são **tools do MCP**; o transporte do meio (`cloudez-sync`)
+`cloudez_begin_deploy` e `cloudez_finalize_deploy` (mais `cloudez_compose_build` e
+`cloudez_compose_up` em site de container) — são **tools do MCP**; o transporte
+do meio (`cloudez-sync`)
 segue local, porque o MCP nunca move bytes. Tanto a tool quanto o adaptador
 devolvem JSON estruturado — **leia esse JSON, não presuma sucesso pelo exit code
 nem por a chamada ter retornado.** O único adaptador em shell que resta é o
@@ -186,6 +187,38 @@ reusando a mesma `idempotency_key`. Só trate como chave ausente se continuar
 falhando depois disso — mandá-lo conferir o cadastro que ele acabou de fazer o
 faz procurar defeito onde não há.
 
+## 6b. Construir a imagem — só quando `compose: true`
+
+**Aplicação tradicional pula este passo.** Não há imagem a construir.
+
+```
+cloudez_compose_build(deploy_id: "<deploy_id>")
+```
+
+Roda `docker compose build` no **diretório da release**, com o symlink ainda
+apontando para a versão anterior.
+
+**Antes do `finalize`, e é o ponto todo.** Enquanto o build roda — e num projeto
+de verdade ele leva minutos — o site inteiro segue no ar coerente: symlink
+antigo, container antigo. Construindo depois de ativar, como era antes, o
+servidor passa o build inteiro num estado misto, com os arquivos novos no disco e
+o container servindo os antigos. E se o build quebra, esse estado fica: o deploy
+retorna erro com a release já ativada, e o site continua na versão velha sem nada
+que o desfaça. **Aqui, build quebrado é deploy que não começou.**
+
+O build lê `releases/<release_id>` explicitamente, nunca `current` — era
+justamente a dependência do symlink que obrigava a ordem antiga.
+
+**`compose_build_failed`** é falha do **projeto**: Dockerfile, dependência,
+contexto. Leia o `hint`, que traz a saída do build. Corrija e recomece o deploy;
+nada foi ativado. É diferente do `compose_failed` do passo 8, que é quase sempre
+do servidor.
+
+`compose_missing` e `docker_missing` significam aqui o mesmo que no passo 8.
+
+Pular este passo **não quebra o deploy**: o passo 8 reconstrói sozinho. Só perde
+a garantia acima.
+
 ## 7. Ativar
 
 ```
@@ -226,10 +259,13 @@ retorno, só no navegador.
 cloudez_compose_up(deploy_id: "<deploy_id>")
 ```
 
-Roda `docker compose up -d --build` na release recém-ativada. **Depois do
-`finalize`, nunca antes** — o build lê o `current`, e invertendo a ordem a imagem
-sairia da release anterior: arquivos novos servindo código velho, sem sinal
-nenhum disso no retorno.
+Roda `docker compose up -d` na release recém-ativada. **Depois do `finalize`,
+nunca antes** — é este passo que troca o container em serviço, e invertida a
+ordem ele subiria a release anterior.
+
+Se o passo 6b rodou, a imagem já existe e o `up` só recria o container: segundos,
+em vez do build inteiro. Se não rodou, ele reconstrói com `--build` — o caminho
+antigo, correto e mais lento.
 
 O retorno traz `compose.project` e `compose.containers`, com `name`, `state` e
 `ports` de cada um. **Confira o `state`**: um container em `restarting` ou
@@ -309,11 +345,14 @@ um incidente — reporte imediatamente com todos os logs, sem tentar mais nada.
 
 **Em aplicação em container, o rollback não termina aqui.** Ele troca o symlink,
 e só: o container segue rodando a imagem construída no deploy anterior, então o
-site continua servindo o que você acabou de tentar tirar do ar. É preciso rodar
-`cloudez_compose_up` para a release de destino reconstruir a imagem a partir
-dela — e ela precisa de um `deploy_id`. Se não houver um deploy ativo para essa
-release, um `cloudez_begin_deploy` novo apontando para o mesmo `ref`, seguido de
-sync + finalize + compose_up, é o caminho que reconstrói e religa tudo.
+site continua servindo o que você acabou de tentar tirar do ar. É preciso
+reconstruir a imagem a partir da release de destino — `cloudez_compose_build`
+seguido de `cloudez_compose_up`, ambos com o `deploy_id` dela. O
+`cloudez_compose_build` aceita release já ativa justamente para isto.
+
+Se não houver um deploy ativo para essa release, um `cloudez_begin_deploy` novo
+apontando para o mesmo `ref`, seguido de sync + compose_build + finalize +
+compose_up, é o caminho que reconstrói e religa tudo.
 
 **Rode o passo 9 de novo depois do rollback.** Voltar o symlink é o remédio, não
 a confirmação — e um rollback que não devolve o site ao ar é o pior estado
@@ -354,6 +393,7 @@ destino dos arquivos criariam a pergunta "qual vale?" para a decisão mais
 destrutiva daqui, e ela só apareceria quando as duas divergissem.
 
 Todo o control plane já é tool do servidor MCP: `cloudez_begin_deploy`,
-`cloudez_finalize_deploy`, `cloudez_compose_up`, `cloudez_list_releases` e
+`cloudez_finalize_deploy`, `cloudez_compose_build`, `cloudez_compose_up`,
+`cloudez_list_releases` e
 `cloudez_rollback`. O passo 6 é a exceção permanente: o transporte (`cloudez-sync`)
 continua local, já que o MCP nunca transporta arquivos.

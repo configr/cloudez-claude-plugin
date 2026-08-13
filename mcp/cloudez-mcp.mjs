@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.17 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 1.0.18 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -20186,6 +20186,75 @@ function matchLine(out, tag) {
   }
   return "";
 }
+function resolveProject(state) {
+  const domain = state.domain || state.root.split("/")[0];
+  if (!domain) {
+    throw new ToolError(
+      "compose_failed",
+      "N\xE3o h\xE1 como nomear o projeto do Compose: estado sem dom\xEDnio e root sem segmento inicial.",
+      { hint: "Rode o deploy pelo cloudez_begin_deploy (que grava o dom\xEDnio no estado) ou confira o `root` no .cloudez.yaml." }
+    );
+  }
+  return projectName(domain);
+}
+function composePrelude(dir) {
+  return `set -e
+cd '${dir}'
+found=
+for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  [ -f "$f" ] && { found=$f; break; }
+done
+[ -n "$found" ] || exit 3
+if docker compose version >/dev/null 2>&1; then DC='docker compose'
+elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
+else exit 4; fi
+`;
+}
+function diagnose(out) {
+  if (/docker\.sock/.test(out) && /ermission denied/.test(out)) {
+    return "O usu\xE1rio do site n\xE3o tem acesso ao socket do Docker. Ele precisa entrar no grupo 'docker' no servidor \u2014 a\xE7\xE3o da Cloudez, n\xE3o do projeto. Confira com: getent group docker";
+  }
+  if (/iptables/.test(out) && /No chain\/target\/match/.test(out)) {
+    return "A integra\xE7\xE3o do Docker com o iptables est\xE1 quebrada no host: as chains DOCKER/DOCKER-FORWARD n\xE3o existem e nenhuma porta publicada funciona. Pe\xE7a \xE0 Cloudez um 'systemctl restart docker' \u2014 n\xE3o h\xE1 contorno no projeto que preserve o 'ports:' do compose.";
+  }
+  return void 0;
+}
+function throwPreludeError(code, releaseId) {
+  if (code === 3) {
+    throw new ToolError("compose_missing", `Nenhum arquivo de Compose na release ${releaseId}.`, {
+      hint: "O deploy publicou um diret\xF3rio sem compose.yaml/docker-compose.yml. Em site do tipo Container Docker, publique o diret\xF3rio do Compose (o contexto de build), n\xE3o a sa\xEDda de um build local."
+    });
+  }
+  if (code === 4) {
+    throw new ToolError("docker_missing", "O servidor n\xE3o tem docker compose nem docker-compose.", {
+      hint: "Isto \xE9 configura\xE7\xE3o do servidor, n\xE3o do projeto. Fale com a Cloudez."
+    });
+  }
+}
+async function composeBuild(deployId2) {
+  const state = loadState(deployId2);
+  if (state.status === "awaiting_upload") {
+    throw new ToolError(
+      "upload_incomplete",
+      `Deploy est\xE1 em '${state.status}'. Rode o sync antes de construir a imagem.`
+    );
+  }
+  const ssh = state.ssh;
+  const { root, release_id: releaseId } = state;
+  const project = resolveProject(state);
+  const build2 = composePrelude(`${root}/releases/${releaseId}`) + `$DC -p '${project}' build`;
+  const res = await sshRun(ssh, build2);
+  const out = `${res.stdout}
+${res.stderr}`;
+  if (res.code !== 0) {
+    throwPreludeError(res.code, releaseId);
+    throw new ToolError("compose_build_failed", `Falha ao construir a imagem da release ${releaseId}.`, {
+      hint: diagnose(out) ?? (out.trim() || void 0)
+    });
+  }
+  state.compose = { ...state.compose ?? { containers: [] }, project, built: true };
+  return saveState(state);
+}
 async function composeUp(deployId2) {
   const state = loadState(deployId2);
   if (state.status !== "succeeded") {
@@ -20196,53 +20265,22 @@ async function composeUp(deployId2) {
   }
   const ssh = state.ssh;
   const { root, release_id: releaseId } = state;
-  const domain = state.domain || root.split("/")[0];
-  if (!domain) {
-    throw new ToolError(
-      "compose_failed",
-      "N\xE3o h\xE1 como nomear o projeto do Compose: estado sem dom\xEDnio e root sem segmento inicial.",
-      { hint: "Rode o deploy pelo cloudez_begin_deploy (que grava o dom\xEDnio no estado) ou confira o `root` no .cloudez.yaml." }
-    );
-  }
-  const project = projectName(domain);
-  const up = `set -e
-cd '${root}/current'
-found=
-for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
-  [ -f "$f" ] && { found=$f; break; }
-done
-[ -n "$found" ] || exit 3
-if docker compose version >/dev/null 2>&1; then DC='docker compose'
-elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
-else exit 4; fi
-$DC -p '${project}' up -d --build --remove-orphans
+  const project = resolveProject(state);
+  const built = state.compose?.built === true;
+  const buildFlag = built ? "" : " --build";
+  const up = composePrelude(`${root}/current`) + `$DC -p '${project}' up -d${buildFlag} --remove-orphans
 $DC -p '${project}' ps --format 'PS\\t{{.Name}}\\t{{.State}}\\t{{.Ports}}'`;
   const res = await sshRun(ssh, up);
   const out = `${res.stdout}
 ${res.stderr}`;
   if (res.code !== 0) {
-    if (res.code === 3) {
-      throw new ToolError("compose_missing", `Nenhum arquivo de Compose na release ${releaseId}.`, {
-        hint: "O deploy publicou um diret\xF3rio sem compose.yaml/docker-compose.yml. Em site do tipo Container Docker, publique o diret\xF3rio do Compose (o contexto de build), n\xE3o a sa\xEDda de um build local."
-      });
-    }
-    if (res.code === 4) {
-      throw new ToolError("docker_missing", "O servidor n\xE3o tem docker compose nem docker-compose.", {
-        hint: "Isto \xE9 configura\xE7\xE3o do servidor, n\xE3o do projeto. Fale com a Cloudez."
-      });
-    }
-    let hint;
-    if (/docker\.sock/.test(out) && /ermission denied/.test(out)) {
-      hint = "O usu\xE1rio do site n\xE3o tem acesso ao socket do Docker. Ele precisa entrar no grupo 'docker' no servidor \u2014 a\xE7\xE3o da Cloudez, n\xE3o do projeto. Confira com: getent group docker";
-    } else if (/iptables/.test(out) && /No chain\/target\/match/.test(out)) {
-      hint = "A integra\xE7\xE3o do Docker com o iptables est\xE1 quebrada no host: as chains DOCKER/DOCKER-FORWARD n\xE3o existem e nenhuma porta publicada funciona. Pe\xE7a \xE0 Cloudez um 'systemctl restart docker' \u2014 n\xE3o h\xE1 contorno no projeto que preserve o 'ports:' do compose.";
-    }
+    throwPreludeError(res.code, releaseId);
     throw new ToolError("compose_failed", `Falha ao subir o container da release ${releaseId}.`, {
-      hint: hint ?? (out.trim() || void 0)
+      hint: diagnose(out) ?? (out.trim() || void 0)
     });
   }
   const containers = res.stdout.split("\n").map((line) => line.split("	")).filter((f) => f[0] === "PS" && f.length === 4).map((f) => ({ name: f[1], state: f[2], ports: f[3] }));
-  state.compose = { project, containers };
+  state.compose = { project, built, containers };
   return saveState(state);
 }
 
@@ -20671,10 +20709,28 @@ server.registerTool(
   }
 );
 server.registerTool(
+  "cloudez_compose_build",
+  {
+    title: "Construir a imagem da release sincronizada",
+    description: "Constr\xF3i a imagem com `docker compose build` a partir do diret\xF3rio da release, ANTES da troca do symlink. Chame em site cuja aplica\xE7\xE3o roda em container, depois do cloudez-sync e antes do cloudez_finalize_deploy. Enquanto o build roda o site segue no ar na vers\xE3o anterior, e um build que falha n\xE3o deixa nada pela metade \u2014 nenhum arquivo foi ativado ainda. Sem este passo o cloudez_compose_up reconstr\xF3i sozinho, o que tamb\xE9m funciona, mas com o site num estado misto durante todo o build. Falha aqui \xE9 quase sempre do projeto (Dockerfile, depend\xEAncia).",
+    inputSchema: object({
+      deploy_id: string2().describe("deploy_id de um deploy j\xE1 sincronizado (status uploaded)")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ deploy_id }) => {
+    try {
+      return okResult({ ...await composeBuild(deploy_id) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
   "cloudez_compose_up",
   {
     title: "Subir o container da release ativa",
-    description: "Sobe o container da release ativa com `docker compose up -d --build` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy \u2014 o build l\xEA `current`. Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
+    description: "Sobe o container da release ativa com `docker compose up -d` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy. Se o cloudez_compose_build j\xE1 rodou, sobe a imagem pronta; se n\xE3o, reconstr\xF3i com `--build` (mais lento, e o site fica em estado misto durante o build). Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
     inputSchema: object({
       deploy_id: string2().describe("deploy_id de uma release j\xE1 finalizada (status succeeded)")
     }),

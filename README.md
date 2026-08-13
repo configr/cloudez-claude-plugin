@@ -154,6 +154,11 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
       `cloudez_rollback` — todo o control plane agora é MCP; em `bin/` só resta o
       transporte `cloudez-sync`. Suíte do MCP em 113 testes (ssh e API falsos)
 - [x] Servidor MCP embutido no plugin (`mcp/cloudez-mcp.mjs`), sem passo de instalação
+- [x] Build antes da ativação: `cloudez_compose_build` constrói a imagem a partir
+      de `releases/<id>` com o symlink ainda apontando para a versão anterior, e o
+      `cloudez_compose_up` deixa de reconstruir. Encurta a janela em que o disco e
+      o container discordam, de "o build inteiro" para "a recriação do container",
+      e faz build quebrado ser deploy que não começou (contrato §3.8)
 
 ## Autenticação
 

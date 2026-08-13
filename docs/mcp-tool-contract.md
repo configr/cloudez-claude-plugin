@@ -625,10 +625,59 @@ não pode compartilhar código com essa.
 
 ---
 
-### 3.8 `cloudez_compose_up` — **mutating**
+### 3.8 `cloudez_compose_build` — **mutating**
 
-Sobe o container da release ativa: `docker compose up -d --build` no servidor.
-Só faz sentido em site cuja aplicação roda em container.
+Constrói a imagem da release sincronizada: `docker compose build` no diretório
+`releases/<release_id>`, **antes** da troca do symlink.
+
+Existe pela **ordem**, não pela operação. Construir depois de ativar — como o
+`compose_up` fazia sozinho — deixa o servidor num estado misto durante o build
+inteiro: os arquivos novos já estão no disco e o container ainda serve os
+antigos. Num projeto real isso são minutos. Pior: um build que quebra deixa esse
+estado para trás, com a release ativada e o site na versão velha, e nada no
+retorno desfaz isso. Construindo antes, o site segue coerente na versão anterior
+enquanto o build roda, e **build quebrado é deploy que não começou**.
+
+```jsonc
+// input
+{ "type": "object", "properties": { "deploy_id": { "type": "string" } },
+  "required": ["deploy_id"], "additionalProperties": false }
+```
+
+```jsonc
+// output — o estado do deploy acrescido de `compose.built`
+{ "deploy_id": "dpl_9f8e7d", "status": "uploaded",
+  "compose": { "project": "meusite-com-br", "built": true, "containers": [] } }
+```
+
+**Lê `releases/<release_id>`, nunca `current`.** Era a dependência do symlink que
+obrigava a ordem antiga: com o caminho explícito, "construir antes" deixa de
+significar "construir a release anterior", e a regra se inverte sem perder nada.
+
+**Aceita `uploaded` e `succeeded`; recusa `awaiting_upload`** com
+`upload_incomplete`. Sem o sync o diretório da release está vazio e não há
+contexto de build. `succeeded` é aceito de propósito: reconstruir uma release já
+ativa é exatamente o que o rollback em container precisa (§3.12).
+
+**`compose_build_failed` é código separado de `compose_failed`**, e a divisão é
+por quem consegue agir: falha de **build** é quase sempre do projeto (Dockerfile,
+dependência, contexto), e falha de **up** é quase sempre do servidor (socket do
+Docker, iptables, porta ocupada). Um código só mandaria procurar no lugar errado
+metade das vezes. `compose_missing` e `docker_missing` significam aqui o mesmo
+que no `compose_up`, e o `docker.sock` negado é diagnosticado nos dois — o build
+também fala com o daemon.
+
+**O passo é opcional.** Sem ele o `compose_up` reconstrói, o que continua
+correto; só se perde a garantia acima. O que **não** é opcional é a
+correspondência do nome de projeto: as duas metades derivam o `-p` do mesmo
+domínio, e é por essa tag que o `up` encontra a imagem que o build produziu.
+
+---
+
+### 3.9 `cloudez_compose_up` — **mutating**
+
+Sobe o container da release ativa: `docker compose up -d` no servidor. Só faz
+sentido em site cuja aplicação roda em container.
 
 Existe porque **publicar arquivos não põe uma aplicação em container no ar.** O
 nginx da Cloudez encaminha `/` para uma porta local (127.0.0.1:8080 por padrão) e
@@ -654,10 +703,17 @@ anterior nos seguintes — falha invisível para quem lê o JSON de retorno.
   } }
 ```
 
-**Roda depois do `finalize`, nunca antes.** O build lê `current`; invertida a
-ordem, a imagem sai da release anterior e o deploy publica arquivos novos
-servindo código velho — sem sinal disso em lugar nenhum. Chamar com o deploy em
-qualquer estado que não seja `succeeded` falha com `activation_incomplete`.
+**Roda depois do `finalize`, nunca antes.** É este passo que troca o container em
+serviço, e invertida a ordem ele subiria a release anterior. Chamar com o deploy
+em qualquer estado que não seja `succeeded` falha com `activation_incomplete`.
+
+**`--build` só quando a imagem não foi construída antes.** Com
+`compose.built: true` no estado — a marca que o `cloudez_compose_build` (§3.8)
+deixa — o `up` sobe a imagem pronta e o container é recriado em segundos. Sem a
+marca ele reconstrói, e o fallback não é cosmético: subir sem `--build` quando
+nada foi construído reaproveitaria em silêncio a imagem do deploy **anterior**
+nos projetos cujo compose fixa um `image:`, e o site serviria código velho com
+JSON de sucesso.
 
 **O nome do projeto vem do domínio, não do diretório**, e isso é correção de bug.
 Sem `-p`, o Compose nomeia o projeto pelo diretório — que aqui é sempre `current`.
@@ -705,11 +761,12 @@ host`, troca um defeito do servidor por um acoplamento permanente a ele.
 
 **O rollback também precisa desta tool.** Ele troca o symlink e só; a imagem
 continua sendo a do deploy anterior, e o site segue servindo o que se tentou tirar
-do ar. Voltar uma release é `cloudez_rollback` seguido de `cloudez_compose_up`.
+do ar. Voltar uma release é `cloudez_rollback` seguido de `cloudez_compose_build`
+e `cloudez_compose_up`, ambos com o `deploy_id` da release de destino.
 
 ---
 
-### 3.9 `cloudez_get_deploy_status` — read-only
+### 3.10 `cloudez_get_deploy_status` — read-only
 
 Consulta o estado de um deploy. Usado para polling quando `finalize` é
 assíncrono, e para inspeção posterior.
@@ -736,7 +793,7 @@ assíncrono, e para inspeção posterior.
 
 ---
 
-### 3.10 `cloudez_list_releases` — read-only
+### 3.11 `cloudez_list_releases` — read-only
 
 Necessária para o rollback ser dirigível pelo modelo (escolher para qual release
 voltar) e para auditoria.
@@ -766,7 +823,7 @@ o alvo de um rollback já foi limpo, `rollback` precisa falhar com
 
 ---
 
-### 3.11 `cloudez_rollback` — **mutating**
+### 3.12 `cloudez_rollback` — **mutating**
 
 Volta o symlink `current` para uma release anterior.
 
@@ -796,7 +853,7 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.12 `cloudez_health_check` — read-only
+### 3.13 `cloudez_health_check` — read-only
 
 Faz uma requisição HTTP ao site e devolve o que voltou. **Única tool que fala com
 o site, e não com a API** — e a única que não manda credencial nenhuma: o que se
@@ -857,7 +914,7 @@ como resultado preserva a latência e as tentativas — que é o que distingue
 
 ---
 
-### 3.13 Fora do escopo, por enquanto
+### 3.14 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:
@@ -1031,7 +1088,7 @@ não apagadas, porque uma pergunta removida volta a ser feita.
    continua em duas etapas, e o rollback troca o symlink.
 4. ~~**Alguma stack precisa de restart/reload depois da troca do symlink?**~~
    **Container precisa; estático não.** É por isso que existe o
-   `cloudez_compose_up` (seção 3.8) e não um campo no `finalize`: a troca do
+   `cloudez_compose_up` (seção 3.9) e não um campo no `finalize`: a troca do
    symlink diz ao Docker QUAL código usar, e subir o container é um passo
    próprio, com falhas próprias.
 5. ~~**O `finalize` é síncrono?**~~ **É.** Nenhuma execução real precisou de
