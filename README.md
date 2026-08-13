@@ -301,6 +301,7 @@ depois é substituição, não reescrita.
 | `cloudez-begin-deploy` | `cloudez_begin_deploy` |
 | `cloudez-sync` (Go) | *(nenhuma — o transporte fica sempre local)* |
 | `cloudez-finalize-deploy` | `cloudez_finalize_deploy` |
+| `cloudez-compose-up` | `cloudez_compose_up` |
 | `cloudez-list-releases` | `cloudez_list_releases` |
 | `cloudez-rollback` | `cloudez_rollback` |
 

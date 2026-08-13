@@ -831,3 +831,118 @@ ssh: {host: srv.example.com, user: deploy, port: 22}'
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "no_previous_release" ]
 }
+
+# ------------------------------------------------------------- compose-up --
+#
+# Publicar arquivos nao poe uma aplicacao em container no ar: o nginx da Cloudez
+# encaminha para uma porta local e quem escuta ali e o container. Sem este passo
+# o deploy termina em `succeeded` com o site em 502 — falha que so aparece no
+# navegador.
+
+# Ordem invertida nao e detalhe de estilo: o build le `current`, entao rodar
+# antes do finalize construiria a imagem a partir da release ANTERIOR, e o
+# deploy publicaria arquivos novos servindo codigo velho sem sinal disso.
+@test "compose-up antes do finalize: activation_incomplete" {
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  run cloudez-compose-up "$d"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "activation_incomplete" ]
+}
+
+# O daemon do Docker e UM SO para todos os sites da maquina. Sem `-p`, o Compose
+# nomeia o projeto pelo diretorio — sempre `current` —, e o deploy de um site
+# derrubaria o container de outro, com `--remove-orphans` terminando o servico.
+@test "o projeto do compose vem do dominio, nunca do diretorio" {
+  d=$(finalized_deploy)
+  run cloudez-compose-up "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .compose.project)" = "staging-example-com" ]
+  grep -q -- "-p 'staging-example-com'" "$MOCK_LOG"
+  ! grep -qE -- "-p 'current'" "$MOCK_LOG"
+}
+
+@test "compose-up roda em current e reconstroi a imagem" {
+  d=$(finalized_deploy)
+  run cloudez-compose-up "$d"
+  [ "$status" -eq 0 ]
+  grep -q "cd '/srv/staging/current'" "$MOCK_LOG"
+  # Sem --build o compose reaproveita a imagem anterior e o deploy nao muda nada.
+  grep -q -- "up -d --build" "$MOCK_LOG"
+}
+
+# Um container em `restarting` e deploy fracassado com JSON de sucesso: quem
+# chama precisa do estado para conferir, nao so do exit code.
+@test "os containers do ps entram no JSON" {
+  d=$(finalized_deploy)
+  MOCK_SSH_STDOUT=$'#8 exporting layers done\nPS\tweb-1\trunning\t0.0.0.0:8080->80/tcp' \
+    run cloudez-compose-up "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" '.compose.containers | length')" = "1" ]
+  [ "$(jq_field "$output" .compose.containers[0].name)"  = "web-1" ]
+  [ "$(jq_field "$output" .compose.containers[0].state)" = "running" ]
+  [ "$(jq_field "$output" .compose.containers[0].ports)" = "0.0.0.0:8080->80/tcp" ]
+}
+
+# O build imprime TUDO que os passos `RUN` produziram, e o inventario sai do
+# mesmo fluxo. Um filtro por contagem de campos aceitaria qualquer linha com dois
+# tabs — e ferramenta com saida tabular dentro de um RUN produz varias. O
+# fantasma nao seria so ruido: o commands/deploy.md manda conferir o `state`
+# desses containers.
+@test "linha de build com tabs nao vira container fantasma" {
+  d=$(finalized_deploy)
+  MOCK_SSH_STDOUT=$'#12 [build 3/5]\tRUN npm ci\t142.3s\nPS\tweb-1\trunning\t0.0.0.0:8080->80/tcp' \
+    run cloudez-compose-up "$d"
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" '.compose.containers | length')" = "1" ]
+  [ "$(jq_field "$output" .compose.containers[0].name)" = "web-1" ]
+}
+
+# Aviso de conexao do ssh, que aparece no primeiro deploy a um host novo.
+@test "aviso do ssh nao vira container" {
+  d=$(finalized_deploy)
+  MOCK_SSH_STDERR_FIRST='Warning: Permanently added the host to the list of known hosts.' \
+  MOCK_SSH_STDOUT=$'PS\tweb-1\trunning\t0.0.0.0:8080->80/tcp' \
+    run cloudez-compose-up "$d"
+  [ "$(jq_field "$output" '.compose.containers | length')" = "1" ]
+}
+
+# Sem compose na release, quase sempre o passo 4 publicou a saida de um build em
+# vez do contexto. Erro nomeado em vez de log de docker para o usuario decifrar.
+@test "release sem arquivo de compose: compose_missing" {
+  d=$(finalized_deploy)
+  MOCK_SSH_EXIT=3 run cloudez-compose-up "$d"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "compose_missing" ]
+}
+
+@test "servidor sem docker compose: docker_missing" {
+  d=$(finalized_deploy)
+  MOCK_SSH_EXIT=4 run cloudez-compose-up "$d"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "docker_missing" ]
+}
+
+# Os dois modos de falha abaixo sao acao da Cloudez, nao do projeto, e a mensagem
+# crua do Docker nao diz isso: "permission denied ... docker.sock" parece
+# problema de arquivo, e o erro de iptables parece problema de rede do container.
+@test "socket negado vira hint sobre o grupo docker" {
+  d=$(finalized_deploy)
+  MOCK_SSH_EXIT=1 \
+    MOCK_SSH_STDERR='permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock' \
+    run cloudez-compose-up "$d"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "compose_failed" ]
+  [[ "$(jq_field "$output" .error.hint)" == *"grupo 'docker'"* ]]
+}
+
+@test "iptables quebrado vira hint sobre reiniciar o daemon" {
+  d=$(finalized_deploy)
+  MOCK_SSH_EXIT=1 \
+    MOCK_SSH_STDERR='iptables failed: iptables --wait -t nat -A DOCKER: iptables: No chain/target/match by that name.' \
+    run cloudez-compose-up "$d"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "compose_failed" ]
+  [[ "$(jq_field "$output" .error.hint)" == *"systemctl restart docker"* ]]
+}

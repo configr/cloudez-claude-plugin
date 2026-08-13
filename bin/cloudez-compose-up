@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Uso: cloudez-compose-up <deploy_id>
+#
+# Sobe o container da release ativa: `docker compose up -d --build` no servidor.
+# Equivalente a tool MCP cloudez_compose_up.
+#
+# Existe porque publicar os arquivos NAO poe uma aplicacao em container no ar. O
+# nginx da Cloudez encaminha `/` para uma porta local (127.0.0.1:8080 por padrao)
+# e quem escuta ali e o container do usuario. Sem este passo o deploy termina em
+# `succeeded` e o site responde 502 no primeiro deploy, ou segue servindo a
+# release anterior nos seguintes — falha silenciosa do ponto de vista de quem
+# leu o JSON de retorno.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
+deploy_id="${1:?uso: cloudez-compose-up <deploy_id>}"
+
+state=$(load_state "$deploy_id")
+environment=$(printf '%s' "$state" | jq -r .environment)
+site=$(site_config "$environment")
+
+# Depois do finalize, nao antes: o build precisa enxergar `current` ja apontando
+# para a release nova. Rodando antes, o compose construiria a imagem a partir da
+# release ANTERIOR e o deploy publicaria arquivos novos servindo codigo velho —
+# divergencia que nao aparece em lugar nenhum do retorno.
+status=$(printf '%s' "$state" | jq -r .status)
+[ "$status" = "succeeded" ] \
+  || die activation_incomplete "Deploy esta em '$status'. Rode cloudez-finalize-deploy antes de subir o container."
+
+release_id=$(printf '%s' "$state" | jq -r .release_id)
+root=$(printf '%s' "$state" | jq -r .root)
+domain=$(cfg "$site" .domain)
+
+[ -n "$domain" ] \
+  || die config_invalid "Ambiente '$environment' nao tem domain definido em $(resolve_config)."
+
+# Nome do projeto derivado do DOMINIO, e isso e correcao de bug, nao preferencia.
+#
+# Sem `-p`, o Compose nomeia o projeto pelo diretorio — que aqui e sempre
+# `current`. O daemon do Docker e UM SO para todos os sites da maquina, entao
+# dois sites deste plugin no mesmo servidor virariam o mesmo projeto `current`:
+# o deploy do segundo derrubaria os containers do primeiro, e o `--remove-orphans`
+# terminaria o servico. O dominio e unico por site e resolve isso na origem.
+#
+# Consequencia aceita: um `name:` no compose do usuario e sobreposto. Perder o
+# nome escolhido e barato; derrubar o site de outra pessoa nao e.
+project=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/-*$//')
+
+require_ssh_target "$site"
+
+# `docker compose` (plugin v2+) com queda para `docker-compose` (binario v1): os
+# dois convivem em servidor gerenciado, e qual esta disponivel nao e escolha do
+# usuario.
+#
+# Os codigos de saida distinguem o que o operador precisa fazer. Um
+# "compose_failed" generico mandaria ele ler log de build para descobrir que o
+# problema era nao ter Docker.
+up="set -e
+  cd '$root/current'
+  found=
+  for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+    [ -f \"\$f\" ] && { found=\$f; break; }
+  done
+  [ -n \"\$found\" ] || exit 3
+  if docker compose version >/dev/null 2>&1; then DC='docker compose'
+  elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
+  else exit 4; fi
+  \$DC -p '$project' up -d --build --remove-orphans
+  \$DC -p '$project' ps --format 'PS\t{{.Name}}\t{{.State}}\t{{.Ports}}'"
+
+# `out=$(...) || rc=$?` e nao `if ! out=$(...)`: dentro do `if !` o `$?` e o
+# status da NEGACAO, sempre 0, e os codigos 3 e 4 do comando remoto se perderiam.
+rc=0
+out=$(ssh_run "$site" "$up" 2>&1) || rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  case "$rc" in
+    3) die compose_missing "Nenhum arquivo de Compose na release $release_id." \
+         '{"hint":"O deploy publicou um diretorio sem compose.yaml/docker-compose.yml. Em site do tipo Container Docker, publique o diretorio do Compose (o contexto de build), nao a saida de um build local."}' ;;
+    4) die docker_missing "O servidor nao tem docker compose nem docker-compose." \
+         '{"hint":"Isto e configuracao do servidor, nao do projeto. Fale com a Cloudez."}' ;;
+  esac
+
+  # Dois modos de falha que ja custaram caro e nao se resolvem no projeto. O
+  # diagnostico vive aqui porque a mensagem crua do Docker nao diz o que fazer:
+  # "permission denied ... docker.sock" parece problema de arquivo, e o erro de
+  # iptables parece problema de rede do container.
+  hint=""
+  case "$out" in
+    *"docker.sock"*"ermission denied"*|*"ermission denied"*"docker.sock"*)
+      hint="O usuario do site nao tem acesso ao socket do Docker. Ele precisa entrar no grupo 'docker' no servidor — acao da Cloudez, nao do projeto. Confira com: getent group docker" ;;
+    *"iptables"*"No chain/target/match"*)
+      hint="A integracao do Docker com o iptables esta quebrada no host: as chains DOCKER/DOCKER-FORWARD nao existem, e nenhuma porta publicada funciona. Acontece quando o firewall e recarregado depois que o dockerd subiu. Peca a Cloudez um 'systemctl restart docker' — nao ha contorno no projeto que preserve o 'ports:' do compose." ;;
+  esac
+
+  die compose_failed "Falha ao subir o container da release $release_id." \
+    "$(jq -n --arg l "$out" --arg h "$hint" \
+        '{logs: $l} | if $h == "" then . else . + {hint: $h} end')"
+fi
+
+# O `ps` e a ultima coisa que o comando remoto imprime, mas o build vem antes no
+# mesmo fluxo — e nele vai TUDO que os passos `RUN` imprimiram.
+#
+# O filtro e por MARCADOR, nao por formato. Contar campos separados por TAB
+# parece suficiente e nao e: qualquer linha de build com dois tabs — e um `RUN`
+# que rode ferramenta com saida tabular produz varias — viraria um container
+# fantasma no inventario, com `state` inventado. O commands/deploy.md manda o
+# modelo conferir esse `state`, entao o fantasma nao seria so ruido.
+#
+# Mesma licao do cloudez-list-releases, onde um aviso do ssh virava release.
+containers=$(printf '%s\n' "$out" \
+  | awk -F'\t' '$1 == "PS" && NF == 4 {print}' \
+  | jq -R -s 'split("\n") | map(select(length > 0) | split("\t")
+              | {name: .[1], state: .[2], ports: .[3]})')
+
+printf '%s' "$state" \
+  | jq --arg project "$project" --argjson containers "${containers:-[]}" \
+      '.compose = {project: $project, containers: $containers}' \
+  | tee "$(state_path "$deploy_id")"

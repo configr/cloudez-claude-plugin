@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-login:*), Bash(cloudez-compose:*), Bash(cloudez-begin-deploy:*), Bash(cloudez-sync:*), Bash(cloudez-finalize-deploy:*), Bash(cloudez-rollback:*), Bash(cloudez-list-releases:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, Bash(cloudez-login:*), Bash(cloudez-compose:*), Bash(cloudez-begin-deploy:*), Bash(cloudez-sync:*), Bash(cloudez-finalize-deploy:*), Bash(cloudez-compose-up:*), Bash(cloudez-rollback:*), Bash(cloudez-list-releases:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -48,7 +48,7 @@ cloudez_get_site(domain: "<domain>")
 
 **`match: "exact"`** — é o alvo. **Guarde o bloco `ssh`**: `host`, `user` e
 `port` são o destino do deploy, e os adaptadores os recebem por ambiente nos
-passos 5 a 8.
+passos 5 a 9.
 
 Esses dados não estão no `.cloudez.yaml` de propósito. Uma cópia do host num
 arquivo versionado envelhece: se a Cloudez mover o site de servidor, o valor
@@ -183,7 +183,57 @@ Os dois mais recentes sempre ficam.
 `previous_release_id` **não aparece** quando não havia release anterior — é o
 caso do primeiro deploy do site. Campo ausente, não string vazia.
 
-## 8. Rollback
+## 8. Subir o container — só quando `compose: true`
+
+**Aplicação tradicional para aqui.** Trocar o symlink já pôs o conteúdo no ar, e
+não há container nenhum a subir. Pule este passo.
+
+**Aplicação em container não.** Publicar os arquivos não põe uma aplicação em
+container no ar: o nginx da Cloudez encaminha `/` para uma porta local, e quem
+escuta ali é o container do usuário. Sem este passo o deploy termina em
+`succeeded` com o site respondendo **502** no primeiro deploy, ou servindo a
+**release anterior** nos seguintes — falha que não aparece em nenhum JSON de
+retorno, só no navegador.
+
+```sh
+CLOUDEZ_SSH_HOST=<ssh.host> CLOUDEZ_SSH_USER=<ssh.user> CLOUDEZ_SSH_PORT=<ssh.port> \
+  cloudez-compose-up <deploy_id>
+```
+
+Roda `docker compose up -d --build` na release recém-ativada. **Depois do
+`finalize`, nunca antes** — o build lê o `current`, e invertendo a ordem a imagem
+sairia da release anterior: arquivos novos servindo código velho, sem sinal
+nenhum disso no retorno.
+
+O retorno traz `compose.project` e `compose.containers`, com `name`, `state` e
+`ports` de cada um. **Confira o `state`**: um container em `restarting` ou
+`exited` é deploy fracassado com JSON de sucesso.
+
+O `project` vem do domínio, não do diretório. Isso sobrepõe um `name:` que o
+usuário tenha no compose dele, e é deliberado — o daemon do Docker é um só para
+todos os sites da máquina, e o nome derivado do diretório seria `current` para
+todos eles. Dois sites deste plugin no mesmo servidor viravam o mesmo projeto, e
+o deploy de um derrubava o container do outro.
+
+Erros que **não se resolvem no projeto** e cujo `hint` você deve repassar como
+está — os dois são ação da Cloudez, não do usuário:
+
+- **`compose_failed` com permissão negada no `docker.sock`** — o usuário do site
+  não está no grupo `docker`;
+- **`compose_failed` com `iptables: No chain/target/match`** — as chains do
+  Docker sumiram do host e nenhuma porta publicada funciona. Não tente contornar
+  com `network_mode: host`: resolve o sintoma e amarra o projeto a um defeito
+  daquele servidor.
+
+**`compose_missing`** é outra coisa: o deploy publicou um diretório sem Compose.
+Quase sempre significa que o passo 4 publicou a saída de um build em vez do
+contexto de build. O container continua rodando a versão anterior.
+
+**Verifique o site depois.** Este é o único passo cujo sucesso não se comprova
+pelo próprio retorno: o container pode subir e a aplicação não responder. Bata no
+domínio e confira o que voltou antes de declarar o deploy pronto.
+
+## 9. Rollback
 
 ```sh
 CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
@@ -195,6 +245,12 @@ CLOUDEZ_SSH_HOST=... CLOUDEZ_SSH_USER=... CLOUDEZ_SSH_PORT=... \
 O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Se o
 rollback também falhar, isso é um incidente — reporte imediatamente com todos os
 logs que você tiver, sem tentar mais nada.
+
+**Em aplicação em container, o rollback não termina aqui.** Ele troca o symlink,
+e só: o container segue rodando a imagem construída no deploy anterior, então o
+site continua servindo o que você acabou de tentar tirar do ar. Rode o passo 8
+novamente, com o `deploy_id` da release para onde voltou, para reconstruir a
+imagem a partir dela.
 
 ## Como reportar
 

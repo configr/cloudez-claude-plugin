@@ -53,6 +53,20 @@ YAML
   git commit -qm "init"
 }
 
+# finalized_deploy — deploy levado ate a ativacao, que e onde o passo de
+# container comeca. Imprime o deploy_id.
+#
+# Existe porque o cloudez-compose-up so age sobre release ja ativa, e repetir
+# begin+sync+finalize dentro de cada teste esconderia o que ele de fato afirma.
+finalized_deploy() {
+  local d
+  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
+  mkdir -p dist && touch dist/index.html
+  cloudez-sync "$d" dist >/dev/null
+  cloudez-finalize-deploy "$d" >/dev/null
+  printf '%s' "$d"
+}
+
 teardown() {
   [ -n "${TEST_TMP:-}" ] && [ -d "$TEST_TMP" ] && rm -rf "$TEST_TMP"
   return 0

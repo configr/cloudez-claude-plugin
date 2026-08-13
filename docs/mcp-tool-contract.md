@@ -593,7 +593,81 @@ não pode compartilhar código com essa.
 
 ---
 
-### 3.8 `cloudez_get_deploy_status` — read-only
+### 3.8 `cloudez_compose_up` — **mutating**
+
+Sobe o container da release ativa: `docker compose up -d --build` no servidor.
+Só faz sentido em site cuja aplicação roda em container.
+
+Existe porque **publicar arquivos não põe uma aplicação em container no ar.** O
+nginx da Cloudez encaminha `/` para uma porta local (127.0.0.1:8080 por padrão) e
+quem escuta ali é o container do usuário. Sem este passo o deploy termina em
+`succeeded` e o site responde 502 no primeiro deploy, ou segue servindo a release
+anterior nos seguintes — falha invisível para quem lê o JSON de retorno.
+
+```jsonc
+// input
+{ "type": "object", "properties": { "deploy_id": { "type": "string" } },
+  "required": ["deploy_id"], "additionalProperties": false }
+```
+
+```jsonc
+// output — o estado do deploy acrescido de `compose`
+{ "deploy_id": "dpl_9f8e7d", "status": "succeeded",
+  "compose": {
+    "project": "meusite-com-br",
+    "containers": [
+      { "name": "meusite-com-br-web-1", "state": "running",
+        "ports": "0.0.0.0:8080->80/tcp" }
+    ]
+  } }
+```
+
+**Roda depois do `finalize`, nunca antes.** O build lê `current`; invertida a
+ordem, a imagem sai da release anterior e o deploy publica arquivos novos
+servindo código velho — sem sinal disso em lugar nenhum. Chamar com o deploy em
+qualquer estado que não seja `succeeded` falha com `activation_incomplete`.
+
+**O nome do projeto vem do domínio, não do diretório**, e isso é correção de bug.
+Sem `-p`, o Compose nomeia o projeto pelo diretório — que aqui é sempre `current`.
+O daemon do Docker é um só para todos os sites da máquina, então dois sites deste
+plugin no mesmo servidor virariam o mesmo projeto: o deploy de um derrubaria os
+containers do outro, e o `--remove-orphans` terminaria o serviço. A consequência
+aceita é sobrepor um `name:` que o usuário tenha no compose dele — perder o nome
+escolhido é barato, derrubar o site de outra pessoa não é.
+
+**O `state` de cada container faz parte do retorno** porque `up` bem-sucedido não
+é aplicação no ar: um container em `restarting` ou `exited` é deploy fracassado
+com JSON de sucesso. Quem chama confere.
+
+**O inventário de containers é separado da saída do build por um marcador**, não
+pelo formato das linhas. Os dois saem no mesmo fluxo, e no build vai tudo que os
+passos `RUN` imprimiram: um filtro por contagem de campos aceitaria qualquer
+linha de log com o mesmo número de separadores, e ela viraria um container
+fantasma com `state` inventado — que quem chama foi instruído a conferir. É a
+mesma regra que vale para `CURRENT`, `MOVED` e `PRUNED` nos outros adaptadores.
+
+Erros próprios, e a divisão é por **quem consegue agir**:
+
+| Código | Causa | Quem resolve |
+|---|---|---|
+| `compose_missing` | a release não tem arquivo de Compose | o usuário — quase sempre publicou a saída de um build em vez do contexto |
+| `docker_missing` | o servidor não tem `docker compose` nem `docker-compose` | a Cloudez |
+| `compose_failed` + `docker.sock` negado | o usuário do site não está no grupo `docker` | a Cloudez |
+| `compose_failed` + `iptables: No chain/target/match` | as chains do Docker sumiram do host; nenhuma porta publicada funciona | a Cloudez (`systemctl restart docker`) |
+
+Os dois últimos vêm com `hint` explicando a ação, porque a mensagem crua do
+Docker aponta para o lugar errado: permissão no socket parece problema de
+arquivo, e o erro de iptables parece problema de rede do container. Nenhum dos
+dois se resolve no projeto — e o contorno óbvio para o segundo, `network_mode:
+host`, troca um defeito do servidor por um acoplamento permanente a ele.
+
+**O rollback também precisa desta tool.** Ele troca o symlink e só; a imagem
+continua sendo a do deploy anterior, e o site segue servindo o que se tentou tirar
+do ar. Voltar uma release é `cloudez_rollback` seguido de `cloudez_compose_up`.
+
+---
+
+### 3.9 `cloudez_get_deploy_status` — read-only
 
 Consulta o estado de um deploy. Usado para polling quando `finalize` é
 assíncrono, e para inspeção posterior.
@@ -620,7 +694,7 @@ assíncrono, e para inspeção posterior.
 
 ---
 
-### 3.9 `cloudez_list_releases` — read-only
+### 3.10 `cloudez_list_releases` — read-only
 
 Necessária para o rollback ser dirigível pelo modelo (escolher para qual release
 voltar) e para auditoria.
@@ -650,7 +724,7 @@ o alvo de um rollback já foi limpo, `rollback` precisa falhar com
 
 ---
 
-### 3.10 `cloudez_rollback` — **mutating**
+### 3.11 `cloudez_rollback` — **mutating**
 
 Volta o symlink `current` para uma release anterior.
 
@@ -680,7 +754,7 @@ Volta o symlink `current` para uma release anterior.
 
 ---
 
-### 3.11 Fora do escopo, por enquanto
+### 3.12 Fora do escopo, por enquanto
 
 Duas tools saíram desta proposta junto com as features correspondentes do
 plugin. Ficam registradas para não serem redescobertas do zero:
