@@ -45,6 +45,7 @@ fi
 step "build (go)"
 if command -v go >/dev/null 2>&1; then
   go vet ./... || rc=1
+  go test ./... || rc=1
   ./build.sh || rc=1
 else
   missing "go"
