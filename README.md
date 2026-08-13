@@ -12,19 +12,21 @@ Três camadas, deliberadamente separadas:
 | **Comandos** | procedimento — a sequência de cada operação | `commands/` |
 | **Skill** | porta de entrada em linguagem natural; encaminha ao comando | `skills/deploy/SKILL.md` |
 | **Transporte** | envio dos arquivos | `cmd/sync/` (Go) |
-| **Adaptadores** | resto da execução, até o MCP chegar | `bin/` (shell, transitório) |
+| **Adaptadores** | o que depende da máquina local | `bin/` (shell) |
 
 O MCP é o control plane: descobre o destino, registra a release, ativa e faz
 rollback. Ele nunca move bytes.
 
 ### Por que duas linguagens
 
-O `bin/` em shell é transitório — quando o servidor MCP entrar, `begin-deploy`,
-`finalize-deploy`, `rollback` e `list-releases` viram tools do servidor e somem
-daqui. Não vale reescrever código com data marcada.
+O `bin/` em shell era transitório e encolheu: `begin-deploy`,
+`finalize-deploy`, `rollback`, `list-releases` e `compose-up` viraram tools do
+servidor MCP e saíram daqui. O que sobrou é o que **não** migra, por depender da
+máquina de quem publica — coletar o token (exige TTY), ler `~/.ssh`, escrever o
+`.cloudez.yaml`, inspecionar o diretório do projeto.
 
-Uma peça **não** migra, e é por isso que está em Go: o `sync`, porque o
-transporte fica sempre local.
+Uma peça não migra por outra razão, e é por isso que está em Go: o `sync`,
+porque o transporte fica sempre local.
 
 Ele usa `tar` em stream sobre `ssh`, não `rsync`: o diretório de release está
 sempre vazio, então o delta transfer não tem contra o que comparar, e
@@ -113,7 +115,7 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Esqueleto do plugin (`plugin.json`, `.mcp.json`, `/deploy`)
 - [x] Skill de deploy como porta em linguagem natural (`skills/deploy/SKILL.md`)
 - [x] Comandos `/cloudez:setup` e `/cloudez:login` (`commands/`)
-- [x] Adaptadores `bin/` para trabalhar antes do MCP ficar pronto
+- [x] Control plane inteiro no MCP; o `bin/` fica só com o que é local
 - [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
 - [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
 - [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
@@ -301,20 +303,16 @@ já passaram despercebidos por só termos testado no outro.
 
 ## Adaptadores `bin/`
 
-Enquanto o servidor MCP não fica pronto, a skill chama estes scripts via Bash.
-Cada um imprime JSON no mesmo formato da tool MCP equivalente, então a troca
-depois é substituição, não reescrita.
+O que sobrou depois de o control plane migrar para o MCP. Todos existem por
+precisarem da **máquina local** — nenhum fala com a Cloudez.
 
-| Script | Tool MCP correspondente |
+| Script | Por que não é uma tool |
 |---|---|
-| `cloudez-login` | *(nenhuma — coleta exige TTY; o MCP lê o que ele grava)* |
-| `cloudez-setup` | *(nenhuma — escreve local; quem confirma o domínio é `cloudez_get_site`)* |
-| `cloudez-begin-deploy` | `cloudez_begin_deploy` |
-| `cloudez-sync` (Go) | *(nenhuma — o transporte fica sempre local)* |
-| `cloudez-finalize-deploy` | `cloudez_finalize_deploy` |
-| `cloudez-compose-up` | `cloudez_compose_up` |
-| `cloudez-list-releases` | `cloudez_list_releases` |
-| `cloudez-rollback` | `cloudez_rollback` |
+| `cloudez-login` | Coletar o token exige TTY; em argumento de tool ele entraria no transcript |
+| `cloudez-pubkey` | Lê as chaves públicas de `~/.ssh` |
+| `cloudez-setup` | Escreve o `.cloudez.yaml` do projeto |
+| `cloudez-compose` | Inspeciona o diretório publicado |
+| `cloudez-sync` (Go) | O transporte fica sempre local, por decisão do contrato |
 
 Sucesso vai para stdout, erro para stderr — ambos JSON. Exit code não-zero em
 qualquer falha.
@@ -392,9 +390,9 @@ O servidor guarda as 5 releases mais recentes — é até onde o rollback alcan�
 
 ### Dependências
 
-`git`, `ssh` e `tar` na máquina local, mais `jq` enquanto o `bin/` em shell
-existir. No servidor, GNU coreutils — a troca atômica do symlink usa `mv -T`,
-que não existe em BSD/macOS.
+`git`, `ssh` e `tar` na máquina local, mais `jq` para os adaptadores em shell.
+No servidor, GNU coreutils — a troca atômica do symlink usa `mv -T`, que não
+existe em BSD/macOS.
 
 `curl` é **opcional**: sem ele o token não é verificado contra a API e o retorno
 diz `verified: false`. Exigir curl para ler um arquivo local seria dependência

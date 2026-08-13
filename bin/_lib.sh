@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # Helpers compartilhados pelos adaptadores cloudez-*.
 #
-# O formato de saída destes scripts espelha docs/mcp-tool-contract.md de
-# propósito: quando o servidor MCP ficar pronto, a skill troca chamadas Bash por
-# chamadas de tool sem mudar o procedimento nem o tratamento de erro.
+# O que sobrou aqui é o que NÃO migra para o MCP, por depender da máquina local:
+# coletar o token (exige TTY), ler ~/.ssh, escrever o .cloudez.yaml e inspecionar
+# o diretório do projeto. Tudo que falava com o servidor virou tool — inclusive o
+# ssh, o estado do deploy e a leitura da config, que saíram daqui.
 
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/_yaml.sh"
-
-CLOUDEZ_STATE_DIR="${CLOUDEZ_STATE_DIR:-.cloudez/state}"
-CLOUDEZ_CONFIG_JSON=""   # cache: a conversao YAML->JSON acontece uma vez por processo
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -22,139 +20,15 @@ need jq
 
 # die <code> <message> [extra_json]
 #
-# Escreve em stderr, nao em stdout. Helpers como site_config sao chamados dentro
-# de $( ), entao um erro em stdout seria capturado na variavel e nunca apareceria.
-# stdout fica reservado para o payload de sucesso.
+# Escreve em stderr, nao em stdout. Helpers sao chamados dentro de $( ), entao um
+# erro em stdout seria capturado na variavel e nunca apareceria. stdout fica
+# reservado para o payload de sucesso.
 die() {
   local code="$1" message="$2" extra="${3:-}"
   [ -n "$extra" ] || extra='{}'
   jq -n --arg c "$code" --arg m "$message" --argjson e "$extra" \
     '{error: ({code: $c, message: $m, retryable: false} + $e)}' >&2
   exit 1
-}
-
-# load_config: popula CLOUDEZ_CONFIG_JSON. Nao imprime nada.
-#
-# Deliberadamente NAO e usada como `x=$(load_config)`: o `exit 1` do die dentro
-# de uma substituicao de comando aninhada nao propaga de forma confiavel, e o
-# script seguia adiante com a config vazia produzindo um segundo erro enganoso.
-# Chamando como comando simples, o die encerra o processo de verdade.
-load_config() {
-  [ -n "$CLOUDEZ_CONFIG_JSON" ] && return 0
-
-  local f j rc
-  f=$(resolve_config)
-  [ -f "$f" ] \
-    || die config_not_found "Arquivo $f nao encontrado. Rode cloudez-setup para criar o template."
-
-  j=$(yaml_to_json "$f"); rc=$?
-  case "$rc" in
-    3) die yaml_parser_missing "Nenhum parser YAML disponivel para ler $f." \
-         "$(jq -n --arg h "$YAML_PARSER_HINT" '{hint: $h}')" ;;
-    0) ;;
-    *) die config_invalid "$f nao e um YAML valido." ;;
-  esac
-
-  printf '%s' "$j" | jq -e . >/dev/null 2>&1 \
-    || die config_invalid "$f nao produziu uma estrutura utilizavel."
-
-  # O bloco raiz se chama `cloudez`. Checar aqui e o que transforma uma config
-  # antiga (que usava `sites:`) num erro nomeado, em vez de um site_not_found
-  # com lista de ambientes vazia — que manda o usuario procurar no lugar errado.
-  printf '%s' "$j" | jq -e 'has("cloudez")' >/dev/null 2>&1 \
-    || die config_invalid "$f nao tem o bloco 'cloudez:' no topo." \
-         '{"hint":"Cada ambiente vira uma chave dentro de cloudez:. O nome antigo era sites:."}'
-
-  CLOUDEZ_CONFIG_JSON="$j"
-}
-
-# site_config <environment> -> JSON do site em stdout
-site_config() {
-  local environment="$1" site
-  load_config
-  site=$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c --arg e "$environment" '.cloudez[$e] // empty')
-  [ -n "$site" ] \
-    || die site_not_found "Ambiente '$environment' nao existe em $(resolve_config)." \
-         "$(printf '%s' "$CLOUDEZ_CONFIG_JSON" | jq -c '{hint: ("Ambientes definidos: " + (.cloudez | keys | join(", ")))}')"
-  printf '%s' "$site"
-}
-
-# cfg <site_json> <jq_path> [default]
-cfg() {
-  local v
-  v=$(printf '%s' "$1" | jq -r "$2 // empty")
-  if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${3:-}"; fi
-}
-
-# site_root <site_json> <environment> -> caminho do site no servidor
-#
-# `root` e obrigatorio e explicito na config: para onde os arquivos vao e a
-# decisao mais destrutiva do deploy, e derivar isso de outro campo deixaria o
-# destino implicito num arquivo que alguem le com pressa.
-#
-# Um `~/` inicial e REMOVIDO, nao expandido: os comandos remotos vao entre aspas
-# simples (senao um caminho com espaco quebraria), e dentro delas o shell do
-# servidor nao expande til — sobraria um diretorio chamado `~`. Caminho relativo
-# resolve a partir do $HOME do usuario ssh, que e exatamente o que `~/` diz.
-site_root() {
-  local site="$1" environment="$2" root
-  root=$(cfg "$site" .root)
-  [ -n "$root" ] \
-    || die config_invalid "Ambiente '$environment' nao tem root definido em $(resolve_config)." \
-         '{"hint":"Ex.: root: ~/meusite.com.br/www/claude — o deploy publica em <root>/current."}'
-  printf '%s' "${root#\~/}"
-}
-
-# ------------------------------------------------------------------- destino --
-#
-# O destino ssh NAO mora mais no .cloudez.yaml. Ele vem da conta do usuario, via
-# cloudez_get_site (cloud.fqdn e user.username), e quem chama estes adaptadores
-# passa nas variaveis abaixo:
-#
-#   CLOUDEZ_SSH_HOST   CLOUDEZ_SSH_USER   CLOUDEZ_SSH_PORT
-#
-# Tirar isso da config elimina uma copia que envelhece: se a Cloudez mover o site
-# de servidor, um host escrito num arquivo versionado continua apontando para o
-# antigo, e o deploy vai para o lugar errado sem reclamar.
-#
-# O bloco `ssh` da config ainda e aceito como fallback, para .cloudez.yaml
-# escritos antes desta mudanca nao pararem de funcionar de um dia para o outro.
-
-# ssh_target <site_json> <campo> <variavel_de_ambiente> [default]
-ssh_target() {
-  local site="$1" field="$2" env_var="$3" default="${4:-}" value
-  value="${!env_var:-}"
-  [ -n "$value" ] || value=$(cfg "$site" "$field" "$default")
-  printf '%s' "$value"
-}
-
-# ssh_run <site_json> <comando...>
-# BatchMode=yes e deliberado: sem ele, um host sem chave configurada trava
-# esperando senha num prompt que o agente nao consegue responder.
-ssh_run() {
-  local site="$1"; shift
-  local host user port
-  host=$(ssh_target "$site" .ssh.host CLOUDEZ_SSH_HOST)
-  user=$(ssh_target "$site" .ssh.user CLOUDEZ_SSH_USER)
-  port=$(ssh_target "$site" .ssh.port CLOUDEZ_SSH_PORT 22)
-
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      -p "$port" "$user@$host" "$@"
-}
-
-# require_ssh_target <site_json> — morre se nao houver destino
-#
-# Chame no nivel de cima do adaptador, NUNCA dentro de $( ). Os adaptadores
-# envolvem ssh_run em substituicao de comando para capturar os logs, e ali um
-# die morre no subshell: o `if !` de fora ve so o status nao-zero e reporta
-# ssh_failed, escondendo que o problema era nao ter para onde conectar. O
-# usuario iria depurar chave e rede em vez do que realmente falta.
-require_ssh_target() {
-  local site="$1"
-  { [ -n "$(ssh_target "$site" .ssh.host CLOUDEZ_SSH_HOST)" ] \
-    && [ -n "$(ssh_target "$site" .ssh.user CLOUDEZ_SSH_USER)" ]; } \
-    || die missing_ssh_target "Destino ssh desconhecido: host e usuario nao foram informados." \
-         '{"hint":"Estes dados vem do cloudez_get_site (cloud.fqdn e user.username) e sao passados em CLOUDEZ_SSH_HOST e CLOUDEZ_SSH_USER. Rode o deploy pelo /cloudez:deploy, que os obtem antes de chamar os adaptadores."}'
 }
 
 # is_fqdn <valor>
@@ -349,15 +223,3 @@ save_token() {
 # O que sobrou de token neste arquivo serve so ao cloudez-login: resolve_token e
 # token_source para o relatorio, verify_token e save_token para gravar e conferir
 # o que foi gravado.
-
-# -------------------------------------------------------------------- state --
-
-# state_path <deploy_id>
-state_path() { printf '%s/%s.json' "$CLOUDEZ_STATE_DIR" "$1"; }
-
-# load_state <deploy_id> -> JSON em stdout
-load_state() {
-  local f; f=$(state_path "$1")
-  [ -f "$f" ] || die deploy_not_found "deploy_id '$1' desconhecido. Rode cloudez-begin-deploy primeiro."
-  cat "$f"
-}

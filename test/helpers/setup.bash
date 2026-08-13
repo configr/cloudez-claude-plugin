@@ -41,30 +41,14 @@ cloudez:
   staging:
     domain: staging.example.com
     root: /srv/staging
-    ssh: {host: srv.example.com, user: deploy, port: 22}
   production:
     domain: example.com
     root: /srv/production
-    ssh: {host: srv.example.com, user: deploy, port: 22}
 YAML
 
   printf '.cloudez/\n' > .gitignore
   git add -A
   git commit -qm "init"
-}
-
-# finalized_deploy — deploy levado ate a ativacao, que e onde o passo de
-# container comeca. Imprime o deploy_id.
-#
-# Existe porque o cloudez-compose-up so age sobre release ja ativa, e repetir
-# begin+sync+finalize dentro de cada teste esconderia o que ele de fato afirma.
-finalized_deploy() {
-  local d
-  d=$(cloudez-begin-deploy staging abc1234def K1 | jq -r .deploy_id)
-  mkdir -p dist && touch dist/index.html
-  cloudez-sync "$d" dist >/dev/null
-  cloudez-finalize-deploy "$d" >/dev/null
-  printf '%s' "$d"
 }
 
 teardown() {
@@ -74,3 +58,24 @@ teardown() {
 
 # jq_field <json> <caminho>
 jq_field() { printf '%s' "$1" | jq -r "$2"; }
+
+# deploy_state <deploy_id> [status] — escreve o estado que o cloudez-sync le.
+#
+# Antes isto vinha de `cloudez-begin-deploy`, que virou tool do MCP. Escrever o
+# JSON direto e mais honesto para um teste de sync: o que se afirma e sobre o
+# TRANSPORTE, e depender de outro adaptador para chegar la escondia isso.
+#
+# O formato e o mesmo que o internal/cloudez le, e o round-trip dele tem teste
+# proprio em Go.
+deploy_state() {
+  local id="$1" status="${2:-awaiting_upload}"
+  mkdir -p .cloudez/state
+  jq -n --arg id "$id" --arg s "$status" \
+    '{deploy_id: $id, release_id: "20260101T000000Z-abc1234",
+      environment: "staging", ref: "abc1234def", status: $s,
+      root: "/srv/staging", domain: "staging.example.com",
+      ssh: {host: "srv.example.com", user: "deploy", port: 22,
+            path: "/srv/staging/releases/20260101T000000Z-abc1234/"}}' \
+    > ".cloudez/state/$id.json"
+  printf '%s' "$id"
+}
