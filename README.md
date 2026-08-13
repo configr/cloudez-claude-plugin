@@ -43,9 +43,12 @@ Para desenvolvimento e uso local:
 claude --plugin-dir /caminho/para/cloudez-claude-plugin
 ```
 
-Os binários de `libexec/` são versionados no repositório, então quem só usa o
-plugin não precisa de Go. `./build.sh` é necessário apenas depois de alterar
-algo em `cmd/`.
+Os binários de `libexec/` e o servidor MCP em `mcp/` são versionados no
+repositório, então quem só usa o plugin não precisa de Go nem de build nenhum —
+só de **Node 20+** para rodar o servidor. `./build.sh` é necessário apenas
+depois de alterar algo em `cmd/`; `./vendor-mcp.sh` só depois de alterar o
+servidor MCP, que vive em [repositório
+separado](https://github.com/configr/cloudez-mcp).
 
 Depois de editar qualquer arquivo do plugin, `/reload-plugins` recarrega sem
 reiniciar a sessão.
@@ -144,7 +147,7 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Tools de ciclo de vida no MCP, 2ª leva: `cloudez_list_releases` e
       `cloudez_rollback` — todo o control plane agora é MCP; em `bin/` só resta o
       transporte `cloudez-sync`. Suíte do MCP em 113 testes (ssh e API falsos)
-- [ ] Servidor MCP publicado — hoje o `.mcp.json` aponta para um placeholder
+- [x] Servidor MCP embutido no plugin (`mcp/cloudez-mcp.mjs`), sem passo de instalação
 
 ## Autenticação
 
@@ -390,9 +393,9 @@ O servidor guarda as 5 releases mais recentes — é até onde o rollback alcan�
 
 ### Dependências
 
-`git`, `ssh` e `tar` na máquina local, mais `jq` para os adaptadores em shell.
-No servidor, GNU coreutils — a troca atômica do symlink usa `mv -T`, que não
-existe em BSD/macOS.
+`git`, `ssh` e `tar` na máquina local, mais `jq` para os adaptadores em shell
+e **Node 20+** para o servidor MCP embutido. No servidor, GNU coreutils — a
+troca atômica do symlink usa `mv -T`, que não existe em BSD/macOS.
 
 `curl` é **opcional**: sem ele o token não é verificado contra a API e o retorno
 diz `verified: false`. Exigir curl para ler um arquivo local seria dependência
@@ -411,8 +414,19 @@ vive em outro repositório:
 export CLOUDEZ_MCP_PATH=/caminho/para/o/repo/do/mcp
 ```
 
-Ajuste `command`/`args` no `.mcp.json` quando o servidor MCP definir como é
-distribuído (npx, binário, etc.) — o valor atual é um placeholder.
+O servidor MCP vem **dentro do plugin**, em `mcp/cloudez-mcp.mjs`: um arquivo
+só, com as dependências embutidas, apontado pelo `.mcp.json` via
+`${CLAUDE_PLUGIN_ROOT}`. Não há `npm install`, registry nem passo extra de
+instalação.
+
+É a mesma decisão dos binários de `libexec/`, e pelo mesmo motivo: quem instala
+um plugin não deveria precisar montar nada. O bundle tem 768 KB — um dezessete
+avos do que os binários Go já ocupam aqui.
+
+O fonte fica em repositório separado. `./vendor-mcp.sh [caminho]` roda o bundle
+lá e traz o resultado; o cabeçalho do arquivo diz de qual versão do
+`cloudez-mcp` a cópia veio, que é o que torna a divergência entre os dois
+repositórios visível antes de virar defeito.
 
 O token **não** é passado por argumento nem colocado no `.mcp.json`: o servidor
 MCP lê `~/.cloudez/token`, o mesmo arquivo que o `cloudez-login` escreve, e aceita

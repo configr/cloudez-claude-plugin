@@ -1,0 +1,38 @@
+// Handshake MCP minimo: sobe o servidor, pede as tools, imprime os nomes.
+//
+// Fora do .bats porque bats nao lida bem com processo de vida longa e stdin
+// bidirecional — e o que se quer afirmar aqui e sobre o PROTOCOLO, nao sobre o
+// arquivo.
+import { spawn } from "node:child_process"
+
+const bundle = process.argv[2]
+const child = spawn("node", [bundle], { stdio: ["pipe", "pipe", "ignore"] })
+
+const send = (msg) => child.stdin.write(JSON.stringify(msg) + "\n")
+let buf = ""
+
+child.stdout.on("data", (chunk) => {
+  buf += chunk
+  const linhas = buf.split("\n")
+  buf = linhas.pop() ?? ""
+  for (const linha of linhas) {
+    if (!linha.trim()) continue
+    const msg = JSON.parse(linha)
+    if (msg.id === 1) {
+      send({ jsonrpc: "2.0", method: "notifications/initialized" })
+      send({ jsonrpc: "2.0", id: 2, method: "tools/list" })
+    }
+    if (msg.id === 2) {
+      console.log(msg.result.tools.map((t) => t.name).join(" "))
+      child.kill()
+      process.exit(0)
+    }
+  }
+})
+
+send({
+  jsonrpc: "2.0", id: 1, method: "initialize",
+  params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "bats", version: "1" } },
+})
+
+setTimeout(() => { console.error("timeout no handshake"); process.exit(1) }, 15000)

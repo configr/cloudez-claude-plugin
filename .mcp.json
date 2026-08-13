@@ -2,7 +2,7 @@
   "mcpServers": {
     "cloudez": {
       "command": "node",
-      "args": ["${CLOUDEZ_MCP_PATH}/dist/index.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/cloudez-mcp.mjs"],
       "env": {}
     }
   }
