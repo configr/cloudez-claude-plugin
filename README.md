@@ -159,6 +159,19 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
       `cloudez_compose_up` deixa de reconstruir. Encurta a janela em que o disco e
       o container discordam, de "o build inteiro" para "a recriação do container",
       e faz build quebrado ser deploy que não começou (contrato §3.8)
+- [ ] Comando `/cloudez:rollback`. Hoje o rollback é o passo 10 do
+      `commands/deploy.md`, o que significa que a operação de emergência mora
+      dentro do procedimento que a causou — quem precisa dela tem de rolar um
+      documento longo, no pior momento possível. As tools já existem
+      (`cloudez_list_releases`, `cloudez_rollback`); falta a porta.
+
+      Duas coisas exercitadas contra servidor de verdade que o comando precisa
+      carregar: em site de container, `cloudez_rollback` **não** basta — ele
+      troca o symlink e o container segue na imagem anterior, então o site
+      continua servindo justamente o que se tentava tirar do ar. Fechar exige
+      `cloudez_compose_build` + `cloudez_compose_up` com o `deploy_id` da release
+      de destino. E o `cloudez_health_check` depois é obrigatório: rollback que
+      não devolve o site ao ar é o pior estado para se declarar resolvido.
 
 ## Autenticação
 

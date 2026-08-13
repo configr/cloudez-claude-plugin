@@ -737,6 +737,16 @@ adaptador shell nunca precisou dele no estado porque lia do `.cloudez.yaml`.
 é aplicação no ar: um container em `restarting` ou `exited` é deploy fracassado
 com JSON de sucesso. Quem chama confere.
 
+**`recreated` responde o que o `state` não responde:** algum container foi
+trocado por este `up`? Quando o conteúdo publicado é idêntico ao do deploy
+anterior, a imagem sai idêntica e o Compose corretamente não recria nada — e aí a
+release ativa e o que o container serve passam a ser coisas diferentes, com
+`state: running` afirmando o mesmo nos dois casos. Foi observado na prática: um
+`up` devolvendo `running` para um container de seis horas antes, e provar isso
+exigiu um `docker inspect` à mão, fora do fluxo. A medição é o conjunto de IDs de
+`ps -q` antes e depois, agregado por projeto e não por container. O campo **some**
+quando não foi possível medir — `false` afirmaria "não recriou" sem ter medido.
+
 **O inventário de containers é separado da saída do build por um marcador**, não
 pelo formato das linhas. Os dois saem no mesmo fluxo, e no build vai tudo que os
 passos `RUN` imprimiram: um filtro por contagem de campos aceitaria qualquer

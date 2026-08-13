@@ -271,6 +271,14 @@ O retorno traz `compose.project` e `compose.containers`, com `name`, `state` e
 `ports` de cada um. **Confira o `state`**: um container em `restarting` ou
 `exited` é deploy fracassado com JSON de sucesso.
 
+**Confira também o `compose.recreated`.** Ele diz se algum container foi de fato
+trocado. `false` significa que o Compose não recriou nada — o conteúdo saiu
+idêntico ao do deploy anterior, então a imagem saiu idêntica. Costuma ser
+legítimo (republicar o mesmo SHA), mas é a diferença entre "a release nova está
+servindo" e "a release nova está no disco". O `state` responde `running` nos dois
+casos. Quando vier `false` e o deploy deveria ter mudado alguma coisa, cruze com
+o `body_sha256` do passo 9.
+
 O `project` vem do domínio, não do diretório. Isso sobrepõe um `name:` que o
 usuário tenha no compose dele, e é deliberado — o daemon do Docker é um só para
 todos os sites da máquina, e o nome derivado do diretório seria `current` para

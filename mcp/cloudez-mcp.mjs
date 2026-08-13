@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.18 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 1.0.19 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -20268,7 +20268,10 @@ async function composeUp(deployId2) {
   const project = resolveProject(state);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + `$DC -p '${project}' up -d${buildFlag} --remove-orphans
+  const up = composePrelude(`${root}/current`) + `before=$($DC -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+$DC -p '${project}' up -d${buildFlag} --remove-orphans
+after=$($DC -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+if [ "$before" = "$after" ]; then echo 'RECREATED no'; else echo 'RECREATED yes'; fi
 $DC -p '${project}' ps --format 'PS\\t{{.Name}}\\t{{.State}}\\t{{.Ports}}'`;
   const res = await sshRun(ssh, up);
   const out = `${res.stdout}
@@ -20280,7 +20283,13 @@ ${res.stderr}`;
     });
   }
   const containers = res.stdout.split("\n").map((line) => line.split("	")).filter((f) => f[0] === "PS" && f.length === 4).map((f) => ({ name: f[1], state: f[2], ports: f[3] }));
-  state.compose = { project, built, containers };
+  const recreated = matchLine(res.stdout, "RECREATED");
+  state.compose = {
+    project,
+    built,
+    ...recreated ? { recreated: recreated === "yes" } : {},
+    containers
+  };
   return saveState(state);
 }
 
@@ -20291,7 +20300,7 @@ function stripHome2(root) {
 async function readReleases(ssh, root) {
   const cmd = `current=$(readlink '${root}/current' 2>/dev/null | xargs -r basename)
 echo "CURRENT $current"
-ls -1dt '${root}/releases/'*/ 2>/dev/null | xargs -rn1 basename`;
+ls -1d '${root}/releases/'*/ 2>/dev/null | xargs -rn1 basename`;
   const res = await sshRun(ssh, cmd);
   if (res.code !== 0) {
     throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel listar as releases.", {
@@ -20312,6 +20321,7 @@ ls -1dt '${root}/releases/'*/ 2>/dev/null | xargs -rn1 basename`;
     releases.push({ release_id: line, current: false });
   }
   for (const r of releases) if (current && r.release_id === current) r.current = true;
+  releases.sort((a, b) => a.release_id < b.release_id ? 1 : a.release_id > b.release_id ? -1 : 0);
   return { current, releases };
 }
 async function listReleases(domain, rootArg) {
