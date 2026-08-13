@@ -241,6 +241,56 @@ setup_keys() {
 # um `._.` por diretorio. Nao quebram o site, mas viajam em toda release e sujam
 # o servidor. COPYFILE_DISABLE=1 resolve na origem; fora do macOS o tar ignora a
 # variavel, entao nao ha condicional por plataforma.
+# ------------------------------------------------------- integridade do tar ---
+#
+# Estes rodam o tar DE VERDADE, nao o mock: o que se afirma e sobre o formato do
+# pacote e sobre o gzip, e nenhum mock reproduz isso.
+#
+# `real_tar` existe porque `tar` no PATH da suite e o mock, que nao empacota
+# nada — um teste que o usasse afirmaria sobre uma listagem inexistente.
+real_tar() { PATH=/usr/bin:/bin tar "$@"; }
+
+# As flags do cmd/sync precisam produzir uma extracao FIEL. `-C dir .` envia o
+# conteudo, nao o diretorio: sem isso o site sobe aninhado um nivel, e o sintoma
+# e 404 numa release que existe.
+@test "o pacote extrai identico ao que foi empacotado" {
+  mkdir -p origem/sub origem/.git
+  echo "raiz"    > origem/index.html
+  echo "aninhado" > origem/sub/app.js
+  echo "lixo"    > origem/.git/config
+
+  mkdir -p destino
+  real_tar -czf - --exclude .git -C origem . | real_tar -xzf - -C destino
+
+  [ "$(cat destino/index.html)" = "raiz" ]
+  [ "$(cat destino/sub/app.js)" = "aninhado" ]
+  [ ! -d destino/.git ]
+  # Sem `.` no fim do tar, o conteudo chegaria dentro de destino/origem/.
+  [ ! -d destino/origem ]
+}
+
+# O `-z` nao e so compressao: o CRC do gzip e o que torna "chegou tudo"
+# verificavel. Sem isso, um stream cortado no meio da rede extrairia o pedaco que
+# chegou e o deploy seguiria com uma release incompleta.
+@test "stream truncado nao extrai em silencio" {
+  mkdir -p origem && echo "conteudo" > origem/a.txt
+  real_tar -czf pacote.tgz -C origem .
+  head -c "$(( $(wc -c < pacote.tgz) / 2 ))" pacote.tgz > truncado.tgz
+
+  run real_tar -tzf truncado.tgz
+  [ "$status" -ne 0 ]
+}
+
+@test "byte corrompido no meio do stream e detectado" {
+  mkdir -p origem && echo "conteudo suficiente para comprimir" > origem/a.txt
+  real_tar -czf pacote.tgz -C origem .
+  cp pacote.tgz corrompido.tgz
+  printf '\xff' | dd of=corrompido.tgz bs=1 seek="$(( $(wc -c < pacote.tgz) / 2 ))" conv=notrunc 2>/dev/null
+
+  run real_tar -tzf corrompido.tgz
+  [ "$status" -ne 0 ]
+}
+
 # O diretorio publicado deixou de ser sempre um build: numa aplicacao em
 # container o que se envia e o CONTEXTO, que costuma ser a raiz do repositorio.
 # Sem exclusao, todo deploy levaria o historico inteiro do git pela rede.
@@ -302,6 +352,31 @@ setup_keys() {
 
 # O deploy so avanca para "uploaded" quando o transporte confirma. Sem isso o
 # finalize ativaria uma release vazia.
+# O caso perigoso do pipe: o tar LOCAL falha no meio — arquivo ilegivel, disco
+# cheio — e o ssh remoto extrai o parcial e sai zero. Verificando so o ssh, o
+# deploy publicaria uma release incompleta como sucesso.
+#
+# O cmd/sync espera pelos DOIS e reporta o primeiro que falhou.
+@test "falha do tar local nao passa por sucesso, mesmo com ssh ok" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/index.html
+  MOCK_TAR_EXIT=2 MOCK_TAR_STDERR="tar: dist/x: Cannot open: Permission denied" \
+    run cloudez-sync "$d" dist
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "transfer_failed" ]
+  [ "$(jq -r .status ".cloudez/state/$d.json")" = "awaiting_upload" ]
+}
+
+# A ordem das duas checagens importa: invertida, uma falha do tar seria reportada
+# com o erro do ssh, e o usuario procuraria problema de rede tendo um de arquivo.
+@test "falha do tar reporta o erro do tar, nao o do ssh" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/index.html
+  MOCK_TAR_EXIT=2 MOCK_TAR_STDERR="tar: Cannot open: Permission denied" \
+    run cloudez-sync "$d" dist
+  [[ "$(jq_field "$output" .error.logs)" == *"Cannot open"* ]]
+}
+
 @test "sync que falha nao marca o deploy como uploaded" {
   d=$(deploy_state dpl_test)
   mkdir -p dist && touch dist/index.html

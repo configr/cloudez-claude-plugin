@@ -47,3 +47,20 @@ jobs:
       # continua sendo responsabilidade de quem altera cmd/.
       - name: Rodar a suíte
         run: ./test/run.sh --strict
+
+  # Job separado, e estreito de propósito. Portar a suíte bats para Windows
+  # significaria bash, jq e coreutils no runner — muito trabalho para cobrir uma
+  # peça de trinta linhas. O que interessa aqui é só o launcher: ele é a única
+  # parte do plugin que roda numa plataforma sem nenhuma outra verificação.
+  #
+  # Os binários de libexec/ são versionados, então não há build: o job clona e
+  # executa.
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Launcher .cmd
+        shell: pwsh
+        run: ./test/windows/launcher.ps1
