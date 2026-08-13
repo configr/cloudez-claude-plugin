@@ -272,11 +272,12 @@ combinações, e duas delas são problema:
 | tem Compose | tipo Docker | Combina. Diga qual arquivo será usado e siga |
 | não tem | tipo tradicional | Combina. Siga sem comentar |
 | **tem Compose** | **tipo tradicional** | O container **não vai subir**: a Cloudez vai servir os arquivos como estáticos. O tipo do site se corrige no painel |
-| **não tem** | **tipo Docker** | O deploy vai publicar arquivos que ninguém executa. Falta o arquivo de Compose no projeto |
+| **não tem** | **tipo Docker** | O deploy vai publicar arquivos que ninguém executa. **Ofereça o `/cloudez:compose`**, que escreve o arquivo junto com o usuário |
 
-Nos dois casos de divergência, **avise e não tente corrigir por conta própria**:
-o tipo do site é decisão do painel, e escrever um Compose pelo usuário seria
-inventar como a aplicação dele sobe.
+Nos dois casos de divergência, **não corrija por conta própria**. O tipo do site
+é decisão do painel. E o Compose não se gera de template: depende do que a
+aplicação é, como sobe e do que precisa em volta — por isso o `/cloudez:compose`
+é uma conversa, e não um passo automático daqui.
 
 Se vier `ignored`, o projeto tem mais de um arquivo de Compose. Diga qual será
 usado e quais serão ignorados — um arquivo editado que nunca entra em nada é
