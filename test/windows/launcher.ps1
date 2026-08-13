@@ -74,3 +74,14 @@ if ($falhas -gt 0) {
 
 Write-Host ""
 Write-Host 'launcher Windows OK'
+
+# `exit 0` explícito, e não queda pelo fim do arquivo.
+#
+# Sem ele o script herda o $LASTEXITCODE do último comando nativo — que aqui é o
+# .cmd copiado, saindo 1 DE PROPÓSITO no teste de binário ausente. O `shell:
+# pwsh` do Actions propaga esse valor, então o job falhava depois de imprimir
+# que tudo passou.
+#
+# É a mesma inversão que este arquivo existe para caçar no launcher, do outro
+# lado: lá o risco é uma falha sair 0, aqui foi um sucesso sair 1.
+exit 0
