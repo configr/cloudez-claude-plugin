@@ -34,8 +34,17 @@ func main() {
 func run() int {
 	if len(os.Args) < 3 {
 		fmt.Fprintln(os.Stderr, "uso: cloudez-sync <deploy_id> <diretorio_local>")
+		fmt.Fprintln(os.Stderr, "     cloudez-sync --hash-only <diretorio_local>")
 		return 2
 	}
+
+	// --hash-only roda ANTES do begin-deploy, e por isso nao recebe deploy_id:
+	// quem o chama esta justamente formando o release_id que ainda nao existe.
+	// Nao toca a rede nem o estado — le o diretorio e imprime o resumo.
+	if os.Args[1] == "--hash-only" {
+		return hashOnly(os.Args[2])
+	}
+
 	deployID, localDir := os.Args[1], os.Args[2]
 
 	dep, err := cloudez.LoadDeploy(deployID)
@@ -44,15 +53,8 @@ func run() int {
 			fmt.Sprintf("deploy_id '%s' desconhecido. Rode cloudez-begin-deploy primeiro.", deployID), nil)
 	}
 
-	info, err := os.Stat(localDir)
-	if err != nil || !info.IsDir() {
-		return cloudez.Fail("build_output_missing",
-			fmt.Sprintf("Diretorio '%s' nao existe. O build rodou?", localDir), nil)
-	}
-	entries, err := os.ReadDir(localDir)
-	if err != nil || len(entries) == 0 {
-		return cloudez.Fail("build_output_empty",
-			fmt.Sprintf("Diretorio '%s' esta vazio.", localDir), nil)
+	if code := checkDir(localDir); code != 0 {
+		return code
 	}
 
 	stats, errOut, err := transfer(dep, localDir)
@@ -69,6 +71,50 @@ func run() int {
 	}
 
 	out, _ := json.MarshalIndent(dep, "", "  ")
+	fmt.Println(string(out))
+	return 0
+}
+
+// checkDir aplica as mesmas duas recusas ao diretorio publicado nos dois modos.
+// Valem tanto para o envio quanto para o hash: hashear um diretorio vazio
+// devolveria um sha valido para conteudo nenhum, e o deploy so descobriria isso
+// depois de registrar a release.
+func checkDir(localDir string) int {
+	info, err := os.Stat(localDir)
+	if err != nil || !info.IsDir() {
+		return cloudez.Fail("build_output_missing",
+			fmt.Sprintf("Diretorio '%s' nao existe. O build rodou?", localDir), nil)
+	}
+	entries, err := os.ReadDir(localDir)
+	if err != nil || len(entries) == 0 {
+		return cloudez.Fail("build_output_empty",
+			fmt.Sprintf("Diretorio '%s' esta vazio.", localDir), nil)
+	}
+	return 0
+}
+
+// hashOnly imprime o identificador de conteudo do que seria enviado, para o
+// passo que forma o release_id sem depender de git. Ver cloudez.HashPayload.
+func hashOnly(localDir string) int {
+	if code := checkDir(localDir); code != 0 {
+		return code
+	}
+
+	h, err := cloudez.HashPayload(localDir)
+	if err != nil {
+		return cloudez.Fail("hash_failed",
+			fmt.Sprintf("Nao foi possivel ler '%s' por inteiro: %s", localDir, err.Error()), nil)
+	}
+
+	// Um diretorio cujo unico conteudo e `.git` passa pelo checkDir (nao esta
+	// vazio) e chega aqui sem nenhum arquivo publicavel. Enviar isso criaria uma
+	// release vazia com identificador de aparencia normal.
+	if h.Files == 0 {
+		return cloudez.Fail("build_output_empty",
+			fmt.Sprintf("Diretorio '%s' nao tem nenhum arquivo publicavel (so `.git`, que o deploy exclui).", localDir), nil)
+	}
+
+	out, _ := json.MarshalIndent(h, "", "  ")
 	fmt.Println(string(out))
 	return 0
 }
