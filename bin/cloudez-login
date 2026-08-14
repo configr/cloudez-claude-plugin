@@ -38,12 +38,18 @@ mode="${1:-}"
 
 # status_json <status> <verified> — resposta comum aos dois modos. Sem token.
 status_json() {
-  jq -n --arg s "$1" --arg src "$(token_source)" --arg f "$(token_file)" \
-        --argjson v "$2" \
-    '{status: $s, source: $src, token_file: $f, verified: $v}
-     | if $v then . else
-         . + {warning: "Nao foi possivel confirmar o token com a API da Cloudez (offline, endpoint ainda nao confirmado ou API fora). O token foi aceito como esta."}
-       end'
+  local status="$1" verified="$2"
+
+  # `:verified` porque e booleano, nao string: quem le a saida checa `verified
+  # === true`, e "false" entre aspas passaria por verdadeiro em JavaScript.
+  if [ "$verified" = "true" ]; then
+    json status "$status" source "$(token_source)" token_file "$(token_file)" \
+         :verified true
+  else
+    json status "$status" source "$(token_source)" token_file "$(token_file)" \
+         :verified false \
+         warning "Nao foi possivel confirmar o token com a API da Cloudez (offline, endpoint ainda nao confirmado ou API fora). O token foi aceito como esta."
+  fi
 }
 
 # ------------------------------------------------------------------- --stdin --
@@ -115,7 +121,8 @@ fi
 
 if [ ! -t 0 ] || [ ! -r /dev/tty ]; then
   die no_tty "cloudez-login exige um terminal interativo." \
-    "$(login_hint | jq '. + {reason: "Um token digitado na conversa entra no contexto do modelo e no transcript. O prompt precisa rodar no terminal do usuario."}')"
+    "$(json +hint "$(login_hint)" \
+            reason "Um token digitado na conversa entra no contexto do modelo e no transcript. O prompt precisa rodar no terminal do usuario.")"
 fi
 
 # ------------------------------------------------------------ token do painel --

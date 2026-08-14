@@ -54,8 +54,7 @@ printf '%s' "$environment" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_-]*$' \
 target=$(resolve_config)
 
 if [ -f "$target" ]; then
-  jq -n --arg p "$target" --arg d "$domain" --arg e "$environment" \
-    '{status: "exists", path: $p, domain: $d, environment: $e}'
+  json status exists path "$target" domain "$domain" environment "$environment"
   exit 0
 fi
 
@@ -92,5 +91,5 @@ fi
 
 # Sem `todo`: nao sobra nada para o usuario preencher. O destino ssh vem do
 # cloudez_get_site, e o root ja sai escrito.
-jq -n --arg p "$target" --arg d "$domain" --arg e "$environment" --arg g "$gitignore" \
-  '{status: "created", path: $p, domain: $d, environment: $e, gitignore: $g}'
+json status created path "$target" domain "$domain" environment "$environment" \
+     gitignore "$gitignore"

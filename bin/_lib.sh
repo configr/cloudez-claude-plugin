@@ -16,7 +16,17 @@ need() {
     exit 1
   }
 }
-need jq
+# O `jq` saiu daqui: ele so construia JSON, nunca lia, e o Node ja e dependencia
+# dura por causa do servidor MCP. Ver bin/_json.mjs.
+need node
+
+# json <chave> <valor> [chave valor ...]
+#
+# Constroi um objeto JSON. Prefixos de chave: `:` para valor JSON literal, `+`
+# para mesclar um objeto na raiz. Ver bin/_json.mjs.
+json() {
+  node "$(dirname "${BASH_SOURCE[0]}")/_json.mjs" "$@"
+}
 
 # die <code> <message> [extra_json]
 #
@@ -25,9 +35,12 @@ need jq
 # reservado para o payload de sucesso.
 die() {
   local code="$1" message="$2" extra="${3:-}"
-  [ -n "$extra" ] || extra='{}'
-  jq -n --arg c "$code" --arg m "$message" --argjson e "$extra" \
-    '{error: ({code: $c, message: $m, retryable: false} + $e)}' >&2
+  # Duas passadas porque o erro e aninhado e o `extra` se funde com o objeto de
+  # DENTRO — `+` por ultimo para que o chamador possa sobrepor `retryable`, que
+  # e a semantica do `+` do jq que estava aqui antes.
+  local corpo
+  corpo=$(json code "$code" message "$message" :retryable false +extra "${extra:-}")
+  json :error "$corpo" >&2
   exit 1
 }
 
@@ -164,16 +177,18 @@ login_hint() {
   clip=$(clipboard_read_cmd)
   [ -n "$clip" ] && pipe="$clip | $bin --stdin"
 
-  jq -n --arg b "$bin" --arg p "${pipe:-}" \
-    '{hint: (if $p == "" then
-               ("Peca ao usuario para rodar: ! " + $b + " (o ! executa no terminal da sessao, onde existe TTY).")
-             else
-               ("Peca ao usuario para copiar o token e autorize rodar: " + $p
-                + "  — o token vai do clipboard direto para o processo, sem passar pela conversa. Alternativa com prompt: ! " + $b)
-             end),
-      login_command: $b,
-      claude_code_command: ("! " + $b)}
-     | if $p == "" then . else . + {clipboard_command: $p} end'
+  # A condicional vive no shell, nao mais na linguagem do jq. Ela estava la so
+  # porque o jq estava — e `if` e a coisa que o shell faz sem ajuda de ninguem.
+  local hint
+  if [ -z "${pipe:-}" ]; then
+    hint="Peca ao usuario para rodar: ! $bin (o ! executa no terminal da sessao, onde existe TTY)."
+    json hint "$hint" login_command "$bin" claude_code_command "! $bin"
+  else
+    hint="Peca ao usuario para copiar o token e autorize rodar: $pipe"
+    hint="$hint  — o token vai do clipboard direto para o processo, sem passar pela conversa."
+    hint="$hint Alternativa com prompt: ! $bin"
+    json hint "$hint" login_command "$bin" claude_code_command "! $bin" clipboard_command "$pipe"
+  fi
 }
 
 # save_token <token> -> veredito em stdout ("valid" | "unknown")

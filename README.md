@@ -297,27 +297,25 @@ um mock de `curl`. Verificado manualmente: um token inventado devolve `401` de
 `api.cloudez.io`, e o plugin traduz isso em `token_invalid`. O caminho do token
 válido (`2xx`) depende de uma credencial de verdade e nunca passou pela suíte.
 
-**`/cloudez:login` e `/cloudez:setup` não funcionam no Windows.** Duas causas
-independentes, e nenhuma tem cobertura — o job `windows` testa só os launchers do
-`sync`.
+**`/cloudez:login` e `/cloudez:setup` no Windows só funcionam sob um bash.** Eram
+duas causas; a saída do `jq` resolveu uma. O Windows não traz `jq` e o Git for
+Windows também não — o Git Bash embarca um subconjunto do MSYS2 com bash,
+coreutils, sed, awk, curl, ssh e tar, sem ele —, então o `need jq` reprovava
+justamente no único ambiente onde esses scripts rodavam.
 
-A primeira é que os dois não têm par `.cmd`. `bin/cloudez-sync.cmd` existe;
-`cloudez-login` e `cloudez-setup` são só scripts POSIX, então no Windows
-respondem apenas quando quem chama é um bash.
+O que sobrou é que eles continuam sendo **bash**, e não têm par `.cmd`. O
+`cloudez-sync.cmd` existe e funciona porque invoca um `.exe` nativo; um `.cmd`
+não roda script POSIX sem um bash para chamá-lo. Então onde não houver bash, os
+dois seguem inalcançáveis.
 
-A segunda é o `jq`, que eles exigem via `need jq` em `bin/_lib.sh`. O Windows não
-o traz, e o Git for Windows também não: o Git Bash embarca um subconjunto do
-MSYS2 com bash, coreutils, sed, awk, curl, ssh e tar, mas não o `jq`. Ele só
-existe se a pessoa tiver instalado de propósito. As duas causas se somam no mesmo
-ponto: o único ambiente Windows onde esses scripts rodam é justamente aquele onde
-a dependência deles costuma faltar.
+Nada disso tem cobertura: o job `windows` testa só os launchers do `sync`. E
+falta confirmar como o Claude Code invoca `bin/` no Windows — se sempre por bash,
+a limitação hoje é teórica; se pelo cmd, é real.
 
-Dar `.cmd` aos dois resolveria metade e deixaria a outra de pé. O que fecha de
-verdade é migrá-los para Go, como o `cloudez-sync` já foi — aí somem o `.cmd` e o
-`jq` de uma vez, e o Windows deixa de depender de um shell POSIX para qualquer
-coisa. Enquanto isso não acontece, no Windows o login e o setup precisam ser
-feitos a partir de outra máquina, ou com `jq` instalado à mão e chamando os
-scripts de dentro do Git Bash.
+O que fecha de vez é reescrevê-los em Node, que já é dependência: some o bash e
+some a necessidade do `.cmd` intermediário. Go também fecharia, mas custa seis
+binários novos em `libexec/` para dois scripts que escrevem um arquivo de config
+e leem um token — o Node é o alvo melhor aqui.
 
 **O Windows tem cobertura dos dois launchers e do binário.** Três frentes, em
 jobs próprios sobre `windows-latest`:
@@ -386,6 +384,7 @@ precisarem da **máquina local** — nenhum fala com a Cloudez.
 | `cloudez-login` | Coletar o token exige TTY, e um servidor stdio não tem terminal de controle |
 | `cloudez-setup` | **Escreve** no projeto do usuário |
 | `cloudez-sync` (Go) | O transporte fica sempre local, por decisão do contrato |
+| `_json.mjs` | Não é adaptador: helper que os dois de cima usam para escrever JSON, no lugar do `jq` |
 
 Ler a máquina local nunca foi razão para ficar fora do MCP — o servidor roda na
 mesma máquina, e já lê `~/.cloudez/token`. Por isso `cloudez-pubkey` e
@@ -473,10 +472,10 @@ O servidor guarda as 5 releases mais recentes — é até onde o rollback alcan�
 
 ### Dependências
 
-Na máquina local: `ssh` e `tar` para o transporte, `jq` para os dois adaptadores
-em shell que restam (`cloudez-login` e `cloudez-setup`) e **Node 20+** para o
-servidor MCP embutido. No servidor, GNU coreutils — a troca atômica do symlink
-usa `mv -T`, que não existe em BSD/macOS.
+Na máquina local: `ssh` e `tar` para o transporte, e **Node 20+** — que serve ao
+servidor MCP embutido e, desde a saída do `jq`, também aos dois adaptadores em
+shell que restam. No servidor, GNU coreutils — a troca atômica do symlink usa
+`mv -T`, que não existe em BSD/macOS.
 
 **`git` não é dependência.** Foi até o deploy passar a identificar a release pelo
 hash do conteúdo publicado; antes disso o `ref` era a única referência, e sem
@@ -485,11 +484,16 @@ repositório não havia deploy. Hoje o commit entra no `release_id` quando exist
 duas chamadas que restam já toleram a ausência: o passo 3 do deploy segue sem
 `ref`, e o `cloudez-setup` grava `gitignore: "skipped"` fora de um repositório.
 
-O `jq` só constrói JSON, nunca o lê — sempre `jq -n --arg`, que é o que escapa
-corretamente valores vindos do usuário (domínio, caminhos, mensagens com aspas).
-Trocá-lo por `printf` significaria reescrever escape de JSON à mão sobre entrada
-não confiável. Ele sai da lista quando esses dois adaptadores virarem Go, como o
-`cloudez-sync` já virou; não antes.
+**`jq` saiu do runtime** e ficou só como dependência de teste, onde faz o que
+sabe fazer: ler JSON. Nos adaptadores ele nunca lia — os cinco usos construíam,
+sempre `jq -n --arg`, que estava ali porque é o que escapa corretamente valores
+vindos do usuário (domínio, caminhos, mensagens com aspas). Quem faz isso agora é
+`bin/_json.mjs`, um helper de trinta linhas: `JSON.stringify` escapa igual, e o
+Node já era dependência dura por causa do servidor MCP. Mesma segurança, uma
+dependência a menos.
+
+O custo é ~60ms de startup do Node contra ~4ms do `jq`, em fluxos interativos que
+chamam isso uma ou duas vezes.
 
 `curl` é **opcional**: sem ele o token não é verificado contra a API e o retorno
 diz `verified: false`. Exigir curl para ler um arquivo local seria dependência
