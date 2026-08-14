@@ -13,8 +13,8 @@ cheguem ao mesmo lugar que `/cloudez:deploy`.
 se o usuário os tiver mencionado.
 
 Toda a lógica do deploy vive em `commands/deploy.md`: autenticação, escolha do
-environment, confirmação do site na Cloudez, working tree limpo, build, as três
-etapas do deploy e o rollback. Se precisar consultar o procedimento, leia esse
+environment, confirmação do site na Cloudez, build, identificação da release,
+as três etapas do deploy e o rollback. Se precisar consultar o procedimento, leia esse
 arquivo — não reconstrua os passos de memória, e não os duplique aqui.
 
 Uma fonte só. Duas descrições do mesmo deploy divergem, e a que estiver errada

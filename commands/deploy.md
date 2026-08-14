@@ -75,13 +75,25 @@ falharia com permissão negada no meio do caminho.
 **`upstream_unavailable`** — leia o `hint`. Se disser que a **rota** não existe,
 o problema é o endpoint do servidor MCP: não afirme que o site sumiu da conta.
 
-## 3. Working tree limpo
+## 3. Identificar o que está sendo publicado (se houver git)
 
-Rode `git status --porcelain`. Se voltar qualquer coisa, **pare** e reporte o que
-está pendente. O `ref` do deploy precisa apontar para um commit real — senão o
-rollback fica sem destino e ninguém sabe o que está no ar.
+**Nem todo projeto é um repositório git, e o deploy não depende de um.** O que
+identifica a release é o hash do conteúdo publicado, coletado no passo 4c.
 
-Colete o SHA com `git rev-parse HEAD`.
+Rode `git rev-parse HEAD` **uma vez**. Se falhar — não é repositório, ou não há
+commit — siga sem `ref`; não é erro e não merece comentário ao usuário.
+
+Se houver repositório, rode também `git status --porcelain`. Saída não vazia
+significa que o commit **não descreve** o que vai ao ar: há mudanças no disco
+que o `ref` não representa. Isso **não interrompe o deploy** — o hash do conteúdo
+identifica a release corretamente de qualquer forma. Avise o usuário em uma
+linha, dizendo que o `release_id` vai sair marcado pelo conteúdo, e siga.
+
+Antes isto era um bloqueio, pela razão certa na época: o `ref` era a única
+referência da release, e um commit que não correspondia ao disco deixava o
+rollback sem destino confiável. Com o hash do conteúdo essa preocupação deixou
+de existir, e parar o deploy passou a custar mais do que resolvia — a árvore
+suja costuma ser exatamente a correção às pressas que se está tentando publicar.
 
 ## 4. Decidir o que subir
 
@@ -147,17 +159,49 @@ prática a primeira requisição a um domínio costuma vir bem mais lenta que as
 seguintes — cache frio de borda e handshake de TLS, não o seu deploy. Não
 apresente essa queda ao usuário como melhora.
 
+## 4c. Identificar o conteúdo
+
+```
+cloudez-sync --hash-only <diretório decidido no passo 4>
+```
+
+Devolve `content_sha256`, `files` e `bytes`. **Guarde o `content_sha256`** — é o
+que identifica a release, com ou sem git.
+
+Roda sobre o diretório do passo 4, depois do build e antes de qualquer coisa
+tocar a rede. Não envia nada; só lê. Cobre exatamente o conjunto de arquivos que
+o `cloudez-sync` vai transmitir, incluindo a exclusão do `.git`.
+
+**Erro `build_output_empty` dizendo que só há `.git`** — o diretório escolhido
+não tem nada publicável. Quase sempre é o passo 4 tendo apontado para a raiz de
+um repositório sem build em vez do diretório de saída. Volte ao passo 4.
+
+Se `files` ou `bytes` vierem absurdos para o projeto (dezenas de milhares de
+arquivos num site estático, por exemplo), **pare e confirme com o usuário** antes
+de publicar: costuma ser `node_modules` indo junto num caminho `compose: false`.
+
 ## 5. Registrar a release
 
 ```
 cloudez_begin_deploy(
   domain: "<domain>",
   root: "<root do bloco do environment no .cloudez.yaml>",
-  ref: "<sha>",
+  content_sha256: "<content_sha256 do passo 4c>",
+  ref: "<sha do passo 3, se houver>",
   idempotency_key: "<uuid>",
   environment: "<environment>"
 )
 ```
+
+**`content_sha256` vai sempre.** O `ref` vai só quando o passo 3 conseguiu o
+commit — omita o campo fora de um repositório, não mande string vazia.
+
+O `release_id` que volta é `<timestamp>-<sufixo>`, e a letra do sufixo diz de
+onde ele veio: `g1a2b3c` é commit, `c9f8e7d` é conteúdo. Use o `release_id` do
+retorno ao falar com o usuário; não o monte por conta própria.
+
+**Erro `release_unidentifiable`** — a chamada foi sem os dois. Volte ao passo 4c;
+não invente um `ref`.
 
 A tool resolve o destino ssh sozinha, pelo `domain` (o mesmo `cloudez_get_site`
 do passo 2) — **não passe host, user nem port**. O `root` vem do `.cloudez.yaml`
@@ -286,7 +330,7 @@ O retorno traz `compose.project` e `compose.containers`, com `name`, `state` e
 **Confira também o `compose.recreated`.** Ele diz se algum container foi de fato
 trocado. `false` significa que o Compose não recriou nada — o conteúdo saiu
 idêntico ao do deploy anterior, então a imagem saiu idêntica. Costuma ser
-legítimo (republicar o mesmo SHA), mas é a diferença entre "a release nova está
+legítimo (republicar o mesmo conteúdo), mas é a diferença entre "a release nova está
 servindo" e "a release nova está no disco". O `state` responde `running` nos dois
 casos. Quando vier `false` e o deploy deveria ter mudado alguma coisa, cruze com
 o `body_sha256` do passo 9.
@@ -381,8 +425,9 @@ seguido de `cloudez_compose_up`, ambos com o `deploy_id` dela. O
 `cloudez_compose_build` aceita release já ativa justamente para isto.
 
 Se não houver um deploy ativo para essa release, um `cloudez_begin_deploy` novo
-apontando para o mesmo `ref`, seguido de sync + compose_build + finalize +
-compose_up, é o caminho que reconstrói e religa tudo.
+com os mesmos identificadores (o `content_sha256` do passo 4c, e o `ref` se
+houver), seguido de sync + compose_build + finalize + compose_up, é o caminho
+que reconstrói e religa tudo.
 
 **Rode o passo 9 de novo depois do rollback.** Voltar o symlink é o remédio, não
 a confirmação — e um rollback que não devolve o site ao ar é o pior estado
@@ -390,8 +435,12 @@ possível para se declarar resolvido.
 
 ## Como reportar
 
-Comece pelo resultado: subiu ou não subiu, em qual ambiente, qual SHA. Depois o
-detalhe.
+Comece pelo resultado: subiu ou não subiu, em qual ambiente, qual `release_id`.
+Depois o detalhe.
+
+Diga o `release_id` inteiro, não só o sufixo: é o que o usuário vai digitar num
+rollback. Quando houver commit, mencione-o junto — a pessoa reconhece o commit,
+não o hash de conteúdo.
 
 Não descreva os passos que correram bem — o usuário não precisa saber que o envio
 funcionou. Descreva o que ele precisa fazer alguma coisa a respeito: falhas,

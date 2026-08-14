@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.19 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 1.0.20 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -20103,6 +20103,19 @@ function stripHome(root) {
 function timestamp() {
   return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
+function releaseSuffix(ref, contentSha) {
+  const git = (ref ?? "").trim();
+  if (git) return `g${git.slice(0, 7)}`;
+  const content = (contentSha ?? "").trim();
+  if (content) return `c${content.slice(0, 7)}`;
+  throw new ToolError(
+    "release_unidentifiable",
+    "Sem `ref` (commit) e sem `content_sha256`, a release n\xE3o teria como ser identificada depois.",
+    {
+      hint: "Rode `cloudez-sync --hash-only <diret\xF3rio>` e passe o `content_sha256` do retorno. Em um reposit\xF3rio git, `git rev-parse HEAD` no `ref` tamb\xE9m serve."
+    }
+  );
+}
 function projectName(domain) {
   return domain.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+$/, "");
 }
@@ -20110,9 +20123,9 @@ async function beginDeploy(args) {
   pruneOldState();
   const existing = lookupIdempotencyKey(args.idempotency_key);
   if (existing) return loadState(existing);
+  const suffix = releaseSuffix(args.ref, args.content_sha256);
   const ssh = await resolveSshTarget(args.domain);
-  const sha7 = args.ref.slice(0, 7);
-  const releaseId = `${timestamp()}-${sha7}`;
+  const releaseId = `${timestamp()}-${suffix}`;
   const deployId2 = deployId(releaseId, args.idempotency_key);
   const root = stripHome(args.root);
   const releasePath = `${root}/releases/${releaseId}`;
@@ -20128,7 +20141,13 @@ async function beginDeploy(args) {
     release_id: releaseId,
     environment: args.environment ?? "",
     domain: args.domain,
-    ref: args.ref,
+    ref: args.ref ?? "",
+    // Gravado mesmo quando o sufixo veio do git. O commit descreve o fonte; no
+    // caminho sem container o que se publica é a saída do build, que ele não
+    // fixa — o mesmo commit com outra versão do Node produz bytes diferentes.
+    // Manter os dois é o que impede a precisão de se perder junto com a
+    // legibilidade do nome.
+    content_sha256: args.content_sha256 ?? "",
     note: args.note ?? "",
     status: "awaiting_upload",
     // O `path` sempre termina em `/`: significa "conteúdo de", não "o diretório em
@@ -20681,11 +20700,14 @@ server.registerTool(
   "cloudez_begin_deploy",
   {
     title: "Registrar uma release e preparar o destino do envio",
-    description: "Registra a inten\xE7\xE3o de deploy e cria o diret\xF3rio de release no servidor. N\xC3O move bytes \u2014 devolve o deploy_id e o destino ssh para o transporte (cloudez-sync) escrever. Chame depois de o build passar e o working tree estar limpo, uma vez por deploy. O `root` vem SEMPRE do .cloudez.yaml do projeto (nunca da API); o destino ssh \xE9 resolvido aqui pelo dom\xEDnio. Gere a idempotency_key (UUID) uma vez e reuse-a em qualquer retry.",
+    description: "Registra a inten\xE7\xE3o de deploy e cria o diret\xF3rio de release no servidor. N\xC3O move bytes \u2014 devolve o deploy_id e o destino ssh para o transporte (cloudez-sync) escrever. Chame depois de o build passar, uma vez por deploy. O `root` vem SEMPRE do .cloudez.yaml do projeto (nunca da API); o destino ssh \xE9 resolvido aqui pelo dom\xEDnio. Gere a idempotency_key (UUID) uma vez e reuse-a em qualquer retry. Passe `content_sha256` (de `cloudez-sync --hash-only`) SEMPRE, e `ref` tamb\xE9m quando o projeto estiver num reposit\xF3rio git. Sem nenhum dos dois a chamada \xE9 recusada.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
       root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
-      ref: string2().describe("Git SHA (preferido) ou tag identificando o que est\xE1 sendo enviado"),
+      ref: string2().optional().describe("Git SHA do que est\xE1 sendo enviado. Omita fora de um reposit\xF3rio git."),
+      content_sha256: string2().optional().describe(
+        "content_sha256 devolvido por `cloudez-sync --hash-only <diret\xF3rio>`. Identifica a release quando n\xE3o h\xE1 git, e fica registrado mesmo quando h\xE1."
+      ),
       idempotency_key: string2().describe("UUID gerado pelo cliente. Repetir devolve o mesmo deploy_id."),
       note: string2().optional().describe("Descri\xE7\xE3o livre (opcional)"),
       environment: string2().optional().describe("Nome do environment do .cloudez.yaml (r\xF3tulo, opcional)")

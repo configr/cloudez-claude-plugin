@@ -18,10 +18,10 @@ um rollback não verificado é o pior estado possível para se declarar resolvid
 O projeto precisa de um `.cloudez.yaml`. Sem ele não há `root`, e sem `root` não
 há o que voltar — pare e diga isso.
 
-**Não exija working tree limpo.** Diferente do deploy, aqui nada é publicado a
-partir do que está no disco local: as releases já estão no servidor. Exigir
-árvore limpa só impediria o rollback exatamente quando alguém está no meio de uma
-correção às pressas.
+**Não exija working tree limpo, nem repositório git.** Nada aqui é publicado a
+partir do disco local: as releases já estão no servidor. Exigir árvore limpa só
+impediria o rollback exatamente quando alguém está no meio de uma correção às
+pressas.
 
 ## 0. Autenticação
 
@@ -61,8 +61,19 @@ ar. O servidor guarda as 5 mais recentes.
 à mão erra fácil. Se ele não indicou destino, proponha a imediatamente anterior à
 atual.
 
-O `release_id` é `<timestamp>-<sha7>`: o sufixo é o commit, e é o que permite ao
-usuário reconhecer para onde está voltando. Diga o sha, não só o timestamp.
+O `release_id` é `<timestamp>-<sufixo>`, e o sufixo é o que permite ao usuário
+reconhecer para onde está voltando — diga-o, não só o timestamp. A primeira
+letra diz de onde ele veio:
+
+- **`g1a2b3c`** — commit do git. É o que a pessoa reconhece; se ela souber o
+  commit, sabe o que está voltando.
+- **`c9f8e7d`** — hash do conteúdo publicado, de um deploy feito fora de um
+  repositório git (ou com a árvore suja). Não tem como ser cruzado com o
+  histórico: o que o identifica é o próprio conteúdo.
+
+Não trate um `c` como anomalia nem sugira ao usuário que aquela release é menos
+confiável. As duas foram publicadas do mesmo jeito; o que muda é só qual
+identificador estava disponível na hora.
 
 Alvo que não existe mais volta `release_not_found` com a lista do que sobrou.
 **Não escolha outro por conta própria** — quem pediu uma release específica tinha
@@ -107,9 +118,14 @@ fato.
 
 **Se não houver estado local para essa release** — máquina diferente, ou estado
 podado depois de 7 dias —, não há `deploy_id` para passar, e as duas tools não
-têm como ser chamadas. O caminho então é `/cloudez:deploy` no commit
-correspondente (o sha está no `release_id`), que refaz a release e o container.
-Diga isso ao usuário em vez de tentar contornar.
+têm como ser chamadas. O caminho então é `/cloudez:deploy` a partir do conteúdo
+correspondente, que refaz a release e o container. Diga isso ao usuário em vez de
+tentar contornar.
+
+Com sufixo `g`, o commit está no próprio `release_id` e o caminho é dar checkout
+nele. Com sufixo `c` **não há como recuperar o conteúdo a partir do id** — ele
+identifica, não armazena. Diga isso claramente: o usuário precisa saber de que
+diretório aquela release saiu, e essa informação não está no servidor.
 
 ## 6. Verificar que o site voltou
 
@@ -127,8 +143,9 @@ cloudez_health_check(domain: "<domain>")
 
 ## Como reportar
 
-Comece por **qual versão está no ar agora** — release_id e sha. É a única coisa
-que a pessoa do outro lado precisa saber primeiro.
+Comece por **qual versão está no ar agora** — o `release_id` inteiro. É a única
+coisa que a pessoa do outro lado precisa saber primeiro. Quando o sufixo for `g`,
+mencione o commit junto: é o que ela reconhece.
 
 Depois: de onde veio, se o container foi recriado (em site de container), e o
 resultado do health check.

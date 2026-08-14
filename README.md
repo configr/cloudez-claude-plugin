@@ -82,8 +82,8 @@ Depois de carregado:
 - `/cloudez:rollback [environment] [release_id]` — volta o site para uma release
   anterior. Existe separado porque a operação de emergência não pode morar dentro
   do procedimento que a causou: quem precisa dela não vai rolar um documento longo
-  no pior momento. Não exige working tree limpo — nada é publicado a partir do
-  disco local, as releases já estão no servidor. Em site de container ele
+  no pior momento. Não exige repositório git nem working tree limpo — nada é
+  publicado a partir do disco local, as releases já estão no servidor. Em site de container ele
   reconstrói a imagem depois de trocar o symlink, sem o que o rollback não surte
   efeito nenhum.
 
