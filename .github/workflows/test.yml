@@ -25,9 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go-version-file em vez de `stable`: o job `binarios` compara os binarios
+      # commitados byte a byte, e o compilador faz parte da entrada dessa
+      # comparacao. Com `stable`, o dia em que o runner promovesse uma versao
+      # nova quebraria o CI sem que uma linha do projeto tivesse mudado.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: true
 
       - name: Instalar dependências (Linux)
@@ -40,13 +44,42 @@ jobs:
 
       # test/run.sh compila antes de testar, entao a suite sempre valida o
       # codigo-fonte atual — nunca um binario velho que ficou no repositorio.
-      #
-      # O que o CI NAO garante e que os binarios commitados correspondam ao
-      # fonte: comparar byte a byte falharia sempre que a versao do Go do CI
-      # divergisse da do desenvolvedor. Rodar ./build.sh antes de commitar
-      # continua sendo responsabilidade de quem altera cmd/.
+      # Que o binario commitado corresponda a esse fonte e o job `binarios`
+      # que verifica.
       - name: Rodar a suíte
         run: ./test/run.sh --strict
+
+  # Os seis binários de libexec/ são versionados: quem instala o plugin recebe
+  # blobs compilados que não consegue auditar lendo o repositório. Este job é o
+  # que torna isso verificável em vez de ter de acreditar — reconstrói do fonte
+  # e falha se um único byte divergir do que está commitado.
+  #
+  # Só funciona porque build.sh usa -trimpath e -buildvcs=false: sem eles o Go
+  # embute o caminho da máquina e a revisão do git no binário, e duas builds do
+  # mesmo fonte nunca sairiam iguais.
+  #
+  # Roda só no Linux. A saída da compilação cruzada não depende do host, então
+  # repetir na matriz custaria o dobro sem verificar nada a mais.
+  binarios:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Reconstruir
+        run: ./build.sh
+
+      - name: Conferir se batem com os commitados
+        run: |
+          if ! git diff --exit-code --stat -- libexec/; then
+            echo "::error::Os binários em libexec/ não correspondem ao fonte em cmd/. Rode ./build.sh e inclua libexec/ no commit."
+            exit 1
+          fi
 
   # Job separado, e estreito de propósito. Portar a suíte bats para Windows
   # significaria bash, jq e coreutils no runner — muito trabalho para cobrir uma
