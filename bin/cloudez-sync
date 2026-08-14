@@ -31,9 +31,34 @@ case "$arch" in
   arm64|aarch64) arch=arm64 ;;
 esac
 
-bin="$libexec/$name-$os-$arch"
+# Windows chega aqui por bash — Git Bash, MSYS2, Cygwin — e nenhum deles diz
+# "windows" no `uname -s`: sai `MINGW64_NT-10.0-22631`, `MSYS_NT-...` ou
+# `CYGWIN_NT-...`, com a versao do sistema embutida no nome.
+#
+# Sem este mapeamento o script procurava `sync-mingw64_nt-10.0-22631-amd64` e
+# falhava com "binario ausente para mingw64_nt-10.0-22631/amd64" — que se le
+# como "nao foi compilado para Windows", quando o .exe estava ali ao lado o
+# tempo todo. O par .cmd nunca viu esse problema, e por isso o defeito passou:
+# ele so aparece quando alguem chama o plugin de dentro de um bash no Windows.
+ext=
+case "$os" in
+  mingw*|msys*|cygwin*) os=windows; ext=.exe ;;
+esac
 
-if [ ! -x "$bin" ]; then
+bin="$libexec/$name-$os-$arch$ext"
+
+# `-x` no lugar de `-f` em toda parte menos Windows: e o bit de execucao que
+# distingue um binario utilizavel de um arquivo truncado por um checkout pela
+# metade. Em Windows nao ha esse bit — dependendo de como o volume esta montado,
+# o bash reporta todo .exe como executavel ou nenhum —, entao la a pergunta que
+# resta e se o arquivo existe.
+if [ "$os" = windows ]; then
+  existe() { [ -f "$1" ]; }
+else
+  existe() { [ -x "$1" ]; }
+fi
+
+if ! existe "$bin"; then
   echo "cloudez: binario '$name' ausente para $os/$arch ($bin)." >&2
   echo "cloudez: rode ./build.sh no diretorio do plugin." >&2
   exit 1

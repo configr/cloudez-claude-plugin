@@ -267,6 +267,37 @@ func TestContagemEBytesConferem(t *testing.T) {
 	}
 }
 
+// Âncora entre plataformas. As outras propriedades daqui são relativas ("mudar
+// X muda o hash"), e todas continuariam valendo se o Windows produzisse uma
+// família de hashes inteiramente diferente da do Linux.
+//
+// Isso não seria detalhe: o release_id sairia diferente para o mesmo conteúdo
+// dependendo de quem publicou, e duas releases idênticas passariam por
+// distintas — exatamente o que o identificador existe para evitar.
+//
+// O mesmo valor está no job `windows-build` do CI, que roda o binário no
+// Windows sobre esta mesma árvore. Os dois mudam JUNTOS: se você alterar o
+// formato do hash, o teste daqui quebra, e o do CI também.
+func TestHashDeArvoreConhecida(t *testing.T) {
+	const esperado = "03ff8bfa4d33e6cad50a7101e974ef34d6e8ccd51a77fbaacf97b7355cef01fc"
+
+	dir := escrever(t, map[string]string{
+		"index.html":      "<h1>oi</h1>",
+		"assets/logo.svg": "svg",
+		".git/HEAD":       "ref: x",
+	})
+
+	h := hashDe(t, dir)
+	if h.Files != 2 {
+		t.Fatalf("Files = %d, queria 2 (o .git fica de fora)", h.Files)
+	}
+	if h.Sum != esperado {
+		t.Errorf("hash mudou de formato:\n  veio  %s\n  queria %s\n\n"+
+			"Se a mudança foi intencional, atualize TAMBÉM o CONTENT_SHA_ESPERADO "+
+			"do job windows-build em .github/workflows/test.yml.", h.Sum, esperado)
+	}
+}
+
 // Short e o que vira sufixo do release_id.
 func TestShortTemSeteDigitos(t *testing.T) {
 	dir := escrever(t, map[string]string{"a.txt": "um"})

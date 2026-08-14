@@ -12,9 +12,10 @@ jobs:
     # GNU coreutils) e o bash 3.2 que o macOS ainda traz, sem `mapfile`. Os dois
     # ja quebraram aqui por so termos testado num lugar.
     #
-    # Windows nao esta na matriz: o launcher .cmd nao tem cobertura automatizada
-    # (veja "Limitacoes" no README). Os binarios sao compilados aqui, mas nao
-    # executados nessa plataforma.
+    # Windows nao esta na matriz porque portar a suite bats para la exigiria
+    # bash, jq e coreutils no runner. A cobertura daquela plataforma mora nos
+    # jobs `windows` (os dois launchers) e `windows-build` (compila e executa o
+    # binario no proprio Windows).
     strategy:
       fail-fast: false
       matrix:
@@ -97,3 +98,99 @@ jobs:
       - name: Launcher .cmd
         shell: pwsh
         run: ./test/windows/launcher.ps1
+
+      # O outro launcher. O .cmd acima é o caminho quando quem chama é o cmd ou o
+      # PowerShell, mas no Windows o plugin também é chamado de dentro de um bash
+      # — Git Bash vem junto com o Git, e é o shell que várias ferramentas usam
+      # para rodar comando. Aí quem responde é `bin/cloudez-sync`, o script
+      # POSIX, e ele estava escolhendo o binário errado.
+      #
+      # Foi assim que o Windows quebrou com o .exe presente e correto ao lado:
+      # `uname -s` no Git Bash devolve `MINGW64_NT-10.0-22631`, não `windows`, e
+      # o script montava um nome de arquivo que nunca existiu. O erro dizia
+      # "binário ausente para mingw64_nt-10.0-22631/amd64", que se lê como falta
+      # de build.
+      #
+      # `shell: bash` no runner Windows é exatamente esse Git Bash — o mesmo
+      # ambiente do usuário, não uma aproximação.
+      - name: Launcher POSIX sob Git Bash
+        shell: bash
+        run: ./test/windows/launcher-posix.sh
+
+  # Compila e EXECUTA no Windows, do fonte, num runner Windows.
+  #
+  # O job `binarios` compila para windows/amd64, mas por compilação cruzada a
+  # partir do Linux, e só compara bytes — nada ali chega a rodar o .exe. O job
+  # `windows` executa, mas o binário COMMITADO. Entre os dois faltava a pergunta
+  # mais simples: o código de hoje compila e roda nesta plataforma?
+  #
+  # amd64 e não arm64 porque é o que o runner é. Uma verificação que não pode
+  # executar o que compilou seria o mesmo furo de novo, com outro nome.
+  windows-build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Compilar para windows/amd64 no próprio Windows
+        shell: bash
+        run: |
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=false -ldflags="-s -w" \
+            -o ./sync-teste.exe ./cmd/sync
+
+      - name: Rodar o que acabou de ser compilado
+        shell: bash
+        run: |
+          # Sem argumentos: imprime o uso e sai 2. Confirma que o PE roda de
+          # verdade neste sistema, e não só que o `go build` devolveu 0.
+          saida=$(./sync-teste.exe 2>&1 || true)
+          ./sync-teste.exe >/dev/null 2>&1 && codigo=0 || codigo=$?
+          set -euo pipefail
+
+          echo "$saida"
+          [ "$codigo" = "2" ] || { echo "::error::esperado exit 2 sem argumentos, veio $codigo"; exit 1; }
+          case "$saida" in
+            *"uso: cloudez-sync"*) ;;
+            *) echo "::error::o binário não imprimiu o uso"; exit 1 ;;
+          esac
+
+      # O --hash-only é a peça que anda no disco: percorre a árvore, normaliza
+      # caminho e lê modo de arquivo. É onde uma diferença de plataforma aparece,
+      # e onde o Windows diverge mais do resto.
+      - name: --hash-only sobre uma árvore de verdade
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raiz=arvore-teste
+          mkdir -p "$raiz/assets" "$raiz/.git"
+          printf '<h1>oi</h1>' > "$raiz/index.html"
+          printf 'svg'         > "$raiz/assets/logo.svg"
+          printf 'ref: x'      > "$raiz/.git/HEAD"
+
+          saida=$(./sync-teste.exe --hash-only "$raiz")
+          echo "$saida"
+
+          # 2 arquivos: o .git fica de fora, como no tar do transfer.
+          echo "$saida" | grep -q '"files": 2' \
+            || { echo "::error::o .git não foi excluído no Windows"; exit 1; }
+
+          # O MESMO conteúdo tem de dar o MESMO sha que nas outras plataformas.
+          # É o que torna o release_id comparável entre a máquina de quem
+          # publica e qualquer outra — se o Windows divergir aqui, dois deploys
+          # do mesmo conteúdo viram releases diferentes.
+          esperado=$(printf '%s' "$CONTENT_SHA_ESPERADO")
+          obtido=$(echo "$saida" | sed -n 's/.*"content_sha256": "\([a-f0-9]*\)".*/\1/p')
+          [ "$obtido" = "$esperado" ] \
+            || { echo "::error::sha divergente no Windows: $obtido != $esperado"; exit 1; }
+        env:
+          # Calculado na suíte Go, que roda em Linux e macOS. Ver
+          # TestHashDeArvoreConhecida em internal/cloudez/payload_test.go: os
+          # dois lados precisam mudar juntos, de propósito.
+          CONTENT_SHA_ESPERADO: 03ff8bfa4d33e6cad50a7101e974ef34d6e8ccd51a77fbaacf97b7355cef01fc

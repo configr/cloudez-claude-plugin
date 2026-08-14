@@ -297,15 +297,28 @@ um mock de `curl`. Verificado manualmente: um token inventado devolve `401` de
 `api.cloudez.io`, e o plugin traduz isso em `token_invalid`. O caminho do token
 válido (`2xx`) depende de uma credencial de verdade e nunca passou pela suíte.
 
-**O Windows tem cobertura só do launcher.** O `bin/cloudez-sync.cmd` roda em CI
-num job próprio (`windows-latest`), afirmando o que ele existe para garantir:
-propagar o código de saída do binário, resolver o alvo pelo próprio nome do
-arquivo e falhar com mensagem útil quando o executável não está lá.
+**O Windows tem cobertura dos dois launchers e do binário.** Três frentes, em
+jobs próprios sobre `windows-latest`:
 
-O resto do caminho Windows segue sem verificação. A suíte `bats` não roda ali —
-portá-la significaria bash, jq e coreutils no runner, muito trabalho para cobrir
-o que já é coberto em duas outras plataformas —, e um deploy de verdade a partir
-de Windows nunca foi feito.
+- `bin/cloudez-sync.cmd`, o caminho de quem chama pelo cmd ou PowerShell:
+  propagar o código de saída do binário, resolver o alvo pelo próprio nome do
+  arquivo e falhar com mensagem útil quando o executável não está lá;
+- `bin/cloudez-sync`, o caminho de quem chama de dentro de um bash — Git Bash
+  vem junto com o Git. Existe porque o plugin já quebrou exatamente aí: `uname
+  -s` devolve `MINGW64_NT-10.0-...`, não `windows`, e o launcher procurava um
+  binário com esse nome no caminho enquanto o `sync-windows-amd64.exe` correto
+  estava ao lado. O `.cmd` tinha cobertura desde sempre e o POSIX não, então o
+  defeito ficou invisível: há dois caminhos de entrada, e um só era verificado;
+- `windows-build` compila para `windows/amd64` **no próprio Windows** e executa
+  o que compilou, incluindo um `--hash-only` sobre uma árvore conhecida cujo
+  `content_sha256` precisa bater com o valor fixado na suíte Go. É o que impede
+  o Windows de produzir uma família de hashes própria — se divergisse, o mesmo
+  conteúdo publicado de máquinas diferentes viraria releases diferentes.
+
+O que segue sem verificação em Windows: a suíte `bats` não roda ali — portá-la
+significaria bash, jq e coreutils no runner, muito trabalho para cobrir o que já
+é coberto em duas outras plataformas — e um deploy de verdade a partir de
+Windows nunca foi feito.
 
 **`sync` → `finalize` contra servidor real** continua sem cobertura: os testes
 verificam o comando enviado, não o efeito no servidor. A exceção é o formato do
