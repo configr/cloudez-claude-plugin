@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.1.24 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.0 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
