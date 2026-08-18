@@ -52,12 +52,52 @@ YAML
 }
 
 teardown() {
+  [ -n "${API_PID:-}" ] && kill "$API_PID" 2>/dev/null
   [ -n "${TEST_TMP:-}" ] && [ -d "$TEST_TMP" ] && rm -rf "$TEST_TMP"
   return 0
 }
 
 # jq_field <json> <caminho>
 jq_field() { printf '%s' "$1" | jq -r "$2"; }
+
+# ------------------------------------------------------------- API da Cloudez --
+#
+# O mock de `curl` no PATH deixou de funcionar quando o cloudez-login virou Node e
+# passou a usar `fetch`: nao ha processo externo para interceptar. No lugar sobe
+# uma API de verdade em porta efemera — nenhum teste toca a rede, e o que se afirma
+# passa a ser a REQUISICAO recebida, nao o comando montado.
+
+# start_api — sobe a API falsa e aponta o CLOUDEZ_API_URL para ela
+start_api() {
+  API_CONTROL="$TEST_TMP/api"
+  mkdir -p "$API_CONTROL"
+  export API_CONTROL
+
+  node "$PLUGIN_ROOT/test/mocks/api-server.mjs" "$API_CONTROL" &
+  API_PID=$!
+  export API_PID
+
+  # Espera o arquivo `port`, que o servidor escreve ao comecar a ouvir. Um sleep
+  # fixo ou passa a maior parte do tempo dormindo a toa, ou falha na maquina
+  # lenta — e uma suite que falha as vezes e pior do que uma suite lenta.
+  local i
+  for i in $(seq 1 200); do
+    [ -s "$API_CONTROL/port" ] && break
+    sleep 0.05
+  done
+  [ -s "$API_CONTROL/port" ] || { echo "api falsa nao subiu" >&2; return 1; }
+
+  export CLOUDEZ_API_URL="http://127.0.0.1:$(cat "$API_CONTROL/port")"
+}
+
+# api_status <codigo> — o que a API respondera na proxima chamada
+api_status() { printf '%s' "$1" > "$API_CONTROL/status"; }
+
+# api_offline — aponta para uma porta onde nao ha ninguem.
+#
+# E a falha de conexao de verdade, nao uma simulacao dela: o `fetch` levanta a
+# mesma excecao que levantaria offline, e o veredito tem que cair para "unknown".
+api_offline() { export CLOUDEZ_API_URL="http://127.0.0.1:1"; }
 
 # deploy_state <deploy_id> [status] — escreve o estado que o cloudez-sync le.
 #

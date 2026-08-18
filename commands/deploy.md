@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-login:*), Bash(cloudez-sync:*), Bash(git:*), Bash(uuidgen:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -25,8 +25,10 @@ e eles não são seus para inventar.
 
 ## 0. Autenticação
 
-Chame `cloudez_auth_status`. Se vier `authenticated: false`, **pare** e conduza o
-`/cloudez:login`. Nunca peça o token na conversa.
+Chame `cloudez_auth_status`. Se vier `authenticated: false`, **pare** e mande o
+usuário rodar `/cloudez:login`. Nunca peça o token na conversa, e não conduza o
+login daqui: o procedimento dele mora em um lugar só, e é lá que estão as
+permissões que ele precisa — este comando não roda o `cloudez-login`.
 
 ## 1. Environment
 
@@ -52,9 +54,11 @@ Do bloco do environment, pegue o `domain` e busque o site:
 cloudez_get_site(domain: "<domain>")
 ```
 
-**`match: "exact"`** — é o alvo. **Guarde o bloco `ssh`**: `host`, `user` e
-`port` são o destino do deploy, e os adaptadores os recebem por ambiente nos
-passos 5 a 10.
+**`match: "exact"`** — é o alvo. O bloco `ssh` do retorno (`host`, `user`,
+`port`) é informativo: serve para você dizer ao usuário para onde o deploy vai.
+**Você não repassa esses valores a ninguém** — o `cloudez_begin_deploy` resolve o
+destino sozinho pelo `domain` e o grava no estado do deploy, e é de lá que o
+`cloudez-sync`, o `finalize` e o `compose_up` o leem.
 
 Esses dados não estão no `.cloudez.yaml` de propósito. Uma cópia do host num
 arquivo versionado envelhece: se a Cloudez mover o site de servidor, o valor
@@ -188,7 +192,6 @@ cloudez_begin_deploy(
   root: "<root do bloco do environment no .cloudez.yaml>",
   content_sha256: "<content_sha256 do passo 4c>",
   ref: "<sha do passo 3, se houver>",
-  idempotency_key: "<uuid>",
   environment: "<environment>"
 )
 ```
@@ -212,9 +215,15 @@ Este passo **já conecta por ssh** — ele prepara o diretório de release no
 servidor. Uma falha de permissão aqui volta como `ssh_failed` (retryable), o
 mesmo caso descrito no passo 6, com a mesma exceção para a chave recém-autorizada.
 
-O `idempotency_key` é um UUID que **você gera uma vez por deploy** (`uuidgen`).
-Se precisar repetir a chamada por qualquer motivo, reuse a mesma chave — ela é o
-que impede um retry seu de virar dois deploys.
+**Não passe `idempotency_key`.** O servidor gera uma. O campo existe para um
+retry não virar um segundo deploy, e ele aceita a sua se você tiver a mesma chave
+de uma chamada anterior — mas **não invente uma**: você não tem como gerar valor
+aleatório de forma confiável, e uma chave repetida por engano devolve um deploy
+antigo em vez de criar o novo.
+
+Isto já foi obrigatório, com o valor vindo de `uuidgen`. O binário não existe no
+subconjunto que o Git Bash do Windows embarca, então o deploy simplesmente não
+passava deste passo naquela plataforma.
 
 Guarde o `deploy_id` do retorno. O destino ssh já foi gravado no estado do
 deploy, e é de lá que o `cloudez-sync` o lê no passo 6.

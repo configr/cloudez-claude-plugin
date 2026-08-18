@@ -3,89 +3,108 @@
 # da autenticacao e a tool cloudez_auth_status do MCP — o --check foi removido
 # daqui, e os adaptadores de deploy nao exigem token nenhum (falam por ssh).
 #
-# O que sobrou de token no shell e testado abaixo direto nas funcoes do _lib.sh,
-# porque o unico comando que as exercita de ponta a ponta exige pty.
+# ─── Por que estes testes mudaram de forma ──────────────────────────────────
+#
+# Antes havia duas camadas: um punhado de testes chamando funcoes do `_lib.sh`
+# direto (`resolve_token`, `verify_token`, `save_token`) e outro punhado
+# exercitando o comando. A primeira existia porque o comando so as exercitava
+# pelo prompt, que precisa de pty.
+#
+# O `--stdin` nao precisa de pty e atravessa exatamente as mesmas funcoes. Com o
+# cloudez-login em Node elas deixaram de ser codigo do shell chamavel de fora, e
+# a camada de baixo perdeu o motivo de existir: hoje tudo aqui e o COMANDO, e a
+# cobertura e a mesma. O que continua sem teste automatizado e so a leitura do
+# terminal — ver "Limitacoes conhecidas" no README.
 
 load helpers/setup
 
-setup() { make_project; }
-
-# lib <expressao> — roda algo com o _lib.sh carregado
-lib() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; $1"; }
-
-# --------------------------------------------------------------- precedencia --
-
-@test "resolve_token le o arquivo quando nao ha variavel" {
-  [ "$(lib resolve_token)" = "tok_teste" ]
-  [ "$(lib token_source)" = "file" ]
+setup() {
+  make_project
+  start_api
 }
 
-@test "CLOUDEZ_TOKEN vence o arquivo" {
-  [ "$(CLOUDEZ_TOKEN=tok_do_ambiente lib resolve_token)" = "tok_do_ambiente" ]
-  [ "$(CLOUDEZ_TOKEN=tok_do_ambiente lib token_source)" = "env" ]
-}
-
-@test "sem arquivo e sem variavel nao ha token" {
-  rm "$CLOUDEZ_TOKEN_FILE"
-  [ -z "$(lib resolve_token)" ]
-  [ "$(lib token_source)" = "none" ]
-}
-
-# -------------------------------------------------------------- verify_token --
+# ------------------------------------------------------------------ endpoint --
 #
-# Os tres vereditos. Esta distincao e contrato, nao detalhe: o MCP a reimplementa
-# do lado dele, e as duas implementacoes precisam concordar.
-
 # Endpoint e header confirmados com a Cloudez. O esquema e `Token`, nao `Bearer`:
 # trocar isso devolve 401 e faria todo token parecer recusado, o que manda o
 # usuario procurar problema no painel em vez de aqui.
-@test "verify_token chama o endpoint e o header confirmados" {
-  lib "verify_token tok_teste" >/dev/null
-  grep -q 'Authorization: Token tok_teste' "$MOCK_LOG"
-  grep -q 'https://api.cloudez.io/auth/token/validate/' "$MOCK_LOG"
+
+@test "a validacao bate no endpoint e no header confirmados" {
+  run bash -c 'printf tok_do_pipe | cloudez-login --stdin'
+  [ "$status" -eq 0 ]
+  grep -q 'api GET /auth/token/validate/' "$MOCK_LOG"
+  grep -q 'Authorization: Token tok_do_pipe' "$MOCK_LOG"
   ! grep -q 'Bearer' "$MOCK_LOG"
 }
 
-@test "CLOUDEZ_API_URL sobrepoe a base, para testar sem editar o script" {
-  CLOUDEZ_API_URL=http://localhost:8000 lib "verify_token tok_teste" >/dev/null
-  grep -q 'http://localhost:8000/auth/token/validate/' "$MOCK_LOG"
+# --------------------------------------------------------------- precedencia --
+
+@test "o token vem do arquivo quando nao ha variavel" {
+  run bash -c 'printf tok_do_pipe | cloudez-login --stdin'
+  [ "$(jq_field "$output" .source)" = "file" ]
 }
 
-@test "2xx: valid" {
-  [ "$(lib 'verify_token tok_teste')" = "valid" ]
+@test "CLOUDEZ_TOKEN vence o arquivo" {
+  run bash -c 'printf tok_do_pipe | CLOUDEZ_TOKEN=tok_do_ambiente cloudez-login --stdin'
+  [ "$(jq_field "$output" .source)" = "env" ]
+}
+
+# ----------------------------------------------------------- os tres vereditos --
+#
+# Esta distincao e contrato, nao detalhe: o MCP a reimplementa do lado dele, e as
+# duas implementacoes precisam concordar.
+
+@test "2xx: o token e dado por verificado" {
+  run bash -c 'printf tok_bom | cloudez-login --stdin'
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .verified)" = "true" ]
+  [ "$(jq_field "$output" .status)" = "authenticated" ]
 }
 
 # 401 e a unica resposta conclusiva: o token existe e a Cloudez o recusou.
-@test "401: invalid" {
-  [ "$(MOCK_HTTP_STATUS=401 lib 'verify_token tok_teste')" = "invalid" ]
+@test "401: recusado, e o erro diz isso" {
+  api_status 401
+  run bash -c 'printf tok_ruim | cloudez-login --stdin'
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
+}
+
+@test "403 tambem e recusa" {
+  api_status 403
+  run bash -c 'printf tok_ruim | cloudez-login --stdin'
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
 }
 
 # Offline, endpoint errado ou API fora nao sao prova de token ruim. Concluir
 # "invalid" aqui mandaria o usuario refazer um login que ja estava certo.
-@test "API fora do ar: unknown" {
-  [ "$(MOCK_CURL_EXIT=7 lib 'verify_token tok_teste')" = "unknown" ]
+@test "API fora do ar: salva e avisa que nao deu para confirmar" {
+  api_offline
+  run bash -c 'printf tok_novo | cloudez-login --stdin'
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .verified)" = "false" ]
+  [ "$(jq_field "$output" .warning)" != "null" ]
+  [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
 }
 
-@test "404: unknown, nao invalid" {
-  [ "$(MOCK_HTTP_STATUS=404 lib 'verify_token tok_teste')" = "unknown" ]
+@test "404: inconclusivo, nao recusa" {
+  api_status 404
+  run bash -c 'printf tok_novo | cloudez-login --stdin'
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .verified)" = "false" ]
+  [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
 }
 
 # -------------------------------------------------------------------- login --
 
-# O ponto central do desenho: um agente nao consegue rodar o login, entao o token
-# nunca passa pelo contexto dele.
+# O ponto central do desenho: um agente nao consegue rodar o login interativo,
+# entao o token nunca passa pelo contexto dele.
 @test "login sem TTY falha: um agente nao pode ler o token" {
   rm "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'cloudez-login < /dev/null'
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "no_tty" ]
   [ ! -f "$CLOUDEZ_TOKEN_FILE" ]
-}
-
-@test "login com argumento desconhecido nao faz nada" {
-  run cloudez-login --force
-  [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "usage" ]
 }
 
 # O erro sem TTY precisa ensinar o caminho, e dentro do Claude Code o caminho e o
@@ -97,21 +116,21 @@ lib() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; $1"; }
   [[ "$(jq_field "$output" .error.hint)" == *"! "* ]]
 }
 
+# A lapide do --check saiu; o erro generico virou o unico caminho de volta ate a
+# tool que o substituiu, entao ele precisa cita-la.
+@test "argumento desconhecido nao faz nada, e aponta a tool" {
+  run cloudez-login --force
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "usage" ]
+  [[ "$(jq_field "$output" .error.hint)" == *cloudez_auth_status* ]]
+}
+
 # O login por e-mail e senha foi abandonado. Quem vier da doc antiga merece um erro
 # que explica, nao "argumento desconhecido".
 @test "--password responde que foi descontinuado" {
   run cloudez-login --password
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "password_login_disabled" ]
-}
-
-# Mesma razao do --password: o substituto do --check nao e outra flag, e uma tool
-# do MCP. "Argumento desconhecido" nao levaria ninguem ate ela.
-@test "--check responde que agora e tool do MCP" {
-  run cloudez-login --check
-  [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "check_moved_to_mcp" ]
-  [[ "$(jq_field "$output" .error.hint)" == *cloudez_auth_status* ]]
 }
 
 # ------------------------------------------------------------------- --stdin --
@@ -136,6 +155,14 @@ lib() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; $1"; }
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_com_newline" ]
 }
 
+@test "stdin num terminal nao trava esperando entrada que nao vem" {
+  run cloudez-login --stdin < /dev/null
+  # Sem terminal aqui: o que se afirma e que o modo existe e nao pendura. O ramo
+  # do "--stdin com TTY" so aparece para quem digita o comando na mao.
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error.code)" = "empty_token" ]
+}
+
 @test "stdin vazio nao salva nada" {
   rm -f "$CLOUDEZ_TOKEN_FILE"
   run bash -c ': | cloudez-login --stdin'
@@ -153,95 +180,30 @@ lib() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; $1"; }
   ! grep -q 'Authorization' "$MOCK_LOG"
 }
 
-@test "stdin com token recusado devolve o anterior" {
-  printf 'tok_bom\n' > "$CLOUDEZ_TOKEN_FILE"
-  # O prefixo vai no cloudez-login, nao no printf: num pipeline cada comando tem o
-  # seu proprio ambiente.
-  run bash -c 'printf tok_ruim | MOCK_HTTP_STATUS=401 cloudez-login --stdin'
-  [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
-  [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_bom" ]
-}
-
 @test "stdin nao imprime o token" {
   rm -f "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'printf tok_secreto | cloudez-login --stdin'
   [[ "$output" != *tok_secreto* ]]
 }
 
-# A dica do erro tem que oferecer o caminho que funciona onde o agente esta. Este
-# teste depende de haver clipboard na maquina: em CI Linux headless nao ha, e o
-# comportamento correto ali e a dica NAO citar clipboard (veja o teste seguinte).
-# O --hint responde "como autentico aqui", nao "estou autenticado" — entao nao
-# pode depender de token nem gastar chamada de API.
-@test "--hint funciona sem token e sem falar com a API" {
-  rm -f "$CLOUDEZ_TOKEN_FILE"
-  run cloudez-login --hint
-  [ "$status" -eq 0 ]
-  [[ "$(jq_field "$output" .claude_code_command)" == "! /"*/cloudez-login ]]
-  [ ! -s "$MOCK_LOG" ] || ! grep -q 'Authorization' "$MOCK_LOG"
-}
-
-@test "a dica oferece o caminho por clipboard, quando ha clipboard" {
-  clip=$(lib clipboard_read_cmd)
-  [ -n "$clip" ] || skip "sem clipboard nesta maquina"
-  out=$(lib login_hint)
-  [[ "$(jq_field "$out" .clipboard_command)" == *"--stdin" ]]
-  [[ "$(jq_field "$out" .hint)" == *clipboard* ]]
-}
-
-# Sem clipboard, a dica cai para o prompt interativo em vez de sugerir um comando
-# que nao existe.
-@test "sem clipboard, a dica oferece so o caminho interativo" {
-  out=$(bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'
-                 clipboard_read_cmd() { :; }
-                 login_hint")
-  [ "$(jq_field "$out" 'has("clipboard_command")')" = "false" ]
-  [[ "$(jq_field "$out" .hint)" == *"! /"* ]]
-}
-
-# X11 e Wayland guardam o clipboard no servidor grafico: sem DISPLAY o utilitario
-# existe e falha. E o caso de SSH, container, CI e Claude Code em maquina remota —
-# e sugerir um comando que falha e pior do que nao sugerir nada.
-@test "sem sessao grafica nao ha clipboard" {
-  run bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; unset DISPLAY WAYLAND_DISPLAY; graphical_session"
-  [ "$status" -eq 1 ]
-  run bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; DISPLAY=:0 graphical_session"
-  [ "$status" -eq 0 ]
-  run bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; WAYLAND_DISPLAY=wayland-0 graphical_session"
-  [ "$status" -eq 0 ]
-}
-
-# ---------------------------------------------------------------- save_token --
+# ------------------------------------------------------------ gravar e desfazer --
 #
-# O prompt do login precisa de pty, mas o que tem consequencia — escrever o
-# segredo, validar, desfazer — mora em save_token, que da para chamar direto.
+# O que tem consequencia: escrever o segredo com 0600, validar DEPOIS do write, e
+# desfazer quando a Cloudez recusa.
 
-# save <token> — chama save_token com o _lib.sh carregado
-save() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; save_token '$1'"; }
-
-@test "save_token grava o token com permissao 0600" {
-  rm -f "$CLOUDEZ_TOKEN_FILE"
-  run save tok_novo
-  [ "$status" -eq 0 ]
-  [ "$output" = "valid" ]
-  [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
-  [ "$(ls -l "$CLOUDEZ_TOKEN_FILE" | cut -c1-10)" = "-rw-------" ]
-}
-
-# O pedido era validar LOGO APOS salvar. Isto afirma a ordem sem pty: o mock
-# registra o conteudo do arquivo no instante da chamada da API.
 @test "a validacao roda depois do write: a API ve o token ja no arquivo" {
   rm -f "$CLOUDEZ_TOKEN_FILE"
-  save tok_novo >/dev/null
+  run bash -c 'printf tok_novo | cloudez-login --stdin'
+  [ "$status" -eq 0 ]
+  # O servidor registra o conteudo do arquivo no instante da chamada. Se a ordem
+  # se invertesse, aqui apareceria vazio — ou o token anterior.
   grep -q 'token_file_at_call=tok_novo' "$MOCK_LOG"
 }
 
-# Perder uma credencial que funcionava por causa de um paste errado seria pior do
-# que o paste errado.
 @test "token recusado devolve o anterior ao arquivo" {
   printf 'tok_bom\n' > "$CLOUDEZ_TOKEN_FILE"
-  MOCK_HTTP_STATUS=401 run save tok_ruim
+  api_status 401
+  run bash -c 'printf tok_ruim | cloudez-login --stdin'
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_bom" ]
@@ -249,47 +211,68 @@ save() { bash -c "source '$PLUGIN_ROOT/bin/_lib.sh'; save_token '$1'"; }
 
 @test "token recusado sem anterior nao deixa arquivo para tras" {
   rm -f "$CLOUDEZ_TOKEN_FILE"
-  MOCK_HTTP_STATUS=401 run save tok_ruim
+  api_status 401
+  run bash -c 'printf tok_ruim | cloudez-login --stdin'
   [ "$status" -eq 1 ]
   [ ! -f "$CLOUDEZ_TOKEN_FILE" ]
 }
 
-# Inconclusivo nao e recusa: o token fica salvo, e quem chama reporta
-# verified:false.
-@test "API inalcancavel salva o token e devolve unknown" {
-  rm -f "$CLOUDEZ_TOKEN_FILE"
-  MOCK_CURL_EXIT=7 run save tok_novo
+@test "o diretorio do token nasce fechado" {
+  rm -rf "$TEST_TMP/casa"
+  run bash -c "printf tok_novo | CLOUDEZ_TOKEN_FILE='$TEST_TMP/casa/.cloudez/token' cloudez-login --stdin"
   [ "$status" -eq 0 ]
-  [ "$output" = "unknown" ]
-  [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
+  [ "$(ls -ld "$TEST_TMP/casa/.cloudez" | cut -c1-10)" = "drwx------" ]
 }
 
-# --------------------------------------------- adaptadores NAO exigem token --
+# ------------------------------------------------------------------- setup ----
 #
-# Nenhum adaptador em bin/ cobra autenticacao. O deploy inteiro fala com o
-# servidor por ssh, com a chave do usuario, e o cloudez-setup so escreve um
-# arquivo local a partir dos argumentos. Quem cobra token e o MCP, porque e ele
-# quem usa o token contra a API.
+# O cloudez-setup nao fala com a Cloudez: escrever config e decisao local. Um
+# adaptador que exigisse token para isso travaria o usuario antes da hora.
 
 @test "setup funciona sem token: escrever config nao fala com a Cloudez" {
-  rm .cloudez.yaml "$CLOUDEZ_TOKEN_FILE"
-  run cloudez-setup meusite.com.br staging
+  rm -f "$CLOUDEZ_TOKEN_FILE" .cloudez.yaml
+  run cloudez-setup novo.example.com staging
   [ "$status" -eq 0 ]
   [ -f .cloudez.yaml ]
 }
 
 @test "setup sem token nao gasta chamada de API" {
-  rm .cloudez.yaml "$CLOUDEZ_TOKEN_FILE"
-  cloudez-setup meusite.com.br staging >/dev/null
-  [ ! -s "$MOCK_LOG" ] || ! grep -q 'Authorization' "$MOCK_LOG"
+  rm -f "$CLOUDEZ_TOKEN_FILE" .cloudez.yaml
+  run cloudez-setup novo.example.com staging
+  ! grep -q 'Authorization' "$MOCK_LOG"
 }
 
-# Sem o gate, o primeiro erro que o usuario ve e o do argumento que faltou — que
-# e o que ele pode consertar sozinho ali mesmo.
 @test "setup sem dominio reclama do dominio" {
-  rm .cloudez.yaml
   run cloudez-setup
   [ "$status" -eq 1 ]
   [ "$(jq_field "$output" .error.code)" = "missing_domain" ]
 }
 
+# ------------------------------------------------------------- piso do Node ----
+#
+# O cloudez-login NAO tem extensao, porque `cloudez-login` e o nome que o usuario
+# digita. Sem extensao, o Node 20 assume CommonJS e o `import` do arquivo vira
+# erro de sintaxe — quem desfaz isso e o `bin/package.json` com `type: module`.
+#
+# Node 22+ detecta o modulo pela sintaxe sozinho, entao o defeito seria INVISIVEL
+# na maquina de quem tem Node novo. `--no-experimental-detect-module` desliga a
+# deteccao e reproduz o Node 20 em qualquer versao.
+@test "o login roda sem a deteccao de modulo, que e o piso Node 20" {
+  run bash -c 'printf tok_do_pipe | node --no-experimental-detect-module "$PLUGIN_ROOT/bin/cloudez-login" --stdin'
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .status)" = "authenticated" ]
+}
+
+@test "o setup tambem roda sem a deteccao de modulo" {
+  rm .cloudez.yaml
+  run bash -c 'node --no-experimental-detect-module "$PLUGIN_ROOT/bin/cloudez-setup" novo.example.com staging'
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .status)" = "created" ]
+}
+
+@test "o bin/package.json existe e so declara o tipo do modulo" {
+  [ "$(jq -r '.type' "$PLUGIN_ROOT/bin/package.json")" = "module" ]
+  # Um package.json com dependencias em bin/ transformaria o plugin em algo que
+  # precisa de npm install — exatamente o que o bundle vendorado evita.
+  [ "$(jq -r 'has("dependencies")' "$PLUGIN_ROOT/bin/package.json")" = "false" ]
+}

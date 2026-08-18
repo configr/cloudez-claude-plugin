@@ -173,6 +173,27 @@ setup_keys() {
   ! grep -q TODO .cloudez.yaml
 }
 
+# ONDE mora a config. Estas tres regras tinham arquivo proprio, test/yaml.bats,
+# porque viviam numa funcao de shell (`resolve_config`, no extinto _yaml.sh) que
+# so dava para chamar por dentro. Com o setup em Node elas voltaram a ser o que
+# sempre foram: comportamento do comando.
+
+@test "com os dois arquivos, o .yaml vence — e o nome que o setup gera" {
+  : > .cloudez.yml
+  run cloudez-setup meusite.com.br staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .path)" = ".cloudez.yaml" ]
+}
+
+@test "CLOUDEZ_CONFIG sobrepoe a deteccao automatica" {
+  rm .cloudez.yaml
+  run env CLOUDEZ_CONFIG=custom.yaml cloudez-setup meusite.com.br staging
+  [ "$status" -eq 0 ]
+  [ "$(jq_field "$output" .path)" = "custom.yaml" ]
+  [ -f custom.yaml ]
+  [ ! -f .cloudez.yaml ]
+}
+
 @test "setup respeita o .cloudez.yml existente em vez de criar um .yaml" {
   mv .cloudez.yaml .cloudez.yml
   run cloudez-setup meusite.com.br staging

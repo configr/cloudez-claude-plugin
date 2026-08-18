@@ -68,6 +68,22 @@ listagem.
 timeout aparente, por retry após erro de rede, por reinterpretar o próprio
 histórico. Sem chave de idempotência isso vira deploy duplicado.
 
+Ela é **opcional**, e quem a gera é o **servidor** quando ela não vem. A versão
+anterior a exigia do cliente, e o `commands/deploy.md` mandava obtê-la com
+`uuidgen` — um binário que o Git Bash do Windows não embarca, então o deploy não
+passava daquele passo naquela plataforma. Duas outras coisas pesaram na troca: um
+modelo não tem como gerar valor aleatório de forma confiável, e a garantia
+dependia de ele *lembrar* de reusar a mesma chave no retry. O que se perde é
+estreito — se a chamada tiver sucesso e a resposta não chegar ao modelo, o retry
+cria um segundo diretório de release, vazio e podado pela retenção. Quem tem a
+chave de uma chamada anterior ainda pode passá-la.
+
+A chave vira **nome de arquivo** em `.cloudez/state/key/`, então ela é validada
+(`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, sem `..`) **antes** de qualquer efeito
+colateral: recusá-la depois do `mkdir` remoto deixaria um diretório órfão por um
+argumento que estava errado desde o começo. Recusa vira
+`invalid_idempotency_key`.
+
 **O retorno é acionável, não um booleano.** `{"ok": true}` cega o modelo. Todo
 retorno de erro deve conter o suficiente para o Claude corrigir e tentar de novo
 sozinho — stderr do comando, código de saída, logs. É isso que fecha o loop
@@ -113,8 +129,39 @@ A distinção entre `authenticated` e `verified` é a mesma da tabela na seção
 Cloudez não desmentiu" — offline ou API fora. Reportar `authenticated: false` aí
 mandaria o usuário refazer um login que já estava correto.
 
-Quando não há token, o retorno traz um `hint` mandando pedir ao usuário que rode
-`! cloudez-login` no terminal. O modelo **não** deve pedir o token na conversa.
+Quando não há token — ou quando a Cloudez o recusou —, o retorno traz **os
+comandos prontos desta máquina**, e não só um conselho genérico:
+
+```jsonc
+{
+  "authenticated": false,
+  "source": "none",
+  "token_file": "/home/ana/.cloudez/token",
+  "verified": false,
+  "hint": "Peça ao usuário para gerar o token no painel e COPIAR. Quando ele confirmar, rode: ...",
+  "login_command": "/home/ana/.claude/plugins/cloudez/bin/cloudez-login",
+  "claude_code_command": "! /home/ana/.claude/plugins/cloudez/bin/cloudez-login",
+  "clipboard_command": "pbpaste | /home/ana/.claude/plugins/cloudez/bin/cloudez-login --stdin",
+  "warning": "Não peça o token na conversa: colado aqui, ele fica no transcript da sessão."
+}
+```
+
+`clipboard_command` só aparece quando há clipboard **verificado**: `pbpaste` no
+macOS e `powershell.exe Get-Clipboard` no Windows. A via X11/Wayland foi
+removida — não por estar errada, mas por nunca ter sido exercitada, e num fluxo
+de credencial um comando não verificado custa mais do que a conveniência que
+entrega. Os três `*_command` só aparecem quando o adaptador foi localizado: o
+servidor confere que o arquivo existe antes de citá-lo, porque um caminho
+inventado manda o usuário a um "arquivo não encontrado" sem pista da causa.
+
+Isso substitui o `cloudez-login --hint`, que fazia o mesmo cálculo do lado shell.
+Ele existia porque "o MCP não tem como saber onde o plugin está" — o que deixou
+de ser verdade quando o servidor passou a ser distribuído **dentro** do plugin
+(`${CLAUDE_PLUGIN_ROOT}/mcp/cloudez-mcp.mjs`, com `CLOUDEZ_PLUGIN_ROOT` injetado
+no ambiente pelo `.mcp.json`). O que se ganha é a chamada de Bash que separava
+"não há token" de "e o que eu faço".
+
+O modelo **não** deve pedir o token na conversa.
 
 ---
 
@@ -185,11 +232,16 @@ Detalhes de um site, incluindo o alvo de sincronização. Tem duas funções:
    virar uma config que só falha no deploy, longe da causa. Esta é a razão de o
    setup exigir autenticação: sem token não há como saber se o site existe.
 2. **Fornecer o destino ssh a cada deploy.** O bloco `ssh` saiu do
-   `.cloudez.yaml`: quem publica busca host e usuário aqui e os passa aos
-   adaptadores em `CLOUDEZ_SSH_HOST`, `CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`.
-   Uma cópia do host num arquivo versionado envelhece — se a Cloudez mover o
-   site de servidor, o valor escrito segue apontando para o antigo e o deploy
-   vai para o lugar errado sem reclamar.
+   `.cloudez.yaml`. Quem o resolve é o `cloudez_begin_deploy`, uma vez, gravando
+   host, usuário e porta no estado do deploy — os passos seguintes leem de lá, e
+   nenhum deles recebe o destino por argumento ou por ambiente. Uma cópia do host
+   num arquivo versionado envelhece — se a Cloudez mover o site de servidor, o
+   valor escrito segue apontando para o antigo e o deploy vai para o lugar errado
+   sem reclamar.
+
+   As variáveis `CLOUDEZ_SSH_HOST`, `CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`
+   citadas em versões anteriores deste contrato **não existem mais**: nada no
+   plugin as lê.
 
 Campo que a API não trouxer **some do retorno**, em vez de virar `null`, string
 vazia ou um default plausível. O bloco `ssh` só sai inteiro: meio bloco faria o
@@ -521,11 +573,12 @@ deve escrever. Não move nenhum byte.
     },
     "idempotency_key": {
       "type": "string",
-      "description": "UUID gerado pelo cliente. Repetir a chave devolve o mesmo deploy_id em vez de criar outro."
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "description": "OPCIONAL — omitida, o servidor gera um UUID. Repetir a mesma chave devolve o mesmo deploy_id em vez de criar outro."
     },
     "note": { "type": "string", "description": "Descrição livre (opcional)" }
   },
-  "required": ["domain", "ref", "idempotency_key"],
+  "required": ["domain", "ref"],
   "additionalProperties": false
 }
 ```
@@ -847,9 +900,8 @@ Volta o symlink `current` para uma release anterior.
       "type": "string",
       "description": "Release alvo. Se omitido, volta para a imediatamente anterior."
     },
-    "idempotency_key": { "type": "string" }
   },
-  "required": ["domain", "idempotency_key"],
+  "required": ["domain"],
   "additionalProperties": false
 }
 ```
@@ -860,6 +912,11 @@ Volta o symlink `current` para uma release anterior.
   "from_release_id": "20260807T143000Z-a1b2c3d",
   "to_release_id": "20260806T101500Z-0f9e8d7" }
 ```
+
+**Sem `idempotency_key`, pela mesma razão da 3.4.** Esta tool ATRIBUI um valor —
+o symlink `current` aponta para a release escolhida —, então repetir dá no mesmo.
+A chave chegou a estar declarada no schema da tool com o handler a ignorando, que
+é o pior dos dois mundos: pedia ao modelo um argumento que não fazia nada.
 
 ---
 

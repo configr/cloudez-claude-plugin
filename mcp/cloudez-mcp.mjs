@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 1.0.20 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.1.24 — gerado por 'npm run bundle'. Nao edite.
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -11572,9 +11572,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
       const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
       return `${varKind} ${this.name}${rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (!names[this.name.str]) return;
-      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants);
+      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -11591,9 +11591,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
     render({ _n }) {
       return `${this.lhs} = ${this.rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects) return;
-      this.rhs = optimizeExpr(this.rhs, names, constants);
+      this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -11652,8 +11652,8 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
     optimizeNodes() {
       return `${this.code}` ? this : void 0;
     }
-    optimizeNames(names, constants) {
-      this.code = optimizeExpr(this.code, names, constants);
+    optimizeNames(names, constants2) {
+      this.code = optimizeExpr(this.code, names, constants2);
       return this;
     }
     get names() {
@@ -11679,12 +11679,12 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
       }
       return nodes.length > 0 ? this : void 0;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       const { nodes } = this;
       let i = nodes.length;
       while (i--) {
         const n = nodes[i];
-        if (n.optimizeNames(names, constants)) continue;
+        if (n.optimizeNames(names, constants2)) continue;
         subtractNames(names, n.names);
         nodes.splice(i, 1);
       }
@@ -11731,11 +11731,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
       if (cond === false || !this.nodes.length) return void 0;
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3;
-      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-      if (!(super.optimizeNames(names, constants) || this.else)) return;
-      this.condition = optimizeExpr(this.condition, names, constants);
+      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+      if (!(super.optimizeNames(names, constants2) || this.else)) return;
+      this.condition = optimizeExpr(this.condition, names, constants2);
       return this;
     }
     get names() {
@@ -11757,9 +11757,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
     render(opts) {
       return `for(${this.iteration})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iteration = optimizeExpr(this.iteration, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iteration = optimizeExpr(this.iteration, names, constants2);
       return this;
     }
     get names() {
@@ -11794,9 +11794,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
     render(opts) {
       return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iterable = optimizeExpr(this.iterable, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iterable = optimizeExpr(this.iterable, names, constants2);
       return this;
     }
     get names() {
@@ -11835,11 +11835,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
       (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3, _b;
-      super.optimizeNames(names, constants);
-      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants);
-      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants);
+      super.optimizeNames(names, constants2);
+      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants2);
+      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants2);
       return this;
     }
     get names() {
@@ -12088,7 +12088,7 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
   function addExprNames(names, from) {
     return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
   }
-  function optimizeExpr(expr, names, constants) {
+  function optimizeExpr(expr, names, constants2) {
     if (expr instanceof code_1.Name) return replaceName(expr);
     if (!canOptimize(expr)) return expr;
     return new code_1._Code(expr._items.reduce((items, c) => {
@@ -12098,13 +12098,13 @@ var require_codegen = /* @__PURE__ */ __commonJSMin((exports) => {
       return items;
     }, []));
     function replaceName(n) {
-      const c = constants[n.str];
+      const c = constants2[n.str];
       if (c === void 0 || names[n.str] !== 1) return n;
       delete names[n.str];
       return c;
     }
     function canOptimize(e) {
-      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
     }
   }
   function subtractNames(names, from) {
@@ -19745,6 +19745,9 @@ async function requireToken() {
   return token;
 }
 
+// src/deploys.ts
+import { randomUUID } from "node:crypto";
+
 // src/api.ts
 function classify(status, body) {
   if (status === 401) {
@@ -20041,6 +20044,18 @@ function stateDir() {
 function statePath(deployId2) {
   return join(stateDir(), `${deployId2}.json`);
 }
+var KEY_FORMAT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+function assertIdempotencyKey(idempotencyKey) {
+  if (!KEY_FORMAT.test(idempotencyKey) || idempotencyKey.includes("..")) {
+    throw new ToolError(
+      "invalid_idempotency_key",
+      "A idempotency_key tem caracteres que n\xE3o servem como nome de arquivo.",
+      {
+        hint: "Use letras, n\xFAmeros, ponto, h\xEDfen ou underscore \u2014 ou omita o campo e deixe o servidor gerar um UUID."
+      }
+    );
+  }
+}
 function keyPath(idempotencyKey) {
   return join(stateDir(), "key", idempotencyKey);
 }
@@ -20121,12 +20136,14 @@ function projectName(domain) {
 }
 async function beginDeploy(args) {
   pruneOldState();
-  const existing = lookupIdempotencyKey(args.idempotency_key);
+  const idempotencyKey = args.idempotency_key ?? randomUUID();
+  assertIdempotencyKey(idempotencyKey);
+  const existing = lookupIdempotencyKey(idempotencyKey);
   if (existing) return loadState(existing);
   const suffix = releaseSuffix(args.ref, args.content_sha256);
   const ssh = await resolveSshTarget(args.domain);
   const releaseId = `${timestamp()}-${suffix}`;
-  const deployId2 = deployId(releaseId, args.idempotency_key);
+  const deployId2 = deployId(releaseId, idempotencyKey);
   const root = stripHome(args.root);
   const releasePath = `${root}/releases/${releaseId}`;
   const mkdir = await sshRun(ssh, `mkdir -p '${releasePath}' '${root}/releases' '${root}/shared'`);
@@ -20157,7 +20174,7 @@ async function beginDeploy(args) {
     root
   };
   saveState(state);
-  recordIdempotencyKey(args.idempotency_key, deployId2);
+  recordIdempotencyKey(idempotencyKey, deployId2);
   return state;
 }
 var KEEP_RELEASES = 5;
@@ -20312,6 +20329,61 @@ ${res.stderr}`;
   return saveState(state);
 }
 
+// src/login-hint.ts
+import { accessSync, constants, existsSync } from "node:fs";
+import { delimiter, dirname as dirname2, join as join2 } from "node:path";
+import { fileURLToPath } from "node:url";
+function onPath(name) {
+  for (const dir of (process.env.PATH || "").split(delimiter)) {
+    if (!dir) continue;
+    try {
+      accessSync(join2(dir, name), constants.X_OK);
+      return true;
+    } catch {
+    }
+  }
+  return false;
+}
+function clipboardReadCmd() {
+  if (onPath("pbpaste")) return "pbpaste";
+  if (onPath("powershell.exe")) return "powershell.exe -NoProfile -Command Get-Clipboard";
+  return null;
+}
+function pluginBin() {
+  const roots = [
+    process.env.CLOUDEZ_PLUGIN_ROOT,
+    dirname2(dirname2(fileURLToPath(import.meta.url)))
+  ];
+  for (const root of roots) {
+    if (!root) continue;
+    const candidate = join2(root, "bin", "cloudez-login");
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+function loginHint() {
+  const bin = pluginBin();
+  if (!bin) {
+    return {
+      hint: "Pe\xE7a ao usu\xE1rio para rodar `cloudez-login` no terminal dele. N\xE3o foi poss\xEDvel localizar o adaptador nesta m\xE1quina \u2014 o plugin da Cloudez pode n\xE3o estar instalado."
+    };
+  }
+  const clip = clipboardReadCmd();
+  const base = { login_command: bin, claude_code_command: `! ${bin}` };
+  if (!clip) {
+    return {
+      ...base,
+      hint: `Pe\xE7a ao usu\xE1rio para rodar: ! ${bin} \u2014 o \`!\` executa no terminal da sess\xE3o, onde existe TTY.`
+    };
+  }
+  const pipe2 = `${clip} | ${bin} --stdin`;
+  return {
+    ...base,
+    clipboard_command: pipe2,
+    hint: `Pe\xE7a ao usu\xE1rio para gerar o token no painel e COPIAR. Quando ele confirmar, rode: ${pipe2} \u2014 o token vai do clipboard direto para o processo, sem passar pela conversa. Alternativa com prompt: ! ${bin}`
+  };
+}
+
 // src/releases.ts
 function stripHome2(root) {
   return root.replace(/^~\//, "");
@@ -20450,13 +20522,13 @@ ${publicKey.trim()}`;
 // src/local.ts
 import { createHash as createHash2 } from "node:crypto";
 import { readdir, readFile as readFile2, stat } from "node:fs/promises";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
 async function findCompose(directory = ".") {
   const encontrados = [];
   for (const nome of COMPOSE_FILES) {
     try {
-      if ((await stat(join2(directory, nome))).isFile()) encontrados.push(nome);
+      if ((await stat(join3(directory, nome))).isFile()) encontrados.push(nome);
     } catch {
     }
   }
@@ -20480,7 +20552,7 @@ function fingerprint(material) {
   return "SHA256:" + createHash2("sha256").update(blob).digest("base64").replace(/=+$/, "");
 }
 async function listLocalSshKeys() {
-  const directory = process.env.CLOUDEZ_SSH_DIR || join2(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
+  const directory = process.env.CLOUDEZ_SSH_DIR || join3(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
   let entradas;
   try {
     entradas = await readdir(directory);
@@ -20491,7 +20563,7 @@ async function listLocalSshKeys() {
   }
   const keys = [];
   for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
-    const caminho = join2(directory, nome);
+    const caminho = join3(directory, nome);
     let conteudo;
     try {
       conteudo = await readFile2(caminho, "utf8");
@@ -20579,7 +20651,7 @@ async function healthCheck(domain, opts = {}) {
 // src/index.ts
 var server = new McpServer({
   name: "Cloudez MCP",
-  version: "1.0.17"
+  version: "0.1.24"
 });
 server.registerTool(
   "cloudez_auth_status",
@@ -20601,7 +20673,8 @@ server.registerTool(
           source,
           token_file: tokenFile(),
           verified: false,
-          hint: "Pe\xE7a ao usu\xE1rio para rodar `! cloudez-login` \u2014 o `!` executa no terminal dele. Um token colado nesta conversa entraria no transcript da sess\xE3o."
+          ...loginHint(),
+          warning: "N\xE3o pe\xE7a o token na conversa: colado aqui, ele fica no transcript da sess\xE3o."
         });
       }
       const verdict = await verifyToken(token);
@@ -20610,8 +20683,11 @@ server.registerTool(
         source,
         token_file: tokenFile(),
         verified: verdict === "valid",
+        // Recusado é o mesmo problema de não ter nenhum — o usuário precisa
+        // autenticar de novo, e a instrução para isso é a mesma.
         ...verdict === "invalid" && {
-          hint: "A Cloudez recusou o token (expirado ou revogado). Gere outro no painel e rode `! cloudez-login`."
+          ...loginHint(),
+          message: "A Cloudez recusou o token (expirado ou revogado). Gere outro no painel."
         },
         ...verdict === "unknown" && {
           warning: "N\xE3o foi poss\xEDvel confirmar o token com a API da Cloudez (offline ou API fora). O token existente foi aceito como est\xE1."
@@ -20700,7 +20776,7 @@ server.registerTool(
   "cloudez_begin_deploy",
   {
     title: "Registrar uma release e preparar o destino do envio",
-    description: "Registra a inten\xE7\xE3o de deploy e cria o diret\xF3rio de release no servidor. N\xC3O move bytes \u2014 devolve o deploy_id e o destino ssh para o transporte (cloudez-sync) escrever. Chame depois de o build passar, uma vez por deploy. O `root` vem SEMPRE do .cloudez.yaml do projeto (nunca da API); o destino ssh \xE9 resolvido aqui pelo dom\xEDnio. Gere a idempotency_key (UUID) uma vez e reuse-a em qualquer retry. Passe `content_sha256` (de `cloudez-sync --hash-only`) SEMPRE, e `ref` tamb\xE9m quando o projeto estiver num reposit\xF3rio git. Sem nenhum dos dois a chamada \xE9 recusada.",
+    description: "Registra a inten\xE7\xE3o de deploy e cria o diret\xF3rio de release no servidor. N\xC3O move bytes \u2014 devolve o deploy_id e o destino ssh para o transporte (cloudez-sync) escrever. Chame depois de o build passar, uma vez por deploy. O `root` vem SEMPRE do .cloudez.yaml do projeto (nunca da API); o destino ssh \xE9 resolvido aqui pelo dom\xEDnio. N\xE3o precisa de idempotency_key: o servidor gera uma. Passe `content_sha256` (de `cloudez-sync --hash-only`) SEMPRE, e `ref` tamb\xE9m quando o projeto estiver num reposit\xF3rio git. Sem nenhum dos dois a chamada \xE9 recusada.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
       root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
@@ -20708,7 +20784,9 @@ server.registerTool(
       content_sha256: string2().optional().describe(
         "content_sha256 devolvido por `cloudez-sync --hash-only <diret\xF3rio>`. Identifica a release quando n\xE3o h\xE1 git, e fica registrado mesmo quando h\xE1."
       ),
-      idempotency_key: string2().describe("UUID gerado pelo cliente. Repetir devolve o mesmo deploy_id."),
+      idempotency_key: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/).optional().describe(
+        "OPCIONAL \u2014 omita e o servidor gera um UUID. S\xF3 passe uma se voc\xEA tiver a MESMA chave de uma chamada anterior e quiser garantir que o retry devolva aquele deploy_id em vez de criar outro. N\xE3o gere uma por conta pr\xF3pria: n\xE3o h\xE1 como gerar valor aleat\xF3rio de forma confi\xE1vel, e chave repetida por engano devolve um deploy antigo."
+      ),
       note: string2().optional().describe("Descri\xE7\xE3o livre (opcional)"),
       environment: string2().optional().describe("Nome do environment do .cloudez.yaml (r\xF3tulo, opcional)")
     }),
@@ -20803,8 +20881,12 @@ server.registerTool(
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
       root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml"),
-      to_release_id: string2().optional().describe("Release alvo. Omitido, volta para a imediatamente anterior."),
-      idempotency_key: string2().optional().describe("UUID opcional. O rollback \xE9 idempotente: voltar ao mesmo alvo repete o resultado.")
+      to_release_id: string2().optional().describe("Release alvo. Omitido, volta para a imediatamente anterior.")
+      // Sem idempotency_key, pela mesma razão do cloudez_set_app_root_path
+      // (contrato §3.4): esta tool ATRIBUI um valor fixo — o symlink aponta para
+      // a release escolhida —, então repetir dá no mesmo. A chave existia aqui
+      // declarada e o handler a ignorava, que é o pior dos dois mundos: pedia ao
+      // modelo um argumento que não fazia nada.
     }),
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
   },

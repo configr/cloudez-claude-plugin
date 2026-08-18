@@ -12,18 +12,27 @@ Três camadas, deliberadamente separadas:
 | **Comandos** | procedimento — a sequência de cada operação | `commands/` |
 | **Skill** | porta de entrada em linguagem natural; encaminha ao comando | `skills/deploy/SKILL.md` |
 | **Transporte** | envio dos arquivos | `cmd/sync/` (Go) |
-| **Adaptadores** | o que depende da máquina local | `bin/` (shell) |
+| **Adaptadores** | o que depende da máquina local | `bin/` (Node) |
 
 O MCP é o control plane: descobre o destino, registra a release, ativa e faz
 rollback. Ele nunca move bytes.
 
 ### Por que duas linguagens
 
-O `bin/` em shell era transitório e encolheu: `begin-deploy`,
-`finalize-deploy`, `rollback`, `list-releases` e `compose-up` viraram tools do
-servidor MCP e saíram daqui. O que sobrou é o que **não** migra, por depender da
-máquina de quem publica — coletar o token (exige TTY), ler `~/.ssh`, escrever o
-`.cloudez.yaml`, inspecionar o diretório do projeto.
+O `bin/` em shell era transitório, e acabou. Encolheu duas vezes e sumiu na
+terceira.
+
+Primeiro por **migração para o MCP**: `begin-deploy`, `finalize-deploy`,
+`rollback`, `list-releases` e `compose-up` viraram tools e saíram daqui. Depois
+por **troca de linguagem**: `cloudez-login` e `cloudez-setup` viraram Node,
+porque o shell deles só existia numa época em que Node não era pré-requisito
+assumido — e sustentar essa ficção custava um helper para escrever JSON com uma
+minilinguagem de prefixos, um `curl` opcional e a pergunta de se há bash na
+máquina. Com os dois em Node, os três arquivos de apoio (`_lib.sh`, `_yaml.sh`,
+`_json.mjs`) saíram juntos: eram 174 linhas de andaime.
+
+O que sobrou em `bin/` é o que **não** migra para o MCP, por depender da máquina
+de quem publica: coletar o token (exige TTY) e escrever o `.cloudez.yaml`.
 
 Uma peça não migra por outra razão, e é por isso que está em Go: o `sync`,
 porque o transporte fica sempre local.
@@ -194,7 +203,6 @@ token de verdade.
 ```sh
 pbpaste | bin/cloudez-login --stdin   # token do clipboard, sem prompt e sem TTY
 bin/cloudez-login                     # pergunta o token. Exige terminal
-bin/cloudez-login --hint              # como autenticar nesta máquina
 ```
 
 **Token é a única forma de autenticar.** Gere no painel da Cloudez.
@@ -205,8 +213,14 @@ duas noções de "estou autenticado" em lugares diferentes acabam divergindo, e 
 que erra é sempre a que ninguém está olhando. Nenhum adaptador em `bin/` exige
 token: o deploy inteiro fala com o servidor por `ssh`, com a sua chave.
 
-O `--hint` fica no shell porque a resposta é local — onde o plugin foi instalado e
-se existe clipboard nesta máquina. O MCP não tem como saber isso.
+**Como** autenticar nesta máquina — o caminho absoluto do `cloudez-login` e o
+utilitário de clipboard, se houver — vem da própria `cloudez_auth_status`, nos
+campos `claude_code_command` e `clipboard_command`. Existiu um `cloudez-login
+--hint` para isso, justificado por "o MCP não tem como saber": deixou de valer
+quando o servidor passou a ser distribuído dentro do plugin, e o que sobrava era
+uma chamada de Bash entre descobrir que falta token e saber o que fazer. Fora do
+plugin — rodando o MCP do repositório dele — os campos simplesmente não vêm, em
+vez de virem com um caminho inventado.
 
 O `--stdin` é o caminho que funciona onde o agente está: um pipe não precisa de
 terminal, e o segredo vai da origem (clipboard, arquivo, variável, gerenciador de
@@ -216,20 +230,26 @@ pipe nunca vê o valor — e é isso que permite rodar pela tool Bash sem vazar 
 > O que **não** vale é o próprio agente montar o pipe com um token que ele
 > conhece: se ele conhece, já vazou. Vale pipe de fonte opaca, não `echo`.
 
-`--stdin` em si é portátil — é um pipe. O **clipboard como fonte** não é, e a dica
-do erro só o oferece quando existe de verdade:
+`--stdin` em si é portátil — é um pipe. O **clipboard como fonte** não é, e o
+`cloudez_auth_status` só o oferece quando existe de verdade:
 
 | Ambiente | Clipboard |
 |---|---|
 | macOS | `pbpaste`, sempre presente |
-| Linux com sessão gráfica | `wl-paste` / `xclip` / `xsel`, se instalado |
 | Windows via WSL ou Git Bash | `powershell.exe Get-Clipboard` |
-| SSH, container, CI, Claude Code remoto | **nenhum** — a dica cai para o prompt |
+| Linux, SSH, container, CI, Claude Code remoto | **nenhum** — cai para o prompt |
 
-`wl-paste` e `xclip` **instalados** não significam clipboard **disponível**: X11 e
-Wayland guardam o clipboard no servidor gráfico, e sem `DISPLAY`/`WAYLAND_DISPLAY`
-o comando existe e falha. A detecção checa a sessão gráfica antes de sugerir
-qualquer coisa — sugerir um comando que quebra é pior que não sugerir nada.
+Houve uma via para X11 e Wayland (`wl-paste`, `xclip`, `xsel`), atrás de uma
+checagem de `DISPLAY`/`WAYLAND_DISPLAY` — porque instalado não é o mesmo que
+disponível: esses utilitários guardam o clipboard no servidor gráfico e, sem ele,
+existem e falham. A checagem estava certa; a via saiu assim mesmo, porque
+**ninguém nunca a rodou** contra um desktop Linux de verdade. Num fluxo de
+credencial, oferecer um comando não verificado troca "roda algo que funciona" por
+"vê um erro do xclip e não sabe de quem é a culpa".
+
+O que se perde é conveniência, não capacidade: no Linux com desktop o login cai
+para o prompt com `!`, que funciona em toda parte. A precedência continua com
+teste; se alguém exercitar a via de verdade, ela volta.
 
 Onde não há clipboard, as fontes que sempre funcionam:
 
@@ -267,7 +287,7 @@ A resposta é lida em três faixas, e a diferença importa:
 |---|---|
 | 2xx | token válido (`verified: true`) |
 | 401 / 403 | recusado: exige login novo |
-| offline, 5xx, sem `curl` | **inconclusivo** — passa com `verified: false` e um `warning` |
+| offline, 5xx | **inconclusivo** — passa com `verified: false` e um `warning` |
 
 Falhar fechado no terceiro caso deixaria você sem deploy justamente quando não há
 o que consertar, e a chamada seguinte à API falha com o erro dela, mais
@@ -277,45 +297,65 @@ No login, a validação roda **depois** de escrever o arquivo, contra o token qu
 acabou de ser gravado — não contra o que estava na memória. Se a Cloudez recusar,
 o token anterior volta: um paste errado não custa a credencial que já funcionava.
 
+Isso tudo mora em **um lugar só**, `src/token-store.ts` no repositório do MCP, e
+chega ao plugin pelo bundle `mcp/cloudez-auth.mjs`. A função devolve o veredito
+com o arquivo já restaurado; que a recusa seja fatal, com que código de erro e o
+que se imprime é decisão do `cloudez-login` — mecanismo na biblioteca, política
+em quem tem interface com gente.
+
 ## Limitações conhecidas
 
-**O prompt do login não tem cobertura automatizada.** `read < /dev/tty` precisa de
-um pty, e alocar um em `bats` de forma portátil significa `script`, cuja sintaxe
-divergente entre macOS e Linux é exatamente o tipo de coisa que já quebrou esta
-suíte. O que fica sem teste é só a leitura do terminal: o que tem consequência —
-escrever o segredo com 0600, validar depois do write, desfazer quando a Cloudez
-recusa — mora em `save_token` (`bin/_lib.sh`) e é chamado direto pelos testes. O
-`--stdin`, que não precisa de pty, é testado de ponta a ponta.
+**O prompt do login não tem cobertura automatizada.** Ler o terminal sem eco
+precisa de um pty, e alocar um em `bats` de forma portátil significa `script`,
+cuja sintaxe divergente entre macOS e Linux é exatamente o tipo de coisa que já
+quebrou esta suíte. O que fica sem teste é só a leitura do terminal — e agora
+também o tratamento de backspace e Ctrl-C, que o modo raw do Node obriga a fazer
+na mão e que o `read -rs` do bash dava de graça.
 
-**A detecção de clipboard só foi verificada em macOS e em Linux headless.** O
-caminho macOS foi testado de verdade; o "sem sessão gráfica → não oferece nada" é
-exercitado pelo CI em `ubuntu-latest`, onde não há clipboard algum. Os ramos
-`xclip`, `xsel` e `powershell.exe` seguem por raciocínio — ninguém rodou.
+O que tem consequência continua coberto, e por um caminho melhor do que antes:
+escrever o segredo com 0600, validar **depois** do write e desfazer quando a
+Cloudez recusa são todos atravessados pelo `--stdin`, que não precisa de pty. A
+suíte deixou de chamar funções soltas do `_lib.sh` e passou a exercitar o
+comando de ponta a ponta.
 
-**A validação do token só foi exercitada contra a API real à mão** — os testes usam
-um mock de `curl`. Verificado manualmente: um token inventado devolve `401` de
-`api.cloudez.io`, e o plugin traduz isso em `token_invalid`. O caminho do token
-válido (`2xx`) depende de uma credencial de verdade e nunca passou pela suíte.
+**A detecção de clipboard só foi verificada em macOS.** O caminho `pbpaste` foi
+testado de verdade; o "sem clipboard → não oferece nada" é exercitado pelo CI em
+`ubuntu-latest`, onde não há nenhum. O ramo `powershell.exe` segue por raciocínio
+— ninguém rodou. Os ramos X11/Wayland **saíram** pela mesma razão, e essa é a
+diferença: o `powershell.exe` fica porque no Windows não há alternativa boa, e o
+`xclip` saiu porque no Linux o prompt com `!` já resolve.
 
-**`/cloudez:login` e `/cloudez:setup` no Windows só funcionam sob um bash.** Eram
-duas causas; a saída do `jq` resolveu uma. O Windows não traz `jq` e o Git for
-Windows também não — o Git Bash embarca um subconjunto do MSYS2 com bash,
-coreutils, sed, awk, curl, ssh e tar, sem ele —, então o `need jq` reprovava
-justamente no único ambiente onde esses scripts rodavam.
+**A validação do token só foi exercitada contra a API real à mão.** Os testes
+sobem uma API falsa em porta efêmera (`test/mocks/api-server.mjs`) — o que
+verifica a requisição enviada, o esquema `Token` e os três vereditos, mas não que
+`api.cloudez.io` responda o que se espera. Verificado manualmente: um token
+inventado devolve `401`, e o plugin traduz isso em `token_invalid`. O caminho do
+token válido (`2xx`) depende de uma credencial de verdade e nunca passou pela
+suíte.
 
-O que sobrou é que eles continuam sendo **bash**, e não têm par `.cmd`. O
-`cloudez-sync.cmd` existe e funciona porque invoca um `.exe` nativo; um `.cmd`
-não roda script POSIX sem um bash para chamá-lo. Então onde não houver bash, os
-dois seguem inalcançáveis.
+**~~`/cloudez:login` e `/cloudez:setup` no Windows só funcionam sob um bash.~~
+Fechada.** Foram três causas encadeadas, e vale registrar as três porque a
+última só ficou visível depois de as outras duas saírem.
 
-Nada disso tem cobertura: o job `windows` testa só os launchers do `sync`. E
-falta confirmar como o Claude Code invoca `bin/` no Windows — se sempre por bash,
-a limitação hoje é teórica; se pelo cmd, é real.
+O `jq` foi a primeira: o Windows não o traz e o Git for Windows também não — o
+Git Bash embarca um subconjunto do MSYS2 com bash, coreutils, sed, awk, curl, ssh
+e tar, sem ele —, então o `need jq` reprovava justamente no único ambiente onde
+esses scripts rodavam.
 
-O que fecha de vez é reescrevê-los em Node, que já é dependência: some o bash e
-some a necessidade do `.cmd` intermediário. Go também fecharia, mas custa seis
-binários novos em `libexec/` para dois scripts que escrevem um arquivo de config
-e leem um token — o Node é o alvo melhor aqui.
+A segunda foi os dois serem **bash sem par `.cmd`**. O `cloudez-sync.cmd` existe
+e funciona porque invoca um `.exe` nativo; um `.cmd` não roda script POSIX sem um
+bash para chamá-lo. Fechou quando os dois viraram Node, com shebang próprio.
+
+A terceira apareceu por causa da segunda: um arquivo **sem extensão** com sintaxe
+ESM é lido como CommonJS pelo Node 20, e o `import` vira erro de sintaxe. O Node
+22+ detecta o módulo sozinho, então o defeito era invisível em máquina moderna e
+quebraria exatamente no piso declarado. Resolvido pelo `bin/package.json` com
+`{"type": "module"}`, e fixado por testes que rodam os dois adaptadores com
+`--no-experimental-detect-module`.
+
+O que segue sem verificação é o **deploy** a partir de Windows, e por outra razão:
+o `commands/deploy.md` manda gerar o `idempotency_key` com `uuidgen`, que não
+está no subconjunto do Git Bash. O job `windows` testa só os launchers do `sync`.
 
 **O Windows tem cobertura dos dois launchers e do binário.** Três frentes, em
 jobs próprios sobre `windows-latest`:
@@ -379,12 +419,15 @@ já passaram despercebidos por só termos testado no outro.
 O que sobrou depois de o control plane migrar para o MCP. Todos existem por
 precisarem da **máquina local** — nenhum fala com a Cloudez.
 
-| Script | Por que não é uma tool |
-|---|---|
-| `cloudez-login` | Coletar o token exige TTY, e um servidor stdio não tem terminal de controle |
-| `cloudez-setup` | **Escreve** no projeto do usuário |
-| `cloudez-sync` (Go) | O transporte fica sempre local, por decisão do contrato |
-| `_json.mjs` | Não é adaptador: helper que os dois de cima usam para escrever JSON, no lugar do `jq` |
+| Script | Linguagem | Por que não é uma tool |
+|---|---|---|
+| `cloudez-login` | Node | Coletar o token exige TTY, e um servidor stdio não tem terminal de controle |
+| `cloudez-setup` | Node | **Escreve** no projeto do usuário |
+| `cloudez-sync` | Go | O transporte fica sempre local, por decisão do contrato |
+| `_out.mjs` | Node | Não é adaptador: o envelope de saída que os dois compartilham |
+
+O `cloudez-login` não implementa o contrato do token: importa
+`mcp/cloudez-auth.mjs`, o mesmo código que o servidor usa.
 
 Ler a máquina local nunca foi razão para ficar fora do MCP — o servidor roda na
 mesma máquina, e já lê `~/.cloudez/token`. Por isso `cloudez-pubkey` e
@@ -435,9 +478,16 @@ diretório chamado `~`). Caminho relativo resolve a partir do `$HOME` do usuári
 ssh, que é o que `~/` significa. Caminho absoluto continua absoluto.
 
 **Não há bloco `ssh` na config.** Host e usuário vêm da conta do usuário, pelo
-`cloudez_get_site` (`cloud.fqdn` e `user.username`), a cada deploy — o
-`/cloudez:deploy` os repassa aos adaptadores em `CLOUDEZ_SSH_HOST`,
-`CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`.
+`cloudez_get_site` (`cloud.fqdn` e `user.username`), a cada deploy. Quem os
+resolve é o `cloudez_begin_deploy`, **uma vez**, e os grava no estado do deploy em
+`.cloudez/state/` — é de lá que o `cloudez-sync`, o `finalize` e o `compose_up` os
+leem. Resolver a cada passo abriria a porta para o envio ir a um servidor e a
+ativação a outro.
+
+Houve uma fase em que o modelo repassava esses valores aos adaptadores por
+ambiente, em `CLOUDEZ_SSH_HOST`, `CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`. Essas
+variáveis **não existem mais** em nenhum código do plugin — a doc as citava
+depois de o mecanismo ter saído.
 
 Uma cópia do host num arquivo versionado envelhece: se a Cloudez mover o site de
 servidor, o valor escrito continua apontando para o antigo e o deploy vai para o
@@ -472,10 +522,14 @@ O servidor guarda as 5 releases mais recentes — é até onde o rollback alcan�
 
 ### Dependências
 
-Na máquina local: `ssh` e `tar` para o transporte, e **Node 20+** — que serve ao
-servidor MCP embutido e, desde a saída do `jq`, também aos dois adaptadores em
-shell que restam. No servidor, GNU coreutils — a troca atômica do symlink usa
-`mv -T`, que não existe em BSD/macOS.
+Na máquina local: **Node 20+**, `ssh` e `tar`. No servidor, GNU coreutils — a
+troca atômica do symlink usa `mv -T`, que não existe em BSD/macOS.
+
+O Node é **pré-requisito declarado**, não uma conveniência: ele roda o servidor
+MCP embutido e os dois adaptadores de `bin/`. Assumi-lo
+explicitamente é o que permitiu apagar as acomodações que existiam para
+contorná-lo — cada uma delas custava mais complexidade do que a dependência que
+evitava.
 
 **`git` não é dependência.** Foi até o deploy passar a identificar a release pelo
 hash do conteúdo publicado; antes disso o `ref` era a única referência, e sem
@@ -485,19 +539,17 @@ duas chamadas que restam já toleram a ausência: o passo 3 do deploy segue sem
 `ref`, e o `cloudez-setup` grava `gitignore: "skipped"` fora de um repositório.
 
 **`jq` saiu do runtime** e ficou só como dependência de teste, onde faz o que
-sabe fazer: ler JSON. Nos adaptadores ele nunca lia — os cinco usos construíam,
-sempre `jq -n --arg`, que estava ali porque é o que escapa corretamente valores
-vindos do usuário (domínio, caminhos, mensagens com aspas). Quem faz isso agora é
-`bin/_json.mjs`, um helper de trinta linhas: `JSON.stringify` escapa igual, e o
-Node já era dependência dura por causa do servidor MCP. Mesma segurança, uma
-dependência a menos.
+sabe fazer: ler JSON. Nos adaptadores ele nunca lia — os usos construíam, sempre
+`jq -n --arg`, que estava ali porque é o que escapa corretamente valores vindos
+do usuário (domínio, caminhos, mensagens com aspas). O substituto foi um helper
+em Node, `_json.mjs`, com uma minilinguagem de prefixos (`:` para literal, `+`
+para merge na raiz) que só fazia sentido porque quem o chamava era um shell.
+Ele também já saiu: com os adaptadores em Node, o objeto é escrito como objeto.
 
-O custo é ~60ms de startup do Node contra ~4ms do `jq`, em fluxos interativos que
-chamam isso uma ou duas vezes.
-
-`curl` é **opcional**: sem ele o token não é verificado contra a API e o retorno
-diz `verified: false`. Exigir curl para ler um arquivo local seria dependência
-nova por nada.
+**`curl` saiu do runtime também.** Ele era *opcional* de propósito — sem ele o
+token não era verificado e a resposta caía para `verified: false` —, e esse ramo
+inteiro deixou de existir quando o `cloudez-login` virou Node: o `fetch` é nativo
+desde o Node 18. Uma dependência a menos e um caso a menos para testar.
 
 Autenticação SSH é por chave, em `~/.ssh/`. Os scripts rodam com
 `BatchMode=yes`: sem chave configurada eles falham na hora em vez de travar num
@@ -512,10 +564,26 @@ vive em outro repositório:
 export CLOUDEZ_MCP_PATH=/caminho/para/o/repo/do/mcp
 ```
 
-O servidor MCP vem **dentro do plugin**, em `mcp/cloudez-mcp.mjs`: um arquivo
-só, com as dependências embutidas, apontado pelo `.mcp.json` via
-`${CLAUDE_PLUGIN_ROOT}`. Não há `npm install`, registry nem passo extra de
-instalação.
+O MCP vem **dentro do plugin**, em dois arquivos com as dependências embutidas.
+Não há `npm install`, registry nem passo extra de instalação.
+
+| Arquivo | O quê | Quem usa |
+|---|---|---|
+| `mcp/cloudez-mcp.mjs` | o servidor; sobe um transporte stdio ao ser importado | o `.mcp.json`, via `${CLAUDE_PLUGIN_ROOT}` |
+| `mcp/cloudez-auth.mjs` | biblioteca: o contrato do token | `bin/cloudez-login`, por `import` |
+
+São dois porque o servidor **não pode ser importado**: um adaptador de linha de
+comando que o importasse ficaria pendurado num transporte que ninguém pediu.
+Entrypoints separados (`src/index.ts` e `src/plugin-lib.ts`), um bundle cada, o
+mesmo `vendor-mcp.sh` traz os dois — e a suíte confere que carregam a mesma
+versão, porque copiar um e esquecer o outro divergiria exatamente no código que
+os dois lados precisam compartilhar.
+
+O segundo existe para acabar com uma duplicação que era só disciplina: o
+`cloudez-login` reimplementava a precedência do token, o header `Authorization:
+Token` e a tabela de vereditos que o MCP já tinha. Hoje ele importa. O modo de
+falha que isso fecha é o pior de diagnosticar — o login dizendo "autenticado" e
+o MCP dizendo que não.
 
 É a mesma decisão dos binários de `libexec/`, e pelo mesmo motivo: quem instala
 um plugin não deveria precisar montar nada. O bundle tem 768 KB — um dezessete

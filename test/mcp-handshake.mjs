@@ -1,11 +1,18 @@
 // Handshake MCP minimo: sobe o servidor, pede as tools, imprime os nomes.
 //
+// Uso: mcp-handshake.mjs <bundle> [tool]
+//
+// Sem `tool`, imprime os nomes das tools anunciadas. Com `tool`, chama-a sem
+// argumentos e imprime o resultado — o que permite afirmar sobre o COMPORTAMENTO
+// do bundle vendorado, e nao so sobre ele subir.
+//
 // Fora do .bats porque bats nao lida bem com processo de vida longa e stdin
 // bidirecional — e o que se quer afirmar aqui e sobre o PROTOCOLO, nao sobre o
 // arquivo.
 import { spawn } from "node:child_process"
 
 const bundle = process.argv[2]
+const tool = process.argv[3]
 const child = spawn("node", [bundle], { stdio: ["pipe", "pipe", "ignore"] })
 
 const send = (msg) => child.stdin.write(JSON.stringify(msg) + "\n")
@@ -23,7 +30,15 @@ child.stdout.on("data", (chunk) => {
       send({ jsonrpc: "2.0", id: 2, method: "tools/list" })
     }
     if (msg.id === 2) {
-      console.log(msg.result.tools.map((t) => t.name).join(" "))
+      if (!tool) {
+        console.log(msg.result.tools.map((t) => t.name).join(" "))
+        child.kill()
+        process.exit(0)
+      }
+      send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: tool, arguments: {} } })
+    }
+    if (msg.id === 3) {
+      console.log(JSON.stringify(msg.result.structuredContent ?? msg.result, null, 2))
       child.kill()
       process.exit(0)
     }

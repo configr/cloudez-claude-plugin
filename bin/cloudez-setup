@@ -1,95 +1,177 @@
-#!/usr/bin/env bash
-# Uso: cloudez-setup <domain> <environment>
-#
-# Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
-# ainda nao existe um. Nao e um erro rodar duas vezes: com config presente ele
-# reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os outros
-# environments — o root e a decisao mais destrutiva do deploy, e quem o ajustou
-# a mao nao vai reescrever o mesmo valor de memoria.
+#!/usr/bin/env node
+// Uso: cloudez-setup <domain> <environment>
+//
+// Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
+// ainda não existe um. Não é erro rodar duas vezes: com config presente ele
+// reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os outros
+// environments — o root é a decisão mais destrutiva do deploy, e quem o ajustou
+// à mão não vai reescrever o mesmo valor de memória.
+//
+// ─── Por que Node, e não shell ──────────────────────────────────────────────
+//
+// Este era o último adaptador em bash, e sustentava sozinho três arquivos de
+// apoio que só existiam por causa dele: `_lib.sh` (construir JSON, validar
+// FQDN), `_json.mjs` (o Node que o shell chamava para escrever JSON, com uma
+// minilinguagem de prefixos `:` e `+`) e `_yaml.sh` (achar o arquivo de config).
+// Eram 174 linhas de andaime para 95 de conteúdo.
+//
+// Com Node 20+ como pré-requisito declarado do plugin, o andaime todo sai: o
+// objeto é escrito como objeto, e o resto é `fs`. Some junto a última limitação
+// de Windows que o README registrava — este arquivo não precisa de bash, e por
+// isso também não precisa de um par `.cmd` para ser alcançável pelo cmd.
+//
+// O arquivo NÃO tem extensão de propósito: `cloudez-setup` é o nome que o
+// usuário digita e que o allowlist autoriza. Quem informa ao Node que isto é um
+// módulo ES é o `bin/package.json` — ver a nota no cloudez-login.
+//
+// ─── O que este adaptador não faz ───────────────────────────────────────────
+//
+// Não exige token, e não confirma que o domínio existe na conta. Quem confirma é
+// a tool `cloudez_get_site` do MCP, chamada pelo /cloudez:setup antes de chegar
+// aqui — este adaptador não fala com a Cloudez, por desenho: o control plane é
+// do MCP.
+//
+// Isso significa que a checagem NÃO é invariante deste script. Rodado direto,
+// ele escreve config para qualquer FQDN bem formado, exista ou não. É uma
+// consequência aceita: a confirmação depende de rede e credencial, que são
+// justamente o que este adaptador não tem. Quem garante a ordem é o
+// commands/setup.md.
+//
+// Ele continua fora do MCP porque **escreve no projeto do usuário**. Ler a
+// máquina local nunca foi razão para ficar de fora — o servidor roda na mesma
+// máquina —, mas gravar é decisão de outra ordem, e merece a discussão de onde
+// o servidor tem permissão para escrever antes de migrar.
 
-source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+import { execFileSync } from "node:child_process"
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 
-# Este script nao exige token, e nao confirma que o dominio existe na conta.
-# Quem confirma e a tool `cloudez_get_site` do MCP, chamada pelo /cloudez:setup
-# antes de chegar aqui — este adaptador nao fala com a Cloudez, por desenho: o
-# control plane e do MCP.
-#
-# Isso significa que a checagem NAO e invariante deste script. Rodado direto, ele
-# escreve config para qualquer FQDN bem formado, exista ou nao. E uma consequencia
-# aceita: a confirmacao depende de rede e credencial, que sao justamente o que
-# este adaptador nao tem. Quem garante a ordem e o commands/setup.md.
+import { die, ok } from "./_out.mjs"
 
-domain="${1:-}"
-environment="${2:-}"
+// ─────────────────────────────────────────────────────────────────── domínio ──
 
-[ -n "$domain" ] \
-  || die missing_domain "Informe o dominio: cloudez-setup <domain> <environment>." \
-       '{"hint":"FQDN, sem protocolo nem caminho. Ex.: staging.meusite.com.br"}'
+/**
+ * FQDN e nada mais: protocolo, caminho, querystring ou porta reprovam.
+ *
+ * O domínio identifica o site E vira caminho no servidor, então um valor solto
+ * aqui reaparece longe da causa — como um diretório sem sentido em `~/`.
+ */
+function isFqdn(valor) {
+  return valor.length <= 253 && /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(valor)
+}
 
-# DNS nao diferencia maiuscula, mas o caminho no servidor diferencia: o dominio
-# vira `~/<domain>/www/claude`, entao normalizar aqui evita dois diretorios para
-# o mesmo site.
-domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
+// ────────────────────────────────────────────────────────────────── config ──
 
-# FQDN e nada mais: protocolo, caminho, querystring ou porta viram erro em vez
-# de entrar na config e reaparecer como um caminho de servidor sem sentido. A
-# mesma regra vale para o dominio do painel, no cloudez-login.
-is_fqdn "$domain" \
-  || die invalid_domain "'$1' nao e um FQDN valido." \
-       '{"hint":"Use apenas o dominio: meusite.com.br. Sem https://, sem /caminho, sem ?query, sem :porta."}'
+/**
+ * Onde mora a config do projeto: o arquivo existente, ou `.cloudez.yaml` como
+ * destino padrão quando não há nenhum. Serve para as duas metades da decisão.
+ *
+ * Houve aqui um conversor YAML→JSON com quatro parsers alternativos (yq nas duas
+ * implementações incompatíveis, python3 com PyYAML, ruby). Ele saiu junto com os
+ * adaptadores de deploy, e o comentário que ficou dizia que "quem lê a config
+ * agora é o servidor MCP" — o que nunca foi verdade. **Ninguém** parseia este
+ * arquivo em código: as tools de deploy recebem `domain` e `root` como
+ * argumento, e quem lê o YAML é o modelo, com a tool Read. O que sobra aqui é
+ * saber ONDE ele fica, e só.
+ */
+function resolveConfig() {
+  if (process.env.CLOUDEZ_CONFIG) return process.env.CLOUDEZ_CONFIG
+  // `.yaml` vence `.yml` quando os dois existem: é o nome que o setup gera.
+  for (const nome of [".cloudez.yaml", ".cloudez.yml"]) {
+    if (existsSync(nome)) return nome
+  }
+  return ".cloudez.yaml"
+}
 
-[ -n "$environment" ] \
-  || die missing_environment "Informe o environment: cloudez-setup <domain> <environment>." \
-       '{"hint":"Ex.: default, staging, production. Nao ha padrao — o environment decide para onde o deploy vai."}'
+// ────────────────────────────────────────────────────────────────── gitignore ──
 
-# O environment vira chave YAML e e interpolado no template. Restringir o
-# formato aqui e o que impede um nome com espaco ou dois-pontos de gerar um
-# arquivo quebrado que o usuario nao escreveu.
-printf '%s' "$environment" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_-]*$' \
-  || die invalid_environment "Nome de environment invalido: '$environment'." \
-       '{"hint":"Use letras, numeros, hifen ou underscore. Ex.: default, staging, production."}'
+/**
+ * Garante `.cloudez/` no .gitignore: "updated" | "already" | "skipped".
+ *
+ * O estado dos deploys mora em `.cloudez/` e não deveria ir para o repositório.
+ * É feito aqui porque é o passo que todo mundo esquece, e esquecer significa
+ * commitar estado de servidor.
+ *
+ * Quem responde se há repositório é o próprio git, e não uma busca por `.git`
+ * subindo os diretórios: em worktree e submódulo o `.git` é um arquivo, e
+ * `GIT_DIR` no ambiente muda a resposta. Fora de um repositório o comando falha,
+ * e "skipped" é resultado, não erro.
+ */
+function garantirGitignore() {
+  try {
+    execFileSync("git", ["rev-parse", "--git-dir"], { stdio: "ignore" })
+  } catch {
+    return "skipped"
+  }
 
-# resolve_config devolve o arquivo existente, ou .cloudez.yaml como destino
-# padrao quando nao ha nenhum. Serve para as duas metades desta decisao.
-target=$(resolve_config)
+  let atual = ""
+  try {
+    atual = readFileSync(".gitignore", "utf8")
+  } catch {
+    // Não existe ainda. O append cria.
+  }
 
-if [ -f "$target" ]; then
-  json status exists path "$target" domain "$domain" environment "$environment"
-  exit 0
-fi
+  if (/^\.cloudez\/?$/m.test(atual)) return "already"
 
-# So domain e root. O destino ssh saiu daqui: ele vem da conta do usuario, pelo
-# cloudez_get_site, e uma copia num arquivo versionado envelheceria — a Cloudez
-# pode mover o site de servidor, e o host escrito continuaria apontando para o
-# antigo, mandando o deploy para o lugar errado sem reclamar.
-#
-# O arquivo gerado nao leva comentario nenhum: e config de projeto, versionada e
-# lida por quem ja sabe o que esta fazendo. O que os comentarios explicavam —
-# para onde o deploy publica, e que o document root no painel precisa apontar
-# para <root>/current — e trabalho do /cloudez:setup dizer na conversa, onde o
-# usuario ainda pode perguntar. No arquivo, viravam texto que ninguem rele e que
-# envelhece sozinho.
-cat > "$target" <<YAML
-cloudez:
-  $environment:
-    domain: $domain
-    root: ~/$domain/www/claude
-YAML
+  // Um arquivo sem newline final grudaria as duas linhas numa só.
+  appendFileSync(".gitignore", (atual && !atual.endsWith("\n") ? "\n" : "") + ".cloudez/\n")
+  return "updated"
+}
 
-# O estado dos deploys mora em .cloudez/ e nao deveria ir para o repositorio.
-# Fazemos aqui porque e o passo que todo mundo esquece, e esquecer significa
-# commitar estado de servidor.
-gitignore="skipped"
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  if [ -f .gitignore ] && grep -q '^\.cloudez/\?$' .gitignore; then
-    gitignore="already"
-  else
-    printf '.cloudez/\n' >> .gitignore
-    gitignore="updated"
-  fi
-fi
+// ───────────────────────────────────────────────────────────────── entrada ──
 
-# Sem `todo`: nao sobra nada para o usuario preencher. O destino ssh vem do
-# cloudez_get_site, e o root ja sai escrito.
-json status created path "$target" domain "$domain" environment "$environment" \
-     gitignore "$gitignore"
+const [bruto, environment] = process.argv.slice(2)
+
+if (!bruto) {
+  die("missing_domain", "Informe o dominio: cloudez-setup <domain> <environment>.", {
+    hint: "FQDN, sem protocolo nem caminho. Ex.: staging.meusite.com.br",
+  })
+}
+
+// DNS não diferencia maiúscula, mas o caminho no servidor diferencia: o domínio
+// vira `~/<domain>/www/claude`, então normalizar aqui evita dois diretórios para
+// o mesmo site.
+const domain = bruto.toLowerCase()
+
+if (!isFqdn(domain)) {
+  die("invalid_domain", `'${bruto}' nao e um FQDN valido.`, {
+    hint: "Use apenas o dominio: meusite.com.br. Sem https://, sem /caminho, sem ?query, sem :porta.",
+  })
+}
+
+if (!environment) {
+  die("missing_environment", "Informe o environment: cloudez-setup <domain> <environment>.", {
+    hint: "Ex.: default, staging, production. Nao ha padrao — o environment decide para onde o deploy vai.",
+  })
+}
+
+// O environment vira chave YAML e é interpolado no template. Restringir o
+// formato aqui é o que impede um nome com espaço ou dois-pontos de gerar um
+// arquivo quebrado que o usuário não escreveu.
+if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(environment)) {
+  die("invalid_environment", `Nome de environment invalido: '${environment}'.`, {
+    hint: "Use letras, numeros, hifen ou underscore. Ex.: default, staging, production.",
+  })
+}
+
+const target = resolveConfig()
+
+if (existsSync(target)) {
+  ok({ status: "exists", path: target, domain, environment })
+}
+
+// Só domain e root. O destino ssh saiu daqui: ele vem da conta do usuário, pelo
+// cloudez_get_site, e uma cópia num arquivo versionado envelheceria — a Cloudez
+// pode mover o site de servidor, e o host escrito continuaria apontando para o
+// antigo, mandando o deploy para o lugar errado sem reclamar.
+//
+// O arquivo gerado não leva comentário nenhum: é config de projeto, versionada e
+// lida por quem já sabe o que está fazendo. O que os comentários explicavam —
+// para onde o deploy publica, e que o document root no painel precisa apontar
+// para <root>/current — é trabalho do /cloudez:setup dizer na conversa, onde o
+// usuário ainda pode perguntar. No arquivo, viravam texto que ninguém relê e que
+// envelhece sozinho.
+writeFileSync(target, `cloudez:\n  ${environment}:\n    domain: ${domain}\n    root: ~/${domain}/www/claude\n`)
+
+// Sem `todo`: não sobra nada para o usuário preencher. O destino ssh vem do
+// cloudez_get_site, e o root já sai escrito.
+ok({ status: "created", path: target, domain, environment, gitignore: garantirGitignore() })

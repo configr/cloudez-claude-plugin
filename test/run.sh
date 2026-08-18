@@ -54,19 +54,27 @@ fi
 # ----------------------------------------------------------------- estatico --
 step "estatico (shellcheck)"
 if command -v shellcheck >/dev/null 2>&1; then
-  # Só arquivos de shell: bin/ e libexec/ tambem guardam launchers .cmd, o
-  # helper de JSON em .mjs e binarios compilados — todos coisas que o shellcheck
-  # tentaria interpretar como script.
+  # Só arquivos de shell. A selecao e pelo SHEBANG, e nao por uma lista de nomes:
+  # bin/ guarda launcher .cmd, binario compilado e — desde que os adaptadores
+  # viraram Node — scripts sem extensao que NAO sao shell. Uma lista de exclusoes
+  # envelheceria a cada migracao, e o sintoma seria uma reprovacao de JavaScript
+  # pelo linter de shell.
+  #
+  # Hoje sobra o launcher POSIX do sync e os mocks. Se um dia nao sobrar nada, o
+  # `xargs` roda com build.sh e test/run.sh, que sao shell de verdade.
+  #
+  # As exclusoes que sobraram sao so as dos binarios, para o awk nao ler megabyte
+  # de dados procurando uma primeira linha que nao existe.
   #
   # find|xargs em vez de mapfile: `mapfile` e builtin do bash 4+, e o bash que o
   # macOS traz e o 3.2. O CI pegou isso — a matriz de duas plataformas existe
   # exatamente para esse tipo de coisa.
   #
-  # SC1091: nao seguir o source de _lib.sh/_yaml.sh (resolvido em runtime).
   find bin libexec test/mocks -maxdepth 1 -type f \
     ! -name '*.cmd' ! -name '*.exe' ! -name '*.mjs' \
     ! -name '*-amd64' ! -name '*-arm64' -print0 \
-    | xargs -0 shellcheck -e SC1091 build.sh test/run.sh || rc=1
+    | xargs -0 awk 'FNR == 1 && /^#!.*(bash|[ \/]sh)$/ { print FILENAME }' \
+    | xargs shellcheck -e SC1091 build.sh test/run.sh || rc=1
   printf 'ok\n'
 else
   missing "shellcheck"

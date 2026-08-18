@@ -3,7 +3,9 @@
     "cloudez": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/cloudez-mcp.mjs"],
-      "env": {}
+      "env": {
+        "CLOUDEZ_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
     }
   }
 }
