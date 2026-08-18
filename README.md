@@ -78,7 +78,38 @@ Para conferir a estrutura antes de carregar:
 claude plugin validate /caminho/para/cloudez-claude-plugin
 ```
 
-Depois de carregado:
+### Instalar de verdade (aparece em `/plugin`)
+
+`--plugin-dir` carrega o plugin só naquela sessão. Para ele ficar instalado e
+aparecer na lista de `/plugin`, use o marketplace — este repositório é os dois
+ao mesmo tempo (`.claude-plugin/marketplace.json` lista o plugin com
+`source: "./"`, a própria raiz).
+
+Local, para você mesmo:
+
+```
+/plugin marketplace add ~/Sandbox/cloudez/cloudez-claude-plugin
+/plugin install cloudez@cloudez
+```
+
+Para o time, depois de publicar o repositório:
+
+```
+/plugin marketplace add configr/cloudez-claude-plugin
+/plugin install cloudez@cloudez
+```
+
+Funciona com repositório privado — quem instala precisa ter acesso de leitura ao
+repo. Não há passo de publicação em diretório público, e o plugin não fica
+visível para ninguém fora de quem você mandar o comando.
+
+Depois de instalado, `/plugin` mostra o `cloudez` na lista, com opções de
+habilitar, desabilitar e atualizar. Atualizações chegam com
+`/plugin marketplace update cloudez` depois de você dar push.
+
+### Comandos
+
+Com o plugin ativo:
 
 - `/cloudez:login` — verifica se há token da Cloudez salvo e conduz o login;
 - `/cloudez:setup <domain> <environment>` — cria o `.cloudez.yaml` do projeto, se
@@ -113,35 +144,6 @@ Depois de carregado:
 
 Os executáveis de `bin/` entram no `PATH` da tool Bash enquanto o plugin está
 ativo.
-
-### Instalar de verdade (aparece em `/plugin`)
-
-`--plugin-dir` carrega o plugin só naquela sessão. Para ele ficar instalado e
-aparecer na lista de `/plugin`, use o marketplace — este repositório é os dois
-ao mesmo tempo (`.claude-plugin/marketplace.json` lista o plugin com
-`source: "./"`, a própria raiz).
-
-Local, para você mesmo:
-
-```
-/plugin marketplace add ~/Sandbox/cloudez/cloudez-claude-plugin
-/plugin install cloudez@cloudez
-```
-
-Para o time, depois de publicar o repositório:
-
-```
-/plugin marketplace add configr/cloudez-claude-plugin
-/plugin install cloudez@cloudez
-```
-
-Funciona com repositório privado — quem instala precisa ter acesso de leitura ao
-repo. Não há passo de publicação em diretório público, e o plugin não fica
-visível para ninguém fora de quem você mandar o comando.
-
-Depois de instalado, `/plugin` mostra o `cloudez` na lista, com opções de
-habilitar, desabilitar e atualizar. Atualizações chegam com
-`/plugin marketplace update cloudez` depois de você dar push.
 
 ## Estado atual
 
