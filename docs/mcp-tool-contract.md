@@ -27,11 +27,11 @@ excessivo, é porque custou uma sessão descobri-lo.
 ## 1. O split: control plane vs data plane
 
 O transporte dos arquivos é `tar` em stream sobre `ssh`, feito localmente pelo
-`cmd/sync/`. Isso define a fronteira:
+`bin/cloudez-sync`. Isso define a fronteira:
 
 | Camada | Quem faz | O quê |
 |---|---|---|
-| **Data plane** | `cmd/sync` (Go), no host do usuário | mover os bytes para o servidor |
+| **Data plane** | `bin/cloudez-sync` (Node), no host do usuário | mover os bytes para o servidor |
 | **Control plane** | tools MCP | descobrir o destino, registrar o deploy, ativar a release, rollback |
 
 **O MCP nunca transporta arquivos.** Ele diz *para onde* enviar e *o que fazer
@@ -45,7 +45,7 @@ Fluxo completo de um deploy:
 1. Skill decide o diretório a publicar          (Bash, opcionalmente um build)
 2. cloudez_begin_deploy(domain, ref)  ─────────► MCP
    └─ retorna deploy_id + destino ssh
-3. tar -c | ssh tar -x  para o release dir      (cmd/sync, local)
+3. tar -c | ssh tar -x  para o release dir      (cloudez-sync, local)
 4. cloudez_finalize_deploy(deploy_id) ─────────► MCP
    └─ troca o symlink current
    └─ falhou? cloudez_rollback(domain)

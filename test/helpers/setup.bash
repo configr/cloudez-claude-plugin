@@ -57,8 +57,104 @@ teardown() {
   return 0
 }
 
-# jq_field <json> <caminho>
-jq_field() { printf '%s' "$1" | jq -r "$2"; }
+# campo <json> <caminho> — extrai um campo, no formato do `jq -r`.
+#
+# Chamava o `jq` e passou a chamar test/helpers/json.mjs. O jq era a ultima
+# dependencia que o CI instalava alem do runtime, e ja nao servia a mais nada: o
+# runtime do plugin deixou de usa-lo quando os adaptadores viraram Node.
+campo() { printf '%s' "$1" | node "$PLUGIN_ROOT/test/helpers/json.mjs" "$2"; }
+
+# campo_de <arquivo> <caminho> — o mesmo, lendo de um arquivo.
+campo_de() { node "$PLUGIN_ROOT/test/helpers/json.mjs" "$2" < "$1"; }
+
+# ----------------------------------------------------------------------- pty --
+#
+# com_pty <bytes> <comando...> — roda o comando num terminal de verdade e "digita"
+# os bytes quando o prompt aparecer.
+#
+# Existe porque o `cloudez-login` abre `/dev/tty`, o terminal de CONTROLE: mockar
+# stdin nao alcanca esse caminho. So um pty alcanca, e `script(1)` e o unico
+# alocador de pty presente nas duas plataformas da matriz.
+#
+# Tres detalhes aqui nao sao estilo, sao correcao — os tres custaram uma tentativa:
+#
+#   1. A ESPERA PELO PROMPT nao e cerimonia nem sleep disfarcado. Alimentar por
+#      redirect simples faz os bytes chegarem antes de o filho entrar em modo raw:
+#      a disciplina de linha os consome e ECOA, e o login recebe entrada VAZIA. O
+#      teste passaria verde afirmando sobre outra coisa. O `pedirToken` liga o raw
+#      ANTES de escrever "Token: ", entao ver o prompt e a garantia de que o modo
+#      ja trocou.
+#
+#   2. A entrada e um PIPE, nunca um fifo nomeado. O `script` do BSD faz
+#      `tcgetattr` no proprio stdin e recusa fifo com "Operation not supported on
+#      socket" — que se le como defeito do teste, e nao como escolha de canal.
+#
+#   3. O EOT (\004) e cinto de seguranca, e so entra quando FALTA terminador. Sem
+#      nenhum, o filho espera Enter para sempre e PENDURA a suite; o `pedirToken`
+#      trata EOT como fim de entrada, entao um byte esquecido vira falha em vez de
+#      travamento — ja aconteceu ao escrever estes testes.
+#
+#      Manda-lo SEMPRE, porem, criava uma intermitencia propria: chegando depois
+#      de o raw mode ser desligado, o terminal o ECOA como "^D" mais backspaces, e
+#      esse eco cai num ponto imprevisivel da saida. Caindo na linha do `{`, o
+#      payload deixa de ser localizavel e o teste falha sem nada de errado no
+#      codigo sob teste.
+com_pty() {
+  local bytes="$1"; shift
+  local dir; dir=$(mktemp -d)
+  local terminal="$dir/terminal"; : > "$terminal"
+  local rc=0
+
+  {
+    # 200 x 0,05s = 10s de teto. Se o prompt nao veio, mandar os bytes assim mesmo
+    # produz uma falha legivel; esperar para sempre nao.
+    local _i
+    for _i in $(seq 1 200); do
+      # Sai tambem se o processo ja falhou: um caminho que nunca chega a
+      # perguntar nao tem prompt para esperar, e pagaria o teto inteiro.
+      grep -q 'Token: \|"error"' "$terminal" 2>/dev/null && break
+      sleep 0.05
+    done
+    # Terminador so quando falta: ver o item 3 do cabecalho.
+    case "$bytes" in
+      *$'\n' | *$'\004' | *$'\003') printf '%s' "$bytes" ;;
+      *) printf '%s\004' "$bytes" ;;
+    esac
+  } | {
+    if script --version 2>/dev/null | grep -q util-linux; then
+      # util-linux quer o comando numa string; %q protege caminho com espaco.
+      local cmd; cmd=$(printf '%q ' "$@")
+      script -q -c "$cmd" /dev/null > "$terminal" 2>&1
+    else
+      script -q /dev/null "$@" > "$terminal" 2>&1
+    fi
+  } || rc=$?
+
+  # Normaliza o que o TERMINAL acrescenta, e que nao veio de quem esta sob teste:
+  #
+  #   \r    o pty converte \n em \r\n; sem tirar, toda comparacao falha por um byte
+  #         invisivel.
+  #   \b    backspace de eco.
+  #   ^D    o `script` envia EOT ao pty quando o proprio stdin dele fecha, e o
+  #         terminal — ja fora do modo raw a essa altura — ecoa isso como "^D". O
+  #         eco cai num ponto que depende de escalonamento: colado ao `{` do
+  #         payload, o JSON deixa de comecar em inicio de linha e o extrator falha.
+  #         Foi uma intermitencia real, nao hipotetica.
+  tr -d '\r\010' < "$terminal" | sed 's/\^D//g'
+  rm -rf "$dir"
+  return $rc
+}
+
+# campo_pty <saida> <caminho> — extrai um campo do JSON que veio junto do terminal.
+#
+# Num pty stdout e stderr caem no mesmo fluxo, entao o payload sai colado ao banner
+# do login e o extrator sozinho engasga. O awk guarda o ULTIMO bloco que comeca numa
+# linha `{` sozinha — que e o payload, seja o `ok` ou o `die` — e so ele segue.
+campo_pty() {
+  printf '%s\n' "$1" \
+    | awk '/^\{$/ { buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' \
+    | node "$PLUGIN_ROOT/test/helpers/json.mjs" "$2"
+}
 
 # ------------------------------------------------------------- API da Cloudez --
 #
@@ -105,17 +201,27 @@ api_offline() { export CLOUDEZ_API_URL="http://127.0.0.1:1"; }
 # JSON direto e mais honesto para um teste de sync: o que se afirma e sobre o
 # TRANSPORTE, e depender de outro adaptador para chegar la escondia isso.
 #
-# O formato e o mesmo que o internal/cloudez le, e o round-trip dele tem teste
-# proprio em Go.
+# O formato e o mesmo que o mcp/cloudez-state.mjs le — e agora os DOIS lados leem
+# por ali, entao nao ha mais dois schemas para divergirem.
 deploy_state() {
   local id="$1" status="${2:-awaiting_upload}"
   mkdir -p .cloudez/state
-  jq -n --arg id "$id" --arg s "$status" \
-    '{deploy_id: $id, release_id: "20260101T000000Z-abc1234",
-      environment: "staging", ref: "abc1234def", status: $s,
-      root: "/srv/staging", domain: "staging.example.com",
-      ssh: {host: "srv.example.com", user: "deploy", port: 22,
-            path: "/srv/staging/releases/20260101T000000Z-abc1234/"}}' \
-    > ".cloudez/state/$id.json"
+  cat > ".cloudez/state/$id.json" <<JSON
+{
+  "deploy_id": "$id",
+  "release_id": "20260101T000000Z-abc1234",
+  "environment": "staging",
+  "ref": "abc1234def",
+  "status": "$status",
+  "root": "/srv/staging",
+  "domain": "staging.example.com",
+  "ssh": {
+    "host": "srv.example.com",
+    "user": "deploy",
+    "port": 22,
+    "path": "/srv/staging/releases/20260101T000000Z-abc1234/"
+  }
+}
+JSON
   printf '%s' "$id"
 }

@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # Uso: ./vendor-mcp.sh [caminho-do-repo-cloudez-mcp]
 #
-# Traz o MCP para dentro do plugin. Sao DOIS artefatos, e a diferenca importa:
+# Traz o MCP para dentro do plugin. Sao TRES artefatos, e a diferenca importa:
 #
 #   mcp/cloudez-mcp.mjs    o servidor. Sobe um transporte stdio ao ser importado.
 #   mcp/cloudez-auth.mjs   biblioteca. O contrato do token, que o bin/cloudez-login
 #                          importa em vez de reimplementar.
+#   mcp/cloudez-state.mjs  biblioteca. O contrato do estado do deploy, que o
+#                          bin/cloudez-sync importa em vez de reimplementar.
 #
-# O segundo existe porque o primeiro nao pode ser importado de um adaptador de
-# linha de comando: importar o servidor penduraria o processo num transporte que
-# ninguem pediu. Entrypoints separados, um bundle cada.
+# As duas bibliotecas existem porque o servidor nao pode ser importado de um
+# adaptador de linha de comando: importa-lo penduraria o processo num transporte
+# que ninguem pediu. Entrypoints separados, um bundle cada.
 #
-# Existe pelo mesmo motivo do build.sh: o plugin versiona o artefato para quem o
-# instala nao precisar de nenhuma etapa de build. A diferenca e que a fonte mora
-# em OUTRO repositorio, entao este script nao compila — ele chama o bundle la e
-# copia o resultado.
+# O contrato do ESTADO e o mais recente, e o que ele evita e concreto: o arquivo
+# de estado tem dois escritores, e enquanto o sync foi Go os dois mantinham o
+# schema em separado. Um round-trip pela struct de Go apagava em silencio o campo
+# que ela nao conhecia. Importar em vez de reimplementar tira isso da disciplina
+# de quem edita e passa para o build.
+#
+# O plugin versiona os artefatos para quem o instala nao precisar de nenhuma etapa
+# de build — era o mesmo motivo dos binarios que viviam em libexec/, e e o unico
+# que sobrou depois que eles sairam. A diferenca e que a fonte mora em OUTRO
+# repositorio, entao este script nao compila: ele chama o bundle la e copia o
+# resultado.
 #
 # Os bundles carregam a versao no cabecalho. E o que permite saber, olhando so o
 # plugin, de qual cloudez-mcp esta copia veio — sem isso a divergencia entre os
@@ -34,7 +43,7 @@ fonte="${1:-../cloudez-mcp}"
 echo "── bundle em $fonte"
 (cd "$fonte" && npm run bundle)
 
-for artefato in cloudez-mcp.mjs cloudez-auth.mjs; do
+for artefato in cloudez-mcp.mjs cloudez-auth.mjs cloudez-state.mjs; do
   [ -f "$fonte/dist/$artefato" ] || {
     echo "cloudez: $fonte/dist/$artefato nao foi gerado pelo bundle." >&2
     exit 1

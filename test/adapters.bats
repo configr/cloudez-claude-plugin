@@ -11,7 +11,7 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "missing_domain" ]
+  [ "$(campo "$output" .error.code)" = "missing_domain" ]
   [ ! -f .cloudez.yaml ]
 }
 
@@ -21,7 +21,7 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup staging.example.com
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "missing_environment" ]
+  [ "$(campo "$output" .error.code)" = "missing_environment" ]
   [ ! -f .cloudez.yaml ]
 }
 
@@ -33,7 +33,7 @@ setup() { make_project; }
            x.example.com:8080 localhost -x.example.com "x .example.com"; do
     run cloudez-setup "$d" staging
     [ "$status" -eq 1 ]
-    [ "$(jq_field "$output" .error.code)" = "invalid_domain" ]
+    [ "$(campo "$output" .error.code)" = "invalid_domain" ]
     [ ! -f .cloudez.yaml ]
   done
 }
@@ -44,7 +44,7 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup staging.example.com "prod: uction"
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_environment" ]
+  [ "$(campo "$output" .error.code)" = "invalid_environment" ]
   [ ! -f .cloudez.yaml ]
 }
 
@@ -52,10 +52,10 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup staging.example.com staging
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "created" ]
-  [ "$(jq_field "$output" .path)" = ".cloudez.yaml" ]
-  [ "$(jq_field "$output" .domain)" = "staging.example.com" ]
-  [ "$(jq_field "$output" .environment)" = "staging" ]
+  [ "$(campo "$output" .status)" = "created" ]
+  [ "$(campo "$output" .path)" = ".cloudez.yaml" ]
+  [ "$(campo "$output" .domain)" = "staging.example.com" ]
+  [ "$(campo "$output" .environment)" = "staging" ]
   [ -f .cloudez.yaml ]
 }
 
@@ -111,7 +111,7 @@ setup() { make_project; }
   rm .cloudez.yaml
   run cloudez-setup meusite.com.br staging
   ! grep -q TODO .cloudez.yaml
-  [ "$(jq_field "$output" .todo)" = "null" ]
+  [ "$(campo "$output" .todo)" = "null" ]
 }
 
 # O bloco ssh saiu da config: uma copia do host num arquivo versionado envelhece
@@ -131,7 +131,7 @@ setup() { make_project; }
 @test "setup normaliza o dominio para minusculas" {
   rm .cloudez.yaml
   run cloudez-setup MeuSite.COM.BR staging
-  [ "$(jq_field "$output" .domain)" = "meusite.com.br" ]
+  [ "$(campo "$output" .domain)" = "meusite.com.br" ]
   grep -q 'domain: meusite.com.br' .cloudez.yaml
   grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
 }
@@ -168,7 +168,7 @@ setup_keys() {
   printf 'cloudez: {producao: {root: /srv/x}}\n' > .cloudez.yaml
   run cloudez-setup meusite.com.br staging
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "exists" ]
+  [ "$(campo "$output" .status)" = "exists" ]
   grep -q producao .cloudez.yaml
   ! grep -q TODO .cloudez.yaml
 }
@@ -182,14 +182,14 @@ setup_keys() {
   : > .cloudez.yml
   run cloudez-setup meusite.com.br staging
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .path)" = ".cloudez.yaml" ]
+  [ "$(campo "$output" .path)" = ".cloudez.yaml" ]
 }
 
 @test "CLOUDEZ_CONFIG sobrepoe a deteccao automatica" {
   rm .cloudez.yaml
   run env CLOUDEZ_CONFIG=custom.yaml cloudez-setup meusite.com.br staging
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .path)" = "custom.yaml" ]
+  [ "$(campo "$output" .path)" = "custom.yaml" ]
   [ -f custom.yaml ]
   [ ! -f .cloudez.yaml ]
 }
@@ -197,22 +197,22 @@ setup_keys() {
 @test "setup respeita o .cloudez.yml existente em vez de criar um .yaml" {
   mv .cloudez.yaml .cloudez.yml
   run cloudez-setup meusite.com.br staging
-  [ "$(jq_field "$output" .status)" = "exists" ]
-  [ "$(jq_field "$output" .path)" = ".cloudez.yml" ]
+  [ "$(campo "$output" .status)" = "exists" ]
+  [ "$(campo "$output" .path)" = ".cloudez.yml" ]
   [ ! -f .cloudez.yaml ]
 }
 
 @test "setup acrescenta .cloudez/ ao gitignore" {
   rm .cloudez.yaml .gitignore
   run cloudez-setup meusite.com.br staging
-  [ "$(jq_field "$output" .gitignore)" = "updated" ]
+  [ "$(campo "$output" .gitignore)" = "updated" ]
   grep -qx '\.cloudez/' .gitignore
 }
 
 @test "setup nao duplica a linha do gitignore" {
   rm .cloudez.yaml
   run cloudez-setup meusite.com.br staging
-  [ "$(jq_field "$output" .gitignore)" = "already" ]
+  [ "$(campo "$output" .gitignore)" = "already" ]
   [ "$(grep -c '^\.cloudez/$' .gitignore)" -eq 1 ]
 }
 
@@ -226,17 +226,91 @@ setup_keys() {
 # e emitia um segundo erro (site_not_found) contradizendo o primeiro.
 # REGRESSAO: `die` escrevia em stdout; como site_config e chamada dentro de
 # $( ), o JSON de erro era capturado na variavel e nunca chegava ao usuario.
+# --------------------------------------------------------------- hash-only ---
+#
+# O passo que forma o release_id sem depender de git (commands/deploy.md, 4c). Roda
+# ANTES do begin_deploy, entao nao tem deploy_id para receber: quem o chama esta
+# justamente montando o identificador que ainda nao existe.
+#
+# Estes testes existem porque este caminho ja teve cobertura em UM lugar so — o job
+# `windows-build` do CI, que compilava o binario Go e o executava sobre uma arvore
+# conhecida. Com o sync em Node aquele job saiu, e sem estes testes a superficie de
+# linha de comando do --hash-only ficaria sem nenhuma verificacao.
+
+# A arvore e o valor sao os mesmos que a suite de unidade fixa (test/payload.test.mjs)
+# e que o CI de Windows conferia. Aqui o que se afirma e o CAMINHO COMPLETO: parsing
+# de argumento, recusa de diretorio e o envelope JSON — nao a funcao de hash.
+@test "hash-only imprime o resumo do que seria enviado" {
+  mkdir -p dist/assets dist/.git
+  printf '<h1>oi</h1>' > dist/index.html
+  printf 'svg'         > dist/assets/logo.svg
+  printf 'ref: x'      > dist/.git/HEAD
+
+  run cloudez-sync --hash-only dist
+  [ "$status" -eq 0 ]
+  [ "$(campo "$output" .content_sha256)" = "03ff8bfa4d33e6cad50a7101e974ef34d6e8ccd51a77fbaacf97b7355cef01fc" ]
+  # 2 arquivos, 14 bytes: o .git fica de fora, como no tar do transfer.
+  [ "$(campo "$output" .files)" = "2" ]
+  [ "$(campo "$output" .bytes)" = "14" ]
+}
+
+# O identificador so serve se descrever exatamente o que vai ao ar. Um hash que
+# tocasse a rede ou avancasse o estado tambem deixaria de ser repetivel — e o
+# deploy.md o chama antes de existir deploy nenhum para avancar.
+@test "hash-only nao toca a rede nem o estado" {
+  mkdir -p dist && touch dist/index.html
+  run cloudez-sync --hash-only dist
+  [ "$status" -eq 0 ]
+  [ ! -s "$MOCK_LOG" ]
+  [ ! -d .cloudez/state ]
+}
+
+# Diretorio cujo unico conteudo e .git nao tem nada publicavel. Sem esta recusa o
+# deploy registraria uma release vazia com identificador de aparencia normal.
+@test "hash-only recusa diretorio que so tem .git" {
+  mkdir -p dist/.git
+  printf 'ref: x' > dist/.git/HEAD
+
+  run cloudez-sync --hash-only dist
+  [ "$status" -eq 1 ]
+  [ "$(campo "$output" .error.code)" = "build_output_empty" ]
+  [[ "$(campo "$output" .error.message)" == *".git"* ]]
+}
+
+# As mesmas duas recusas do envio valem aqui: hashear um diretorio vazio devolveria
+# um sha valido para conteudo nenhum.
+@test "hash-only aplica as recusas de diretorio" {
+  run cloudez-sync --hash-only nao-existe
+  [ "$status" -eq 1 ]
+  [ "$(campo "$output" .error.code)" = "build_output_missing" ]
+
+  mkdir -p vazio
+  run cloudez-sync --hash-only vazio
+  [ "$status" -eq 1 ]
+  [ "$(campo "$output" .error.code)" = "build_output_empty" ]
+}
+
+# Uso vai em texto puro e sai com 2 — nao no envelope JSON. Quem chega aqui errou a
+# linha de comando, e nao ha contrato estabelecido para ele ler. O 2 distingue "voce
+# me chamou errado" de "a operacao falhou", que e 1.
+@test "sem argumentos o sync imprime o uso e sai 2" {
+  run cloudez-sync
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"uso: cloudez-sync"* ]]
+  [[ "$output" == *"--hash-only"* ]]
+}
+
 @test "sync com deploy_id desconhecido: deploy_not_found" {
   run cloudez-sync dpl_inexistente dist
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "deploy_not_found" ]
+  [ "$(campo "$output" .error.code)" = "deploy_not_found" ]
 }
 
 @test "sync com diretorio ausente: build_output_missing" {
   d=$(deploy_state dpl_test)
   run cloudez-sync "$d" nao-existe
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "build_output_missing" ]
+  [ "$(campo "$output" .error.code)" = "build_output_missing" ]
 }
 
 @test "sync com diretorio vazio: build_output_empty" {
@@ -244,7 +318,7 @@ setup_keys() {
   mkdir -p dist
   run cloudez-sync "$d" dist
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "build_output_empty" ]
+  [ "$(campo "$output" .error.code)" = "build_output_empty" ]
 }
 
 @test "sync bem-sucedido marca o deploy como uploaded" {
@@ -252,7 +326,7 @@ setup_keys() {
   mkdir -p dist && touch dist/index.html
   run cloudez-sync "$d" dist
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "uploaded" ]
+  [ "$(campo "$output" .status)" = "uploaded" ]
   grep -q "tar xzf - -C '/srv/staging/releases/" "$MOCK_LOG"
 }
 
@@ -271,7 +345,7 @@ setup_keys() {
 # nada — um teste que o usasse afirmaria sobre uma listagem inexistente.
 real_tar() { PATH=/usr/bin:/bin tar "$@"; }
 
-# As flags do cmd/sync precisam produzir uma extracao FIEL. `-C dir .` envia o
+# As flags do transporte precisam produzir uma extracao FIEL. `-C dir .` envia o
 # conteudo, nao o diretorio: sem isso o site sobe aninhado um nivel, e o sintoma
 # e 404 numa release que existe.
 @test "o pacote extrai identico ao que foi empacotado" {
@@ -367,8 +441,8 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   MOCK_SSH_EXIT=255 MOCK_SSH_STDERR="Permission denied (publickey)" \
     run cloudez-sync "$d" dist
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "transfer_failed" ]
-  [ "$(jq_field "$output" .error.retryable)" = "true" ]
+  [ "$(campo "$output" .error.code)" = "transfer_failed" ]
+  [ "$(campo "$output" .error.retryable)" = "true" ]
 }
 
 # O deploy so avanca para "uploaded" quando o transporte confirma. Sem isso o
@@ -377,15 +451,15 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
 # cheio — e o ssh remoto extrai o parcial e sai zero. Verificando so o ssh, o
 # deploy publicaria uma release incompleta como sucesso.
 #
-# O cmd/sync espera pelos DOIS e reporta o primeiro que falhou.
+# O sync espera pelos DOIS e reporta o primeiro que falhou.
 @test "falha do tar local nao passa por sucesso, mesmo com ssh ok" {
   d=$(deploy_state dpl_test)
   mkdir -p dist && touch dist/index.html
   MOCK_TAR_EXIT=2 MOCK_TAR_STDERR="tar: dist/x: Cannot open: Permission denied" \
     run cloudez-sync "$d" dist
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "transfer_failed" ]
-  [ "$(jq -r .status ".cloudez/state/$d.json")" = "awaiting_upload" ]
+  [ "$(campo "$output" .error.code)" = "transfer_failed" ]
+  [ "$(campo_de ".cloudez/state/$d.json" .status)" = "awaiting_upload" ]
 }
 
 # A ordem das duas checagens importa: invertida, uma falha do tar seria reportada
@@ -395,14 +469,14 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   mkdir -p dist && touch dist/index.html
   MOCK_TAR_EXIT=2 MOCK_TAR_STDERR="tar: Cannot open: Permission denied" \
     run cloudez-sync "$d" dist
-  [[ "$(jq_field "$output" .error.logs)" == *"Cannot open"* ]]
+  [[ "$(campo "$output" .error.logs)" == *"Cannot open"* ]]
 }
 
 @test "sync que falha nao marca o deploy como uploaded" {
   d=$(deploy_state dpl_test)
   mkdir -p dist && touch dist/index.html
   MOCK_SSH_EXIT=255 run cloudez-sync "$d" dist
-  [ "$(jq -r .status ".cloudez/state/$d.json")" = "awaiting_upload" ]
+  [ "$(campo_de ".cloudez/state/$d.json" .status)" = "awaiting_upload" ]
 }
 
 # ---------------------------------------------------------------- finalize --

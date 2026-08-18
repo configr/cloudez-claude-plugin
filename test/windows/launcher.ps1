@@ -4,8 +4,10 @@
 # afirma aqui é sobre o comportamento do próprio `cmd`, não sobre o plugin.
 #
 # O launcher é a única peça do plugin que roda numa plataforma sem nenhuma outra
-# cobertura. Os binários são compilados para windows/amd64 e windows/arm64 e
-# versionados, mas até aqui ninguém os tinha executado.
+# cobertura. Ele deixou de invocar um `.exe` em libexec/ e passou a invocar o
+# script Node irmão — o que MUDOU foi o alvo, não a razão de existir: no Windows o
+# shebang não vale nada, e quem chama pelo cmd ou pelo PowerShell precisa que
+# alguém chame o node explicitamente.
 
 $ErrorActionPreference = 'Continue'
 
@@ -28,26 +30,28 @@ Verifica 'o launcher existe' (Test-Path $cmd) $cmd
 
 # ── propagação do código de saída ──────────────────────────────────────────
 #
-# O `exit /b %ERRORLEVEL%` no fim do .cmd é o que faz o código do binário chegar
-# a quem chamou. Sem ele o launcher sai 0 e uma falha de transporte passa por
-# deploy bem-sucedido — a mesma classe de erro silencioso que o resto do plugin
-# persegue.
+# O `exit /b %ERRORLEVEL%` no fim do .cmd é o que faz o código do node chegar a
+# quem chamou. Sem ele o launcher sai 0 e uma falha de transporte passa por deploy
+# bem-sucedido — a mesma classe de erro silencioso que o resto do plugin persegue.
 #
-# `cloudez-sync` sem argumentos sai com 2, e é justamente por não ser 0 nem 1
-# que ele serve aqui: distingue "propagou" de "engoliu" e de "errou por conta
-# própria".
+# `cloudez-sync` sem argumentos sai com 2, e é justamente por não ser 0 nem 1 que
+# ele serve aqui: distingue "propagou" de "engoliu" e de "errou por conta própria".
 
 $saida = & $cmd 2>&1
 $codigo = $LASTEXITCODE
 
-Verifica 'propaga o codigo de saida do binario' ($codigo -eq 2) "esperado 2, veio $codigo"
-Verifica 'chegou a executar o binario' ("$saida" -match 'uso: cloudez-sync') "saida: $saida"
+Verifica 'propaga o codigo de saida do script' ($codigo -eq 2) "esperado 2, veio $codigo"
+Verifica 'chegou a executar o script' ("$saida" -match 'uso: cloudez-sync') "saida: $saida"
 
 # ── resolução do nome pelo %~n0 ────────────────────────────────────────────
 #
-# O alvo sai do próprio nome do arquivo, com o prefixo `cloudez-` removido, para
-# o mesmo conteúdo servir a qualquer comando futuro. Copiado com outro nome, o
-# launcher tem de procurar OUTRO binário.
+# O alvo sai do próprio nome do arquivo, para o mesmo conteúdo servir a qualquer
+# comando futuro sem uma cópia editada. Copiado com outro nome e sem o script
+# irmão ao lado, o launcher tem de procurar OUTRO alvo e falhar dizendo qual.
+#
+# Antes o alvo era `libexec\<nome-sem-prefixo>-windows-<arch>.exe`; hoje é o irmão
+# `bin\<nome>`. A propriedade testada é a mesma: o nome do arquivo decide, não uma
+# string fixa dentro dele.
 
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("cloudez-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $temp | Out-Null
@@ -56,13 +60,14 @@ Copy-Item $cmd (Join-Path $temp 'cloudez-inexistente.cmd')
 $saida = & (Join-Path $temp 'cloudez-inexistente.cmd') 2>&1
 $codigo = $LASTEXITCODE
 
-Verifica 'binario ausente sai 1' ($codigo -eq 1) "esperado 1, veio $codigo"
-Verifica 'o nome do alvo vem do arquivo, sem o prefixo' ("$saida" -match "inexistente") "saida: $saida"
-Verifica 'a mensagem diz o que fazer' ("$saida" -match 'build\.sh') "saida: $saida"
+Verifica 'alvo ausente sai 1' ($codigo -eq 1) "esperado 1, veio $codigo"
+Verifica 'o nome do alvo vem do arquivo' ("$saida" -match 'cloudez-inexistente') "saida: $saida"
+Verifica 'a mensagem diz o que falta' ("$saida" -match 'ausente') "saida: $saida"
 
-# Sem `..\libexec` ao lado, o launcher cai para o próprio diretório — e não pode
-# procurar num caminho com `cloudez-` no nome do binário.
-Verifica 'o alvo nao carrega o prefixo cloudez-' (-not ("$saida" -match 'cloudez-inexistente-windows')) "saida: $saida"
+# O alvo é o irmão de mesmo nome, e não um binário por plataforma: uma mensagem
+# falando de libexec ou de arquitetura significaria que o .cmd velho ficou para
+# trás numa cópia.
+Verifica 'o alvo nao e mais um binario por plataforma' (-not ("$saida" -match 'libexec|windows-amd64|windows-arm64')) "saida: $saida"
 
 Remove-Item -Recurse -Force $temp
 
@@ -78,9 +83,9 @@ Write-Host 'launcher Windows OK'
 # `exit 0` explícito, e não queda pelo fim do arquivo.
 #
 # Sem ele o script herda o $LASTEXITCODE do último comando nativo — que aqui é o
-# .cmd copiado, saindo 1 DE PROPÓSITO no teste de binário ausente. O `shell:
-# pwsh` do Actions propaga esse valor, então o job falhava depois de imprimir
-# que tudo passou.
+# .cmd copiado, saindo 1 DE PROPÓSITO no teste de alvo ausente. O `shell: pwsh` do
+# Actions propaga esse valor, então o job falhava depois de imprimir que tudo
+# passou.
 #
 # É a mesma inversão que este arquivo existe para caçar no launcher, do outro
 # lado: lá o risco é uma falha sair 0, aqui foi um sucesso sair 1.

@@ -41,12 +41,12 @@ setup() {
 
 @test "o token vem do arquivo quando nao ha variavel" {
   run bash -c 'printf tok_do_pipe | cloudez-login --stdin'
-  [ "$(jq_field "$output" .source)" = "file" ]
+  [ "$(campo "$output" .source)" = "file" ]
 }
 
 @test "CLOUDEZ_TOKEN vence o arquivo" {
   run bash -c 'printf tok_do_pipe | CLOUDEZ_TOKEN=tok_do_ambiente cloudez-login --stdin'
-  [ "$(jq_field "$output" .source)" = "env" ]
+  [ "$(campo "$output" .source)" = "env" ]
 }
 
 # ----------------------------------------------------------- os tres vereditos --
@@ -57,8 +57,8 @@ setup() {
 @test "2xx: o token e dado por verificado" {
   run bash -c 'printf tok_bom | cloudez-login --stdin'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .verified)" = "true" ]
-  [ "$(jq_field "$output" .status)" = "authenticated" ]
+  [ "$(campo "$output" .verified)" = "true" ]
+  [ "$(campo "$output" .status)" = "authenticated" ]
 }
 
 # 401 e a unica resposta conclusiva: o token existe e a Cloudez o recusou.
@@ -66,14 +66,14 @@ setup() {
   api_status 401
   run bash -c 'printf tok_ruim | cloudez-login --stdin'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
+  [ "$(campo "$output" .error.code)" = "invalid_token" ]
 }
 
 @test "403 tambem e recusa" {
   api_status 403
   run bash -c 'printf tok_ruim | cloudez-login --stdin'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
+  [ "$(campo "$output" .error.code)" = "invalid_token" ]
 }
 
 # Offline, endpoint errado ou API fora nao sao prova de token ruim. Concluir
@@ -82,8 +82,8 @@ setup() {
   api_offline
   run bash -c 'printf tok_novo | cloudez-login --stdin'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .verified)" = "false" ]
-  [ "$(jq_field "$output" .warning)" != "null" ]
+  [ "$(campo "$output" .verified)" = "false" ]
+  [ "$(campo "$output" .warning)" != "null" ]
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
 }
 
@@ -91,7 +91,7 @@ setup() {
   api_status 404
   run bash -c 'printf tok_novo | cloudez-login --stdin'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .verified)" = "false" ]
+  [ "$(campo "$output" .verified)" = "false" ]
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_novo" ]
 }
 
@@ -103,7 +103,7 @@ setup() {
   rm "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'cloudez-login < /dev/null'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "no_tty" ]
+  [ "$(campo "$output" .error.code)" = "no_tty" ]
   [ ! -f "$CLOUDEZ_TOKEN_FILE" ]
 }
 
@@ -112,8 +112,8 @@ setup() {
 @test "o erro sem TTY ensina o ! do Claude Code" {
   rm "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'cloudez-login < /dev/null'
-  [[ "$(jq_field "$output" .error.claude_code_command)" == "! /"*/cloudez-login ]]
-  [[ "$(jq_field "$output" .error.hint)" == *"! "* ]]
+  [[ "$(campo "$output" .error.claude_code_command)" == "! /"*/cloudez-login ]]
+  [[ "$(campo "$output" .error.hint)" == *"! "* ]]
 }
 
 # A lapide do --check saiu; o erro generico virou o unico caminho de volta ate a
@@ -121,8 +121,8 @@ setup() {
 @test "argumento desconhecido nao faz nada, e aponta a tool" {
   run cloudez-login --force
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "usage" ]
-  [[ "$(jq_field "$output" .error.hint)" == *cloudez_auth_status* ]]
+  [ "$(campo "$output" .error.code)" = "usage" ]
+  [[ "$(campo "$output" .error.hint)" == *cloudez_auth_status* ]]
 }
 
 # O login por e-mail e senha foi abandonado. Quem vier da doc antiga merece um erro
@@ -130,7 +130,7 @@ setup() {
 @test "--password responde que foi descontinuado" {
   run cloudez-login --password
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "password_login_disabled" ]
+  [ "$(campo "$output" .error.code)" = "password_login_disabled" ]
 }
 
 # ------------------------------------------------------------------- --stdin --
@@ -143,7 +143,7 @@ setup() {
   rm -f "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'printf tok_do_clipboard | cloudez-login --stdin'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "authenticated" ]
+  [ "$(campo "$output" .status)" = "authenticated" ]
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_do_clipboard" ]
   [ "$(ls -l "$CLOUDEZ_TOKEN_FILE" | cut -c1-10)" = "-rw-------" ]
 }
@@ -158,16 +158,16 @@ setup() {
 @test "stdin num terminal nao trava esperando entrada que nao vem" {
   run cloudez-login --stdin < /dev/null
   # Sem terminal aqui: o que se afirma e que o modo existe e nao pendura. O ramo
-  # do "--stdin com TTY" so aparece para quem digita o comando na mao.
+  # do "--stdin com TTY" precisa de um pty para existir, e mora em test/pty.bats.
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "empty_token" ]
+  [ "$(campo "$output" .error.code)" = "empty_token" ]
 }
 
 @test "stdin vazio nao salva nada" {
   rm -f "$CLOUDEZ_TOKEN_FILE"
   run bash -c ': | cloudez-login --stdin'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "empty_token" ]
+  [ "$(campo "$output" .error.code)" = "empty_token" ]
   [ ! -f "$CLOUDEZ_TOKEN_FILE" ]
 }
 
@@ -176,7 +176,7 @@ setup() {
   rm -f "$CLOUDEZ_TOKEN_FILE"
   run bash -c 'printf "Seu token: abc123" | cloudez-login --stdin'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
+  [ "$(campo "$output" .error.code)" = "invalid_token" ]
   ! grep -q 'Authorization' "$MOCK_LOG"
 }
 
@@ -205,7 +205,7 @@ setup() {
   api_status 401
   run bash -c 'printf tok_ruim | cloudez-login --stdin'
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "invalid_token" ]
+  [ "$(campo "$output" .error.code)" = "invalid_token" ]
   [ "$(cat "$CLOUDEZ_TOKEN_FILE")" = "tok_bom" ]
 }
 
@@ -245,7 +245,7 @@ setup() {
 @test "setup sem dominio reclama do dominio" {
   run cloudez-setup
   [ "$status" -eq 1 ]
-  [ "$(jq_field "$output" .error.code)" = "missing_domain" ]
+  [ "$(campo "$output" .error.code)" = "missing_domain" ]
 }
 
 # ------------------------------------------------------------- piso do Node ----
@@ -260,19 +260,23 @@ setup() {
 @test "o login roda sem a deteccao de modulo, que e o piso Node 20" {
   run bash -c 'printf tok_do_pipe | node --no-experimental-detect-module "$PLUGIN_ROOT/bin/cloudez-login" --stdin'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "authenticated" ]
+  [ "$(campo "$output" .status)" = "authenticated" ]
 }
 
 @test "o setup tambem roda sem a deteccao de modulo" {
   rm .cloudez.yaml
   run bash -c 'node --no-experimental-detect-module "$PLUGIN_ROOT/bin/cloudez-setup" novo.example.com staging'
   [ "$status" -eq 0 ]
-  [ "$(jq_field "$output" .status)" = "created" ]
+  [ "$(campo "$output" .status)" = "created" ]
 }
 
 @test "o bin/package.json existe e so declara o tipo do modulo" {
-  [ "$(jq -r '.type' "$PLUGIN_ROOT/bin/package.json")" = "module" ]
+  [ "$(campo_de "$PLUGIN_ROOT/bin/package.json" .type)" = "module" ]
   # Um package.json com dependencias em bin/ transformaria o plugin em algo que
   # precisa de npm install — exatamente o que o bundle vendorado evita.
-  [ "$(jq -r 'has("dependencies")' "$PLUGIN_ROOT/bin/package.json")" = "false" ]
+  #
+  # Campo ausente sai como "null", que e o que se afirma aqui. Antes era um
+  # `has("dependencies")` do jq; a diferenca so apareceria num package.json com
+  # `"dependencies": null` escrito a mao, que nao e um estado que alguem produz.
+  [ "$(campo_de "$PLUGIN_ROOT/bin/package.json" .dependencies)" = "null" ]
 }

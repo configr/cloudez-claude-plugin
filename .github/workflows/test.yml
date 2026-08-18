@@ -12,10 +12,13 @@ jobs:
     # GNU coreutils) e o bash 3.2 que o macOS ainda traz, sem `mapfile`. Os dois
     # ja quebraram aqui por so termos testado num lugar.
     #
-    # Windows nao esta na matriz porque portar a suite bats para la exigiria
-    # bash, jq e coreutils no runner. A cobertura daquela plataforma mora nos
-    # jobs `windows` (os dois launchers) e `windows-build` (compila e executa o
-    # binario no proprio Windows).
+    # Windows nao esta na matriz porque portar a suite bats para la exigiria bash e
+    # coreutils no runner. A cobertura daquela plataforma mora no job `windows`, que
+    # exercita as duas portas de entrada do sync.
+    #
+    # A unica dependencia que sobra para instalar aqui e o shellcheck, e ele e de
+    # lint: a suite em si roda com o runtime que o plugin ja exige. O jq saiu quando
+    # test/helpers/json.mjs assumiu a extracao de campo.
     strategy:
       fail-fast: false
       matrix:
@@ -26,171 +29,68 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # go-version-file em vez de `stable`: o job `binarios` compara os binarios
-      # commitados byte a byte, e o compilador faz parte da entrada dessa
-      # comparacao. Com `stable`, o dia em que o runner promovesse uma versao
-      # nova quebraria o CI sem que uma linha do projeto tivesse mudado.
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - name: Instalar dependências (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Instalar dependências (macOS)
         if: runner.os == 'macOS'
-        run: brew install shellcheck jq
+        run: brew install shellcheck
 
-      # test/run.sh compila antes de testar, entao a suite sempre valida o
-      # codigo-fonte atual — nunca um binario velho que ficou no repositorio.
-      # Que o binario commitado corresponda a esse fonte e o job `binarios`
-      # que verifica.
       - name: Rodar a suíte
         run: ./test/run.sh --strict
 
-  # Os seis binários de libexec/ são versionados: quem instala o plugin recebe
-  # blobs compilados que não consegue auditar lendo o repositório. Este job é o
-  # que torna isso verificável em vez de ter de acreditar — reconstrói do fonte
-  # e falha se um único byte divergir do que está commitado.
+  # Portar a suite bats para Windows significaria bash e coreutils no runner — muito
+  # trabalho para cobrir o que ja e verificado em duas outras plataformas. O
+  # que interessa aqui sao as duas PORTAS DE ENTRADA do sync naquela plataforma,
+  # que nenhuma outra exercita.
   #
-  # Só funciona porque build.sh usa -trimpath e -buildvcs=false: sem eles o Go
-  # embute o caminho da máquina e a revisão do git no binário, e duas builds do
-  # mesmo fonte nunca sairiam iguais.
-  #
-  # Roda só no Linux. A saída da compilação cruzada não depende do host, então
-  # repetir na matriz custaria o dobro sem verificar nada a mais.
-  binarios:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Reconstruir
-        run: ./build.sh
-
-      - name: Conferir se batem com os commitados
-        run: |
-          if ! git diff --exit-code --stat -- libexec/; then
-            echo "::error::Os binários em libexec/ não correspondem ao fonte em cmd/. Rode ./build.sh e inclua libexec/ no commit."
-            exit 1
-          fi
-
-  # Job separado, e estreito de propósito. Portar a suíte bats para Windows
-  # significaria bash, jq e coreutils no runner — muito trabalho para cobrir uma
-  # peça de trinta linhas. O que interessa aqui é só o launcher: ele é a única
-  # parte do plugin que roda numa plataforma sem nenhuma outra verificação.
-  #
-  # Os binários de libexec/ são versionados, então não há build: o job clona e
-  # executa.
+  # Este job substitui tres que existiam antes — `windows` (dois launchers),
+  # `windows-build` (compilar e executar o binario no proprio Windows) e o
+  # `binarios` (reconstruir os seis blobs de libexec/ e comparar byte a byte). Os
+  # dois ultimos existiam porque o plugin embarcava artefato compilado que quem
+  # instala nao consegue auditar lendo o repositorio. Com o sync em Node o fonte E
+  # o que embarca, e nao ha mais o que reconstruir para conferir.
   windows:
     runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
 
+      # Node 20 explicito, e nao o que o runner traz por acaso.
+      #
+      # 20 e o piso que o plugin declara, e a diferenca importa exatamente aqui: um
+      # arquivo SEM EXTENSAO com sintaxe ESM e lido como CommonJS pelo Node 20 — o
+      # que o `bin/package.json` resolve — enquanto o Node 22+ detecta o modulo
+      # sozinho. Um runner moderno esconderia justamente o defeito que quebraria no
+      # piso, e ja escondeu uma vez.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # A porta de quem chama pelo cmd ou pelo PowerShell: o `.cmd`, que existe
+      # porque no Windows o shebang nao vale nada.
       - name: Launcher .cmd
         shell: pwsh
         run: ./test/windows/launcher.ps1
 
-      # O outro launcher. O .cmd acima é o caminho quando quem chama é o cmd ou o
-      # PowerShell, mas no Windows o plugin também é chamado de dentro de um bash
-      # — Git Bash vem junto com o Git, e é o shell que várias ferramentas usam
-      # para rodar comando. Aí quem responde é `bin/cloudez-sync`, o script
-      # POSIX, e ele estava escolhendo o binário errado.
+      # A outra porta. No Windows o plugin tambem e chamado de dentro de um bash —
+      # Git Bash vem junto com o Git, e e o shell que varias ferramentas usam para
+      # rodar comando. Ai quem responde e o `bin/cloudez-sync` pelo shebang.
       #
-      # Foi assim que o Windows quebrou com o .exe presente e correto ao lado:
-      # `uname -s` no Git Bash devolve `MINGW64_NT-10.0-22631`, não `windows`, e
-      # o script montava um nome de arquivo que nunca existiu. O erro dizia
-      # "binário ausente para mingw64_nt-10.0-22631/amd64", que se lê como falta
-      # de build.
+      # Ja quebrou exatamente aqui, na versao anterior desta peca: `uname -s` no
+      # Git Bash devolve `MINGW64_NT-10.0-22631`, nao `windows`, e o launcher
+      # montava um nome de binario que nunca existiu. O .cmd tinha cobertura desde
+      # sempre e o POSIX nao, entao o defeito ficou invisivel: ha duas portas, e uma
+      # so era verificada.
       #
-      # `shell: bash` no runner Windows é exatamente esse Git Bash — o mesmo
-      # ambiente do usuário, não uma aproximação.
-      - name: Launcher POSIX sob Git Bash
+      # Este script tambem carrega a ANCORA DO HASH entre plataformas, que era o que
+      # o extinto `windows-build` verificava de mais valioso: o mesmo conteudo tem
+      # de dar o mesmo content_sha256 aqui e nas outras duas plataformas, senao dois
+      # deploys do mesmo conteudo viram releases diferentes.
+      #
+      # `shell: bash` no runner Windows e exatamente esse Git Bash — o mesmo
+      # ambiente do usuario, nao uma aproximacao.
+      - name: Sync sob Git Bash
         shell: bash
-        run: ./test/windows/launcher-posix.sh
-
-  # Compila e EXECUTA no Windows, do fonte, num runner Windows.
-  #
-  # O job `binarios` compila para windows/amd64, mas por compilação cruzada a
-  # partir do Linux, e só compara bytes — nada ali chega a rodar o .exe. O job
-  # `windows` executa, mas o binário COMMITADO. Entre os dois faltava a pergunta
-  # mais simples: o código de hoje compila e roda nesta plataforma?
-  #
-  # amd64 e não arm64 porque é o que o runner é. Uma verificação que não pode
-  # executar o que compilou seria o mesmo furo de novo, com outro nome.
-  windows-build:
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Compilar para windows/amd64 no próprio Windows
-        shell: bash
-        run: |
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-            go build -trimpath -buildvcs=false -ldflags="-s -w" \
-            -o ./sync-teste.exe ./cmd/sync
-
-      - name: Rodar o que acabou de ser compilado
-        shell: bash
-        run: |
-          # Sem argumentos: imprime o uso e sai 2. Confirma que o PE roda de
-          # verdade neste sistema, e não só que o `go build` devolveu 0.
-          saida=$(./sync-teste.exe 2>&1 || true)
-          ./sync-teste.exe >/dev/null 2>&1 && codigo=0 || codigo=$?
-          set -euo pipefail
-
-          echo "$saida"
-          [ "$codigo" = "2" ] || { echo "::error::esperado exit 2 sem argumentos, veio $codigo"; exit 1; }
-          case "$saida" in
-            *"uso: cloudez-sync"*) ;;
-            *) echo "::error::o binário não imprimiu o uso"; exit 1 ;;
-          esac
-
-      # O --hash-only é a peça que anda no disco: percorre a árvore, normaliza
-      # caminho e lê modo de arquivo. É onde uma diferença de plataforma aparece,
-      # e onde o Windows diverge mais do resto.
-      - name: --hash-only sobre uma árvore de verdade
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          raiz=arvore-teste
-          mkdir -p "$raiz/assets" "$raiz/.git"
-          printf '<h1>oi</h1>' > "$raiz/index.html"
-          printf 'svg'         > "$raiz/assets/logo.svg"
-          printf 'ref: x'      > "$raiz/.git/HEAD"
-
-          saida=$(./sync-teste.exe --hash-only "$raiz")
-          echo "$saida"
-
-          # 2 arquivos: o .git fica de fora, como no tar do transfer.
-          echo "$saida" | grep -q '"files": 2' \
-            || { echo "::error::o .git não foi excluído no Windows"; exit 1; }
-
-          # O MESMO conteúdo tem de dar o MESMO sha que nas outras plataformas.
-          # É o que torna o release_id comparável entre a máquina de quem
-          # publica e qualquer outra — se o Windows divergir aqui, dois deploys
-          # do mesmo conteúdo viram releases diferentes.
-          esperado=$(printf '%s' "$CONTENT_SHA_ESPERADO")
-          obtido=$(echo "$saida" | sed -n 's/.*"content_sha256": "\([a-f0-9]*\)".*/\1/p')
-          [ "$obtido" = "$esperado" ] \
-            || { echo "::error::sha divergente no Windows: $obtido != $esperado"; exit 1; }
-        env:
-          # Calculado na suíte Go, que roda em Linux e macOS. Ver
-          # TestHashDeArvoreConhecida em internal/cloudez/payload_test.go: os
-          # dois lados precisam mudar juntos, de propósito.
-          CONTENT_SHA_ESPERADO: 03ff8bfa4d33e6cad50a7101e974ef34d6e8ccd51a77fbaacf97b7355cef01fc
+        run: ./test/windows/sync-git-bash.sh

@@ -1,67 +1,137 @@
-#!/bin/sh
-# Launcher POSIX: seleciona o binario da plataforma atual.
-#
-# Existe porque quem chama usa um nome so — `cloudez-sync` — e o binario e por
-# sistema e arquitetura. No Windows o par deste script e o .cmd ao lado, que o
-# PATHEXT resolve a partir do mesmo nome.
-#
-# O alvo sai do proprio nome do arquivo, com o prefixo `cloudez-` removido, para
-# que o mesmo script sirva a qualquer comando futuro sem uma copia editada.
-#
-# `exec` e importante: substitui o processo, entao o codigo de saida do binario
-# chega intacto a quem chamou.
+#!/usr/bin/env node
+// Uso: cloudez-sync <deploy_id> <diretorio_local>
+//      cloudez-sync --hash-only <diretorio_local>
+//
+// Envia o build para o diretório de release criado pelo cloudez_begin_deploy.
+//
+// Este arquivo já foi duas coisas antes de ser um adaptador: um binário em Go
+// (`cmd/sync`) e, aqui, o launcher POSIX que escolhia o binário da plataforma. O
+// Go existia por uma razão que deixou de valer — distribuir um executável que não
+// depende de runtime — no dia em que o Node 20+ virou pré-requisito assumido do
+// plugin. O servidor MCP é um bundle Node que sobe em toda invocação: sem Node
+// não há plugin, e um transporte nativo não salvava nada.
+//
+// O que a troca fechou, além de 15 MB de binários versionados: o arquivo de estado
+// tem dois escritores, e enquanto este lado foi Go cada um mantinha o schema por
+// conta própria. Um round-trip pela struct apagava em silêncio o campo que ela não
+// conhecia — foi assim que o `domain` gravado pelo begin sumia aqui e o
+// `compose_up` falhava depois, longe da causa. Agora os dois lados importam as
+// MESMAS funções de `mcp/cloudez-state.mjs`, e o round-trip é de objeto JSON
+// inteiro.
+//
+// O par deste arquivo é o `.cmd` ao lado, para quem chama pelo cmd ou PowerShell,
+// onde o shebang não vale nada.
 
-# CDPATH atrapalha: com ele setado, `cd` imprime o destino no stdout e polui a
-# substituicao de comando.
-unset CDPATH
+import { readdirSync, statSync } from "node:fs"
 
-dir=$(cd -- "$(dirname -- "$0")" && pwd)
+// O import é do BUNDLE de biblioteca, não do servidor: `mcp/cloudez-mcp.mjs` sobe
+// um transporte stdio ao ser importado, e penduraria este processo.
+import { loadState, saveState } from "../mcp/cloudez-state.mjs"
 
-name=$(basename -- "$0")
-name=${name#cloudez-}
+import { die, ok } from "./_out.mjs"
+import { hashPayload } from "./_payload.mjs"
+import { transferir } from "./_transfer.mjs"
 
-# O launcher vive em bin/, mas tolera ser chamado de dentro do proprio libexec/.
-libexec="$dir"
-[ -d "$dir/../libexec" ] && libexec=$(cd -- "$dir/../libexec" && pwd)
+const args = process.argv.slice(2)
 
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-arch=$(uname -m)
-case "$arch" in
-  x86_64|amd64)  arch=amd64 ;;
-  arm64|aarch64) arch=arm64 ;;
-esac
+if (args.length < 2) {
+  // Uso vai em texto puro, e não no envelope JSON de erro: quem chega aqui errou a
+  // linha de comando, e ainda não há contrato nenhum estabelecido para ele ler.
+  process.stderr.write("uso: cloudez-sync <deploy_id> <diretorio_local>\n")
+  process.stderr.write("     cloudez-sync --hash-only <diretorio_local>\n")
+  process.exit(2)
+}
 
-# Windows chega aqui por bash — Git Bash, MSYS2, Cygwin — e nenhum deles diz
-# "windows" no `uname -s`: sai `MINGW64_NT-10.0-22631`, `MSYS_NT-...` ou
-# `CYGWIN_NT-...`, com a versao do sistema embutida no nome.
-#
-# Sem este mapeamento o script procurava `sync-mingw64_nt-10.0-22631-amd64` e
-# falhava com "binario ausente para mingw64_nt-10.0-22631/amd64" — que se le
-# como "nao foi compilado para Windows", quando o .exe estava ali ao lado o
-# tempo todo. O par .cmd nunca viu esse problema, e por isso o defeito passou:
-# ele so aparece quando alguem chama o plugin de dentro de um bash no Windows.
-ext=
-case "$os" in
-  mingw*|msys*|cygwin*) os=windows; ext=.exe ;;
-esac
+// --hash-only roda ANTES do begin_deploy, e por isso não recebe deploy_id: quem o
+// chama está justamente formando o release_id que ainda não existe. Não toca a
+// rede nem o estado — lê o diretório e imprime o resumo.
+if (args[0] === "--hash-only") {
+  apenasHash(args[1])
+} else {
+  await sincronizar(args[0], args[1])
+}
 
-bin="$libexec/$name-$os-$arch$ext"
+/**
+ * As duas recusas sobre o diretório publicado, aplicadas nos DOIS modos.
+ *
+ * Valem tanto para o envio quanto para o hash: hashear um diretório vazio
+ * devolveria um sha válido para conteúdo nenhum, e o deploy só descobriria isso
+ * depois de registrar a release.
+ */
+function conferirDiretorio(dir) {
+  let info = null
+  try {
+    info = statSync(dir)
+  } catch {
+    info = null
+  }
+  if (!info || !info.isDirectory()) {
+    die("build_output_missing", `Diretório '${dir}' não existe. O build rodou?`)
+  }
 
-# `-x` no lugar de `-f` em toda parte menos Windows: e o bit de execucao que
-# distingue um binario utilizavel de um arquivo truncado por um checkout pela
-# metade. Em Windows nao ha esse bit — dependendo de como o volume esta montado,
-# o bash reporta todo .exe como executavel ou nenhum —, entao la a pergunta que
-# resta e se o arquivo existe.
-if [ "$os" = windows ]; then
-  existe() { [ -f "$1" ]; }
-else
-  existe() { [ -x "$1" ]; }
-fi
+  let entradas = []
+  try {
+    entradas = readdirSync(dir)
+  } catch {
+    entradas = []
+  }
+  if (entradas.length === 0) {
+    die("build_output_empty", `Diretório '${dir}' está vazio.`)
+  }
+}
 
-if ! existe "$bin"; then
-  echo "cloudez: binario '$name' ausente para $os/$arch ($bin)." >&2
-  echo "cloudez: rode ./build.sh no diretorio do plugin." >&2
-  exit 1
-fi
+/** Imprime o identificador de conteúdo do que seria enviado. */
+function apenasHash(dir) {
+  conferirDiretorio(dir)
 
-exec "$bin" "$@"
+  let h
+  try {
+    h = hashPayload(dir)
+  } catch (e) {
+    die("hash_failed", `Não foi possível ler '${dir}' por inteiro: ${e.message}`)
+  }
+
+  // Um diretório cujo único conteúdo é `.git` passa pelo conferirDiretorio (não
+  // está vazio) e chega aqui sem nenhum arquivo publicável. Enviar isso criaria
+  // uma release vazia com identificador de aparência normal.
+  if (h.files === 0) {
+    die("build_output_empty", `Diretório '${dir}' não tem nenhum arquivo publicável (só \`.git\`, que o deploy exclui).`)
+  }
+
+  ok(h)
+}
+
+async function sincronizar(deployId, dir) {
+  let dep
+  try {
+    dep = loadState(deployId)
+  } catch (e) {
+    // O `loadState` levanta o erro do MCP (ToolError), que carrega o corpo já no
+    // formato do contrato. Reaproveitar a mensagem dele evita as duas pontas
+    // divergirem sobre o que dizer — e a de lá é a atualizada: o `begin` virou
+    // tool, não é mais um adaptador que se "roda".
+    const doMcp = e?.body?.error?.message
+    die("deploy_not_found", doMcp ?? `deploy_id '${deployId}' desconhecido. Chame cloudez_begin_deploy primeiro.`)
+  }
+
+  conferirDiretorio(dir)
+
+  const { stats, logs, erro } = await transferir(dep, dir)
+  if (erro) {
+    // retryable porque a causa mais comum é rede ou chave recém-autorizada, e o
+    // deploy fica exatamente onde estava: o estado só avança quando o transporte
+    // confirma. Sem isso o finalize ativaria uma release incompleta.
+    die("transfer_failed", `Falha ao enviar '${dir}' para ${dep.ssh.host}.`, { logs, retryable: true })
+  }
+
+  dep.status = "uploaded"
+  dep.transfer_stats = stats
+
+  try {
+    saveState(dep)
+  } catch (e) {
+    die("state_write_failed", e.message)
+  }
+
+  ok(dep)
+}

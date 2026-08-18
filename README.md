@@ -11,13 +11,13 @@ Três camadas, deliberadamente separadas:
 | **MCP** | capacidade — verbos primitivos da API Cloudez | repositório separado; contrato em [`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md) |
 | **Comandos** | procedimento — a sequência de cada operação | `commands/` |
 | **Skill** | porta de entrada em linguagem natural; encaminha ao comando | `skills/deploy/SKILL.md` |
-| **Transporte** | envio dos arquivos | `cmd/sync/` (Go) |
+| **Transporte** | envio dos arquivos | `bin/cloudez-sync` (Node) |
 | **Adaptadores** | o que depende da máquina local | `bin/` (Node) |
 
 O MCP é o control plane: descobre o destino, registra a release, ativa e faz
 rollback. Ele nunca move bytes.
 
-### Por que duas linguagens
+### Por que só Node
 
 O `bin/` em shell era transitório, e acabou. Encolheu duas vezes e sumiu na
 terceira.
@@ -34,30 +34,40 @@ máquina. Com os dois em Node, os três arquivos de apoio (`_lib.sh`, `_yaml.sh`
 O que sobrou em `bin/` é o que **não** migra para o MCP, por depender da máquina
 de quem publica: coletar o token (exige TTY) e escrever o `.cloudez.yaml`.
 
-Uma peça não migra por outra razão, e é por isso que está em Go: o `sync`,
-porque o transporte fica sempre local.
+O `sync` não migra por outra razão: o transporte fica sempre local, por decisão
+do contrato. Ele foi escrito **em Go** por bastante tempo, e a razão era boa —
+distribuir um executável que não depende de runtime. Ela morreu no dia em que
+Node 20+ virou pré-requisito assumido: o servidor MCP é um bundle Node que sobe
+em toda invocação do plugin, então sem Node não há plugin, e um transporte nativo
+não salvava nada.
+
+O que ele custava, em troca de nada: 15 MB de binários versionados para seis
+plataformas, três jobs de CI (dois só para tornar os blobs auditáveis), um
+launcher de shell por plataforma para escolher o arquivo certo — e um segundo
+escritor do arquivo de estado mantendo o schema por conta própria, que é o item
+com defeito registrado: o round-trip por uma struct que não conhecia
+`content_sha256` apagava o campo em silêncio.
 
 Ele usa `tar` em stream sobre `ssh`, não `rsync`: o diretório de release está
 sempre vazio, então o delta transfer não tem contra o que comparar, e
 `tar`/`ssh` existem nativamente nas três plataformas enquanto `rsync` não existe
-no Windows. O pipe entre os dois processos é montado sem shell — o pipeline do
-PowerShell é orientado a texto e corromperia o `.tar.gz`.
+no Windows. O pipe entre os dois processos é montado por
+descritor, sem passar por shell — o pipeline do PowerShell é orientado a texto e
+corromperia o `.tar.gz`. Em Node isso significa passar o `stdout` do `tar` no
+`stdio` do `ssh`, e **nunca** `.pipe()`, que rotearia cada byte pelo event loop.
 
 ## Instalação
 
 Para desenvolvimento e uso local:
 
 ```sh
-./build.sh                 # compila os binários (precisa de Go)
 claude --plugin-dir /caminho/para/cloudez-claude-plugin
 ```
 
-Os binários de `libexec/` e o servidor MCP em `mcp/` são versionados no
-repositório, então quem só usa o plugin não precisa de Go nem de build nenhum —
-só de **Node 20+** para rodar o servidor. `./build.sh` é necessário apenas
-depois de alterar algo em `cmd/`; `./vendor-mcp.sh` só depois de alterar o
-servidor MCP, que vive em [repositório
-separado](https://github.com/configr/cloudez-mcp).
+Não há etapa de build. O servidor MCP em `mcp/` é versionado no repositório e
+todo o resto é fonte que roda direto, então o único pré-requisito é **Node 20+**.
+`./vendor-mcp.sh` é necessário apenas depois de alterar o servidor MCP, que vive
+em [repositório separado](https://github.com/configr/cloudez-mcp).
 
 Depois de editar qualquer arquivo do plugin, `/reload-plugins` recarrega sem
 reiniciar a sessão.
@@ -141,7 +151,8 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 - [x] Comandos `/cloudez:setup` e `/cloudez:login` (`commands/`)
 - [x] Control plane inteiro no MCP; no `bin/` sobra o que exige TTY, escreve no
       projeto, ou é o transporte
-- [x] Sync em Go (`tar` sobre `ssh`, sem `rsync`)
+- [x] Sync em Node (`tar` sobre `ssh`, sem `rsync`) — era Go, e o Go saiu junto
+      com 15 MB de binários versionados e dois jobs de CI
 - [x] Autenticação: `~/.cloudez/token` + validação em `/auth/token/validate/`
 - [x] Tools `cloudez_auth_status` e `cloudez_get_site` no servidor MCP
 - [x] `/cloudez:deploy` como comando, com a skill reduzida a roteador
@@ -305,18 +316,45 @@ em quem tem interface com gente.
 
 ## Limitações conhecidas
 
-**O prompt do login não tem cobertura automatizada.** Ler o terminal sem eco
-precisa de um pty, e alocar um em `bats` de forma portátil significa `script`,
-cuja sintaxe divergente entre macOS e Linux é exatamente o tipo de coisa que já
-quebrou esta suíte. O que fica sem teste é só a leitura do terminal — e agora
-também o tratamento de backspace e Ctrl-C, que o modo raw do Node obriga a fazer
-na mão e que o `read -rs` do bash dava de graça.
+**~~O prompt do login não tem cobertura automatizada.~~ Fechada**, por
+`test/pty.bats`. A objeção registrada aqui era que alocar um pty de forma portátil
+significa `script(1)`, cuja sintaxe divergente entre macOS e Linux é o tipo de
+coisa que já quebrou esta suíte. Ela era legítima e acabou sendo a parte fácil: a
+divergência cabe num condicional de três linhas dentro do `com_pty`.
 
-O que tem consequência continua coberto, e por um caminho melhor do que antes:
-escrever o segredo com 0600, validar **depois** do write e desfazer quando a
-Cloudez recusa são todos atravessados pelo `--stdin`, que não precisa de pty. A
-suíte deixou de chamar funções soltas do `_lib.sh` e passou a exercitar o
-comando de ponta a ponta.
+O caro foi outro, e vale registrar porque nada disso aparece na documentação do
+`script`:
+
+- **alimentar por redirect simples não funciona.** Os bytes chegam antes de o
+  processo entrar em modo raw, a disciplina de linha os consome e ecoa, e o login
+  recebe entrada **vazia** — um teste verde afirmando sobre outra coisa. A
+  sincronização é esperar o prompt aparecer, que é um ponto exato: `pedirToken`
+  liga o raw **antes** de escrever `Token: `;
+- **a entrada tem de ser um pipe, nunca um fifo nomeado.** O `script` do BSD faz
+  `tcgetattr` no próprio stdin e recusa fifo;
+- **o `script` envia EOT ao pty quando o stdin dele fecha**, e o terminal ecoa isso
+  como `^D`. O eco cai num ponto que depende de escalonamento — colado ao `{` do
+  payload, o JSON deixa de começar em início de linha. Era intermitência real, e
+  por isso a captura normaliza `\r`, `\b` e `^D`.
+
+O que a camada nova cobre e nenhuma outra cobria: o modo raw, o **backspace** e o
+**Ctrl-C** — que o `read -rs` do bash dava de graça e viraram código nosso quando o
+adaptador virou Node — e o não-eco, que é a razão de o prompt existir. De quebra,
+tornou alcançável o ramo do `--stdin` chamado de um terminal, que o
+`test/auth.bats` registrava por escrito como fora de alcance.
+
+Isso levou o `cloudez-login` de **60,5% para 93,8%** das linhas com código, e o
+total de `bin/` para 95,4%. O que sobra sem cobertura ali é o ramo de Windows do
+`abrirTerminal`, que por definição não roda na matriz.
+
+**Uma ressalva honesta:** o caminho do `script` foi exercitado de verdade só no
+macOS. O ramo do util-linux segue por leitura da documentação — quem o executa é o
+CI, no primeiro push.
+
+O que tem consequência já estava coberto antes disso, e continua: escrever o
+segredo com 0600, validar **depois** do write e desfazer quando a Cloudez recusa
+são todos atravessados pelo `--stdin`, que não precisa de pty. O `test/pty.bats`
+não duplica nenhum deles de propósito.
 
 **A detecção de clipboard só foi verificada em macOS.** O caminho `pbpaste` foi
 testado de verdade; o "sem clipboard → não oferece nada" é exercitado pelo CI em
@@ -353,42 +391,51 @@ quebraria exatamente no piso declarado. Resolvido pelo `bin/package.json` com
 `{"type": "module"}`, e fixado por testes que rodam os dois adaptadores com
 `--no-experimental-detect-module`.
 
-O que segue sem verificação é o **deploy** a partir de Windows, e por outra razão:
-o `commands/deploy.md` manda gerar o `idempotency_key` com `uuidgen`, que não
-está no subconjunto do Git Bash. O job `windows` testa só os launchers do `sync`.
+O que segue sem verificação é o **deploy** a partir de Windows, e hoje por uma
+razão só: ninguém rodou um. A barreira que estava registrada aqui — o
+`commands/deploy.md` mandando gerar o `idempotency_key` com `uuidgen`, que o Git
+Bash não embarca — caiu quando o servidor passou a gerar a chave: o comando agora
+diz para **não** passá-la.
 
-**O Windows tem cobertura dos dois launchers e do binário.** Três frentes, em
-jobs próprios sobre `windows-latest`:
+**O Windows tem cobertura das duas portas de entrada do `sync`.** Um job sobre
+`windows-latest`, com o Node fixado em 20 — o piso declarado, e não o que o runner
+traz por acaso, porque é exatamente aí que um arquivo sem extensão com sintaxe ESM
+é lido como CommonJS:
 
-- `bin/cloudez-sync.cmd`, o caminho de quem chama pelo cmd ou PowerShell:
-  propagar o código de saída do binário, resolver o alvo pelo próprio nome do
-  arquivo e falhar com mensagem útil quando o executável não está lá;
-- `bin/cloudez-sync`, o caminho de quem chama de dentro de um bash — Git Bash
-  vem junto com o Git. Existe porque o plugin já quebrou exatamente aí: `uname
-  -s` devolve `MINGW64_NT-10.0-...`, não `windows`, e o launcher procurava um
-  binário com esse nome no caminho enquanto o `sync-windows-amd64.exe` correto
-  estava ao lado. O `.cmd` tinha cobertura desde sempre e o POSIX não, então o
-  defeito ficou invisível: há dois caminhos de entrada, e um só era verificado;
-- `windows-build` compila para `windows/amd64` **no próprio Windows** e executa
-  o que compilou, incluindo um `--hash-only` sobre uma árvore conhecida cujo
-  `content_sha256` precisa bater com o valor fixado na suíte Go. É o que impede
-  o Windows de produzir uma família de hashes própria — se divergisse, o mesmo
-  conteúdo publicado de máquinas diferentes viraria releases diferentes.
+- `bin/cloudez-sync.cmd`, o caminho de quem chama pelo cmd ou PowerShell, que
+  existe porque no Windows o shebang não vale nada: propagar o código de saída,
+  resolver o alvo pelo próprio nome do arquivo e falhar com mensagem útil quando o
+  alvo não está lá;
+- `bin/cloudez-sync`, o caminho de quem chama de dentro de um bash — Git Bash vem
+  junto com o Git. Verifica que o shebang resolve neste ambiente e carrega a
+  **âncora do hash entre plataformas**: um `--hash-only` sobre uma árvore conhecida
+  cujo `content_sha256` precisa bater com o valor fixado na suíte de unidade. É o
+  que impede o Windows de produzir uma família de hashes própria — se divergisse, o
+  mesmo conteúdo publicado de máquinas diferentes viraria releases diferentes.
+
+Esta segunda frente existe porque o plugin já quebrou exatamente aí, na versão
+anterior da peça: `uname -s` no Git Bash devolve `MINGW64_NT-10.0-...`, não
+`windows`, e o launcher procurava um binário com esse nome enquanto o
+`sync-windows-amd64.exe` correto estava ao lado. O `.cmd` tinha cobertura desde
+sempre e o POSIX não, então o defeito ficou invisível: há dois caminhos de
+entrada, e um só era verificado. Sem binário por plataforma essa classe de
+defeito desapareceu, mas a lição sobre cobrir as DUAS portas não.
 
 O que segue sem verificação em Windows: a suíte `bats` não roda ali — portá-la
-significaria bash, jq e coreutils no runner, muito trabalho para cobrir o que já
-é coberto em duas outras plataformas — e um deploy de verdade a partir de
-Windows nunca foi feito.
+significaria bash e coreutils no runner, muito trabalho para cobrir o que já é
+coberto em duas outras plataformas — e um deploy de verdade a partir de Windows
+nunca foi feito.
 
 **`sync` → `finalize` contra servidor real** continua sem cobertura: os testes
 verificam o comando enviado, não o efeito no servidor. A exceção é o formato do
 pacote — o empacotamento e a detecção de corrupção rodam com o `tar` de verdade,
 porque nenhum mock reproduz o CRC do gzip.
 
-**Os binários em `libexec/` são versionados** — hoje ~13 MB somando as seis
-plataformas. Cada rebuild acrescenta cópias ao histórico do git. Como o `sync`
-muda pouco, isso é administrável rebuildando só quando `cmd/` mudar; se virar
-problema, as saídas são Git LFS ou publicar releases e baixar na instalação.
+**Não há mais binário versionado.** Eram seis, ~15 MB somando as plataformas, e
+cada rebuild acrescentava cópias ao histórico do git — o que já era administrado
+rebuildando só quando o fonte mudava, e chegou a ter Git LFS como plano B. Saíram
+com o Go: hoje o único artefato versionado é o bundle do MCP, e o que ele embarca
+é auditável lendo o repositório.
 
 ## Testes
 
@@ -396,10 +443,49 @@ problema, as saídas são Git LFS ou publicar releases e baixar na instalação.
 test/run.sh
 ```
 
-Três camadas: `claude plugin validate` (estrutura), `shellcheck` (estático) e
-`bats` (comportamento). Ferramentas ausentes viram aviso local e erro com
-`--strict`, que é o que o CI usa — `git clone && test/run.sh` funciona sem
-instalar nada, mas o CI não passa com meia suíte.
+Quatro camadas: `claude plugin validate` (estrutura), `shellcheck` (estático),
+`node --test` (unidade) e `bats` (comportamento). Ferramentas ausentes viram aviso
+local e erro com `--strict`, que é o que o CI usa — `git clone && test/run.sh`
+funciona sem instalar nada, mas o CI não passa com meia suíte.
+
+A camada de unidade existe para o que afirma sobre uma **função**, e não sobre um
+comando: as propriedades do hash do payload precisam hashear duas árvores e
+comparar, e fazer isso por linha de comando seria exercitar o adaptador para
+testar a biblioteca. `node --test` é embutido no Node 20, então ela não custa
+dependência nenhuma.
+
+Havia uma quinta, de **build**, e ela saiu junto com o Go: não há mais artefato
+para compilar antes de testar.
+
+A única dependência que a suíte pede além do runtime é o `shellcheck`, e é de
+lint. O `jq` era a outra, e saiu quando `test/helpers/json.mjs` assumiu a
+extração de campo — as afirmações que o usavam continuam idênticas.
+
+### Cobertura
+
+```sh
+test/run.sh --coverage
+```
+
+Junta o que as **duas** camadas executaram e reporta `bin/` por linha e por função.
+Nenhuma ferramenta embutida faz isso aqui: o `--experimental-test-coverage` do
+`node --test` só enxerga o que o próprio processo carrega, e os adaptadores são
+exercitados pelo bats como subprocesso. O que alcança os dois é o
+`NODE_V8_COVERAGE`, que faz todo processo Node despejar o coverage bruto do V8 num
+diretório; `test/coverage.mjs` junta. O `c8` resolveria em uma linha, ao preço de
+trazer `node_modules` e um `npm install` de volta.
+
+**Não é portão de CI, de propósito.** Cobertura como critério de aprovação produz
+teste escrito para o número. Como relatório sob demanda ela já se pagou: apontou
+que os únicos caminhos sem exercício em `bin/cloudez-sync` são três `catch` de
+erro difícil de provocar, e que o `proc.on("error")` do transporte — o caso de
+`tar` ou `ssh` ausentes do PATH — foi verificado à mão e nunca virou teste.
+
+Foi também o que motivou o `test/pty.bats`: a primeira medição pôs o
+`cloudez-login` em 60,5%, e as linhas que faltavam eram exatamente a limitação do
+prompt de TTY que este README declarava. Que a medição caísse ali, sozinha, é o que
+deu confiança de que ela mede o que se pensa — e o que mostrou que valia a pena
+atacar a limitação em vez de conviver com ela. Hoje o arquivo está em 96,9%.
 
 O `bats` faz bootstrap sozinho em `test/bats/` (gitignorado) na primeira
 execução, então não há submodule nem passo de instalação.
@@ -423,7 +509,7 @@ precisarem da **máquina local** — nenhum fala com a Cloudez.
 |---|---|---|
 | `cloudez-login` | Node | Coletar o token exige TTY, e um servidor stdio não tem terminal de controle |
 | `cloudez-setup` | Node | **Escreve** no projeto do usuário |
-| `cloudez-sync` | Go | O transporte fica sempre local, por decisão do contrato |
+| `cloudez-sync` | Node | O transporte fica sempre local, por decisão do contrato |
 | `_out.mjs` | Node | Não é adaptador: o envelope de saída que os dois compartilham |
 
 O `cloudez-login` não implementa o contrato do token: importa
@@ -538,13 +624,21 @@ repositório não havia deploy. Hoje o commit entra no `release_id` quando exist
 duas chamadas que restam já toleram a ausência: o passo 3 do deploy segue sem
 `ref`, e o `cloudez-setup` grava `gitignore: "skipped"` fora de um repositório.
 
-**`jq` saiu do runtime** e ficou só como dependência de teste, onde faz o que
-sabe fazer: ler JSON. Nos adaptadores ele nunca lia — os usos construíam, sempre
-`jq -n --arg`, que estava ali porque é o que escapa corretamente valores vindos
-do usuário (domínio, caminhos, mensagens com aspas). O substituto foi um helper
-em Node, `_json.mjs`, com uma minilinguagem de prefixos (`:` para literal, `+`
-para merge na raiz) que só fazia sentido porque quem o chamava era um shell.
-Ele também já saiu: com os adaptadores em Node, o objeto é escrito como objeto.
+**`jq` saiu, e saiu duas vezes.** Primeiro do runtime: nos adaptadores ele nunca
+lia JSON — os usos construíam, sempre `jq -n --arg`, que estava ali porque é o que
+escapa corretamente valores vindos do usuário (domínio, caminhos, mensagens com
+aspas). O substituto foi um helper em Node, `_json.mjs`, com uma minilinguagem de
+prefixos (`:` para literal, `+` para merge na raiz) que só fazia sentido porque
+quem o chamava era um shell; ele também já saiu, porque com os adaptadores em Node
+o objeto é escrito como objeto.
+
+Ficou como dependência **de teste**, onde finalmente fazia o que sabe fazer: ler
+JSON. Saiu de lá também, quando `test/helpers/json.mjs` assumiu a extração de
+campo — um extrator de ~40 linhas que aceita caminho com ponto e índice de array,
+e nada além disso. As afirmações que o usavam continuam idênticas; o que mudou é
+que `git clone && test/run.sh` deixou de pedir um pacote a mais.
+
+O que sobrou de dependência externa na suíte é o `shellcheck`, e é de lint.
 
 **`curl` saiu do runtime também.** Ele era *opcional* de propósito — sem ele o
 token não era verificado e a resposta caía para `verified: false` —, e esse ramo
@@ -585,9 +679,10 @@ Token` e a tabela de vereditos que o MCP já tinha. Hoje ele importa. O modo de
 falha que isso fecha é o pior de diagnosticar — o login dizendo "autenticado" e
 o MCP dizendo que não.
 
-É a mesma decisão dos binários de `libexec/`, e pelo mesmo motivo: quem instala
-um plugin não deveria precisar montar nada. O bundle tem 768 KB — um dezessete
-avos do que os binários Go já ocupam aqui.
+Era a mesma decisão dos binários que viviam em `libexec/`, e pelo mesmo motivo:
+quem instala um plugin não deveria precisar montar nada. Hoje é a única
+sobrevivente dela — os binários saíram quando o `sync` virou Node, e o bundle de
+768 KB é o que restou de artefato versionado, contra os 15 MB que eles ocupavam.
 
 O fonte fica em repositório separado. `./vendor-mcp.sh [caminho]` roda o bundle
 lá e traz o resultado; o cabeçalho do arquivo diz de qual versão do
