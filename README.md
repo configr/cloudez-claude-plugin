@@ -347,9 +347,20 @@ Isso levou o `cloudez-login` de **60,5% para 93,8%** das linhas com código, e o
 total de `bin/` para 95,4%. O que sobra sem cobertura ali é o ramo de Windows do
 `abrirTerminal`, que por definição não roda na matriz.
 
-**Uma ressalva honesta:** o caminho do `script` foi exercitado de verdade só no
-macOS. O ramo do util-linux segue por leitura da documentação — quem o executa é o
-CI, no primeiro push.
+**O ramo do util-linux custou um CI vermelho, e a lição ficou em teste.** Ele foi
+escrito por leitura da documentação, com o macOS verde, e quebrou no primeiro
+push: o `script` do util-linux devolve o **próprio** código de saída, não o do
+filho, a menos que receba `-e`. Sem a flag, toda afirmação sobre falha virava
+sucesso — e como o `script` do BSD propaga por padrão, só o ubuntu acusou.
+
+Duas coisas saíram disso. A flag, obviamente; e dois testes que verificam o
+**harness**, não o plugin: `com_pty` rodando um comando que sai com 3 e outro que
+sai com 0. Um harness do qual sete testes dependem para afirmar sobre falha
+precisa provar que sabe distinguir falha de sucesso.
+
+O ramo também passou a ser exercitável fora do Linux, por um `script` falso que se
+anuncia como util-linux e recusa a chamada sem `-e`. Não substitui o CI, mas tira
+"nunca ninguém rodou" da frente.
 
 O que tem consequência já estava coberto antes disso, e continua: escrever o
 segredo com 0600, validar **depois** do write e desfazer quando a Cloudez recusa

@@ -123,8 +123,13 @@ com_pty() {
   } | {
     if script --version 2>/dev/null | grep -q util-linux; then
       # util-linux quer o comando numa string; %q protege caminho com espaco.
+      #
+      # O -e nao e opcional: SEM ele o script do util-linux devolve o proprio
+      # codigo de saida, sempre 0, e toda afirmacao sobre falha do comando passa
+      # por sucesso. O do BSD propaga o do filho por padrao e nem conhece a flag —
+      # foi assim que o CI quebrou so no ubuntu, com o macOS verde.
       local cmd; cmd=$(printf '%q ' "$@")
-      script -q -c "$cmd" /dev/null > "$terminal" 2>&1
+      script -q -e -c "$cmd" /dev/null > "$terminal" 2>&1
     else
       script -q /dev/null "$@" > "$terminal" 2>&1
     fi

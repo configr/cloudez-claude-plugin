@@ -27,6 +27,27 @@ setup() {
   start_api
 }
 
+# ------------------------------------------------------------------ o harness --
+#
+# O `com_pty` deixou de ser detalhe de teste e virou peça carregada: sete testes
+# dependem dele para afirmar sobre falha. Este verifica o HARNESS, não o plugin.
+#
+# Existe por um defeito real: o `script` do util-linux devolve o próprio código de
+# saída, e não o do filho, a menos que receba `-e`. Sem essa flag toda afirmação de
+# falha virava sucesso — e como o `script` do BSD propaga por padrão, o macOS ficou
+# verde e só o ubuntu quebrou, depois do push.
+@test "o harness de pty propaga o codigo de saida do comando" {
+  # Imprime o prompt (para o com_pty não esperar o teto) e sai com 3. O 3 não é 0
+  # nem 1: distingue "propagou" de "engoliu" e de "falhou por conta própria".
+  run com_pty $'x\n' sh -c 'printf "Token: "; exit 3'
+  [ "$status" -eq 3 ]
+}
+
+@test "o harness de pty propaga sucesso tambem" {
+  run com_pty $'x\n' sh -c 'printf "Token: "; exit 0'
+  [ "$status" -eq 0 ]
+}
+
 # ------------------------------------------------------------------ o básico --
 
 @test "o prompt le o token digitado e o grava" {
