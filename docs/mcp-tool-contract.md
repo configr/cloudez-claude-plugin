@@ -1035,36 +1035,60 @@ resolve e o usuário conclui que a publicação não funcionou.
 ```
 
 ```jsonc
-// output — aponta
+// output — o DNS já resolve para o servidor
 { "domain": "meusite.com.br",
-  "domain_ips": ["203.0.113.10"],
-  "server_host": "srv-12.cloudez.io",
-  "server_ips": ["203.0.113.10"],
-  "points_to_server": true }
+  "points_to_server": true, "method": "dns",
+  "dns": { "domain_ips": ["203.0.113.10"], "server_host": "srv-12.cloudez.io",
+           "server_ips": ["203.0.113.10"], "matches": true } }
 ```
 
 ```jsonc
-// output — não aponta, e o motivo importa
+// output — atrás de CDN: o DNS não bate, o header confirma. Está tudo certo.
 { "domain": "meusite.com.br",
-  "domain_ips": ["104.21.5.7"],
-  "server_host": "srv-12.cloudez.io",
-  "server_ips": ["203.0.113.10"],
-  "points_to_server": false,
-  "note": "O domínio resolve para outro lugar que não o servidor do site. ..." }
+  "points_to_server": true, "method": "header",
+  "dns": { "domain_ips": ["104.21.5.7"], "server_host": "srv-12.cloudez.io",
+           "server_ips": ["203.0.113.10"], "matches": false },
+  "header": { "present": true, "status_code": 200 },
+  "note": "... a requisição chega à Cloudez mesmo assim ..." }
 ```
 
-**`points_to_server: false` NÃO significa configuração errada**, e tratá-lo assim
-manda a maior parte dos usuários procurar problema onde não há. São três casos
-distintos, e o `note` diz qual é:
+```jsonc
+// output — nenhuma das duas confirmou
+{ "domain": "meusite.com.br",
+  "points_to_server": false, "method": "none",
+  "dns": { "domain_ips": [], "server_host": "srv-12.cloudez.io",
+           "server_ips": ["203.0.113.10"], "matches": false },
+  "header": { "present": false, "error": "getaddrinfo ENOTFOUND" },
+  "note": "... ou o registro ainda não foi criado, ou a propagação não terminou ..." }
+```
 
-| Situação | O que é |
+**Duas checagens, e a segunda existe porque a primeira erra.** Comparar o A/AAAA do
+domínio com o IP do servidor responde bem no caso simples e erra no comum: um
+domínio atrás de Cloudflare resolve para o proxy, não para o servidor, e o site
+funciona. Só com DNS isso é indistinguível de um domínio apontado para o lugar
+errado.
+
+O header `cez-verify` é servido pela Cloudez: recebê-lo prova que a requisição ao
+domínio chegou nela, com CDN na frente ou sem. É consultado **só quando o DNS não
+bate** — quando bate, não há o que desempatar e não se gasta uma requisição ao site
+do usuário. Qualquer código de status serve; um 502 com o header presente é
+justamente o caso que interessa distinguir.
+
+O campo `method` diz qual das duas decidiu:
+
+| `method` | O que significa |
 |---|---|
-| `domain_ips` vazio | O domínio não resolve. Registro ainda não criado, ou propagação não terminada |
-| IPs que não são do servidor | Ou o DNS aponta para o lugar errado, **ou** o domínio está atrás de um CDN/proxy — caso em que é esperado e o site funciona normalmente |
-| `server_ips` vazio | A checagem não conseguiu resolver o próprio servidor. Limitação da verificação, não problema do site |
+| `dns` | O domínio resolve para o IP do servidor. Caminho direto |
+| `header` | O DNS não bate, mas o domínio devolveu o `cez-verify`. Há CDN ou proxy na frente, e **está tudo certo** — não relate como problema de DNS |
+| `none` | Nenhuma das duas confirmou. O `note` diz se é propagação pendente, apontamento errado, ou checagem que não conseguiu verificar |
 
-Quem chama **não deve afirmar que o DNS está errado** sem confirmar com o usuário
-qual dos casos é.
+**Dois campos de texto, e eles têm leitores diferentes.** O `note` é a explicação
+inteira, para quem for diagnosticar. O `summary` é UMA linha, pronta para exibir ao
+usuário no fim do deploy — vem daqui em vez de resumida por quem chama, para a
+saída ser a mesma toda vez.
+
+O `summary` nunca afirma mais do que se sabe: quando a checagem é que ficou cega
+(o servidor do site não resolveu), ele diz isso, e não que o domínio está errado.
 
 Resolve A e AAAA. Ausência de registro não é erro: "não resolve" é uma resposta, e
 a mais comum logo depois de apontar um domínio novo — deixar a exceção subir faria

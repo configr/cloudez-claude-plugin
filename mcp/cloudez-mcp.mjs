@@ -27707,6 +27707,7 @@ ${res.stderr}`;
 
 // src/dns.ts
 import { promises as dns } from "node:dns";
+var HEADER_VERIFICACAO = "cez-verify";
 async function resolver(nome) {
   const ips = [];
   for (const metodo of ["resolve4", "resolve6"]) {
@@ -27717,7 +27718,26 @@ async function resolver(nome) {
   }
   return ips;
 }
-async function checkDns(domain) {
+async function temHeaderDeVerificacao(domain, buscar) {
+  const timeout = apiTimeoutMs();
+  let ultimoErro;
+  for (const esquema of ["https", "http"]) {
+    try {
+      const resposta = await buscar(`${esquema}://${domain}/`, {
+        redirect: "follow",
+        signal: AbortSignal.timeout(timeout),
+        headers: { "User-Agent": "cloudez-mcp/dns-check" }
+      });
+      return { present: resposta.headers.get(HEADER_VERIFICACAO) !== null, status_code: resposta.status };
+    } catch (err) {
+      ultimoErro = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return { present: false, error: ultimoErro };
+}
+async function checkDns(domain, opts = {}) {
+  const resolve = opts.resolver ?? resolver;
+  const buscar = opts.fetch ?? fetch;
   const site = await getSite(domain);
   if (site.match !== "exact") {
     throw new ToolError("site_not_found", `Nenhum site com o dom\xEDnio '${domain}' nesta conta.`, {
@@ -27731,22 +27751,36 @@ async function checkDns(domain) {
       hint: "Isto costuma vir junto de ssh_unavailable no cloudez_get_site."
     });
   }
-  const [domainIps, serverIps] = await Promise.all([resolver(domain), resolver(serverHost)]);
-  const aponta = domainIps.some((ip) => serverIps.includes(ip));
+  const [domainIps, serverIps] = await Promise.all([resolve(domain), resolve(serverHost)]);
+  const bate = domainIps.some((ip) => serverIps.includes(ip));
   const resultado = {
     domain,
-    domain_ips: domainIps,
-    server_host: serverHost,
-    server_ips: serverIps,
-    points_to_server: aponta
+    points_to_server: bate,
+    method: bate ? "dns" : "none",
+    dns: { domain_ips: domainIps, server_host: serverHost, server_ips: serverIps, matches: bate }
   };
-  if (aponta) return resultado;
+  if (bate) return resultado;
+  const header = await temHeaderDeVerificacao(domain, buscar);
+  resultado.header = header;
+  if (header.present) {
+    resultado.points_to_server = true;
+    resultado.method = "header";
+    resultado.summary = "O dom\xEDnio chega \xE0 Cloudez atrav\xE9s de um CDN.";
+    resultado.note = `O dom\xEDnio n\xE3o resolve para o IP do servidor, mas devolveu o header \`${HEADER_VERIFICACAO}\` \u2014 ent\xE3o a requisi\xE7\xE3o chega \xE0 Cloudez mesmo assim. \xC9 o que acontece com um dom\xEDnio atr\xE1s de CDN ou proxy (Cloudflare e semelhantes), e est\xE1 tudo certo. N\xE3o relate isto como problema de DNS.`;
+    return resultado;
+  }
   if (domainIps.length === 0) {
-    resultado.note = "O dom\xEDnio n\xE3o resolve para nenhum IP. Ou o registro ainda n\xE3o foi criado, ou a propaga\xE7\xE3o n\xE3o terminou. O endere\xE7o tempor\xE1rio funciona enquanto isso.";
+    resultado.summary = "O dom\xEDnio ainda n\xE3o resolve \u2014 registro n\xE3o criado, ou propaga\xE7\xE3o em curso.";
+    resultado.note = "O dom\xEDnio n\xE3o resolve para nenhum IP, e n\xE3o respondeu com o header de verifica\xE7\xE3o. Ou o registro ainda n\xE3o foi criado, ou a propaga\xE7\xE3o n\xE3o terminou. O endere\xE7o tempor\xE1rio funciona enquanto isso.";
   } else if (serverIps.length === 0) {
-    resultado.note = `O dom\xEDnio resolve, mas '${serverHost}' n\xE3o \u2014 ent\xE3o n\xE3o d\xE1 para afirmar que aponta para o lugar errado. Isto \xE9 uma limita\xE7\xE3o da checagem, n\xE3o um problema do site.`;
+    resultado.summary = "N\xE3o foi poss\xEDvel verificar: o servidor do site n\xE3o resolveu.";
+    resultado.note = `O dom\xEDnio resolve, mas '${serverHost}' n\xE3o \u2014 ent\xE3o n\xE3o d\xE1 para comparar. O header de verifica\xE7\xE3o tamb\xE9m n\xE3o veio. Isto \xE9 uma limita\xE7\xE3o da checagem tanto quanto um poss\xEDvel problema do dom\xEDnio; diga o que observou sem concluir.`;
   } else {
-    resultado.note = "O dom\xEDnio resolve para outro lugar que n\xE3o o servidor do site. Duas causas comuns, e elas pedem respostas opostas: ou o registro DNS aponta para o endere\xE7o errado, ou o dom\xEDnio est\xE1 atr\xE1s de um CDN/proxy (Cloudflare e semelhantes), caso em que isto \xE9 esperado e o site funciona normalmente. N\xE3o afirme que est\xE1 errado sem confirmar com o usu\xE1rio qual dos dois \xE9.";
+    resultado.summary = "O dom\xEDnio resolve para outro servidor, e n\xE3o devolveu o header da Cloudez. Se houver CDN na frente, confira se ele encaminha para c\xE1.";
+    resultado.note = `O dom\xEDnio resolve para outro lugar que n\xE3o o servidor do site, e n\xE3o devolveu o header de \`${HEADER_VERIFICACAO}\`. As duas checagens falharam, ent\xE3o o mais prov\xE1vel \xE9 que o registro DNS aponte para o endere\xE7o errado. Se o site estiver atr\xE1s de um CDN, confira se ele est\xE1 configurado para encaminhar para a Cloudez.`;
+  }
+  if (header.error) {
+    resultado.note += ` (A requisi\xE7\xE3o ao dom\xEDnio falhou: ${header.error}.)`;
   }
   return resultado;
 }
@@ -28427,7 +28461,7 @@ server.registerTool(
   "cloudez_check_dns",
   {
     title: "O dom\xEDnio aponta para o servidor do site?",
-    description: "Compara para onde o dom\xEDnio resolve com o servidor onde a Cloudez hospeda o site. Pergunta diferente de cloudez_health_check: aquele diz se o site responde, este diz se o DNS do dom\xEDnio j\xE1 chegou aqui. As duas precisam de resposta ao fim de um deploy. `points_to_server: false` N\xC3O significa configura\xE7\xE3o errada \u2014 um dom\xEDnio atr\xE1s de CDN resolve para o proxy e funciona normalmente. Leia o campo `note`, que distingue os casos, e n\xE3o afirme ao usu\xE1rio que o DNS est\xE1 errado sem confirmar qual deles \xE9.",
+    description: "Diz se o dom\xEDnio CHEGA ao servidor onde a Cloudez hospeda o site. Pergunta diferente de cloudez_health_check: aquele diz se o site responde, este diz se o tr\xE1fego do dom\xEDnio chega at\xE9 aqui. As duas precisam de resposta ao fim de um deploy. Faz duas checagens: compara o A/AAAA do dom\xEDnio com o IP do servidor e, s\xF3 se n\xE3o bater, busca o header 'cez-verify' na resposta do dom\xEDnio \u2014 receb\xEA-lo prova que a requisi\xE7\xE3o chegou \xE0 Cloudez com um CDN na frente. O campo `method` diz qual das duas decidiu. `points_to_server: true` com `method: 'header'` \xE9 situa\xE7\xE3o NORMAL de site atr\xE1s de proxy: n\xE3o relate como problema de DNS.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml")
     }),

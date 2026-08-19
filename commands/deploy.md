@@ -400,17 +400,39 @@ Nova versão da aplicação disponível em:
   https://<domain>              ✅  ou  ⚠️
 ```
 
+**Quando o oficial vier ⚠️**, acrescente duas linhas logo abaixo — a primeira
+sempre igual, a segunda vinda do `summary` do retorno, **sem reescrever**:
+
+```
+⚠️  Use o endereço temporário por enquanto.
+    <summary>
+```
+
+A primeira linha é a única acionável, e é fixa de propósito: o usuário não precisa
+ler o resto para saber o que fazer agora. E ela fala só de **ação**, nunca de
+causa — [A13](#a13).
+
+O `summary` já vem em uma linha, pronto para exibir. O `note` é outra coisa: é a
+explicação inteira, para quando alguém for diagnosticar. **Não cole o `note` no
+bloco** e não resuma o `summary` por conta própria — a saída ser igual toda vez é
+o motivo de ele existir.
+
 **O endereço temporário é sempre ✅** quando o passo 9 deu `healthy: true`: ele
-aponta para o servidor por construção, sem depender de DNS de ninguém.
+aponta para o servidor por construção, sem depender de DNS de ninguém. E ele
+aparece **sempre**, inclusive quando o oficial está ✅ — é o endereço que continua
+funcionando se o DNS mudar depois.
 
 **O oficial depende do `points_to_server`:**
 
 | Retorno | Marca | O que dizer |
 |---|---|---|
-| `points_to_server: true` | ✅ | Nada. Os dois funcionam |
-| `false`, com `domain_ips` vazio | ⚠️ | O DNS do domínio ainda não aponta para cá, ou não terminou de propagar. Use o endereço temporário enquanto isso |
-| `false`, com IPs que não são do servidor | ⚠️ | **Leia o `note` antes de falar.** Pode ser DNS apontado para o lugar errado — ou o domínio atrás de um CDN, caso em que está tudo certo e o ⚠️ é só informativo. **Não afirme que está errado**: diga o que observou e pergunte se há CDN na frente |
-| `false`, com `server_ips` vazio | ⚠️ | A checagem não conseguiu resolver o servidor. Diga que não deu para verificar, e não conclua nada sobre o domínio |
+| `true`, `method: "dns"` | ✅ | Nada. Os dois funcionam |
+| `true`, `method: "header"` | ✅ | Nada. O domínio está atrás de um CDN e chega à Cloudez assim mesmo. **Não mencione DNS** — está tudo certo |
+| `false` | ⚠️ | **Leia o `note`**, que diz qual dos três casos é: registro ainda não propagado, apontado para o lugar errado, ou checagem que não conseguiu verificar. Repasse o que ele diz, e use o endereço temporário enquanto isso |
+
+A tabela tinha uma quarta linha, que existia porque "resolve para outro lugar" era
+indistinguível entre CDN e erro de configuração. O header `cez-verify` desempata
+isso, e a linha deixou de ser necessária — [A12](#a12).
 
 Se o site não tem `temporary_address`, mostre só o oficial — não invente um
 endereço nem prometa que existe.
@@ -623,3 +645,40 @@ envelheceria em silêncio.
 
 É a mesma razão pela qual o bloco `ssh` saiu do `.cloudez.yaml` ([A1](#a1)) — dado
 derivado do servidor não se copia para o projeto.
+
+<a id="a12"></a>
+
+### A12 — Por que a verificação do domínio tem DUAS checagens
+
+Comparar o A/AAAA do domínio com o IP do servidor responde bem no caso simples e
+erra no caso comum: um domínio atrás de Cloudflare resolve para o **proxy**, não
+para o servidor, e o site funciona perfeitamente.
+
+Só com DNS, esse cenário é **indistinguível** de um domínio apontado para o lugar
+errado. A saída era mostrar ⚠️ e perguntar ao usuário se havia CDN na frente — ou
+seja, pedir que ele fizesse o diagnóstico por nós, no fim de um deploy que deu
+certo.
+
+O header `cez-verify` é servido pela Cloudez, então recebê-lo prova que a
+requisição ao domínio **chegou** num servidor dela, com CDN na frente ou sem. Ele
+só é consultado quando o DNS não bate: quando bate, não há o que desempatar e não
+se gasta uma requisição ao site do usuário.
+
+Qualquer código de status serve. Um **502 com o header presente** é justamente o
+caso que interessa distinguir — o tráfego chegou, e o problema é a aplicação;
+dizer "o DNS não aponta" ali mandaria procurar no lugar errado.
+
+<a id="a13"></a>
+
+### A13 — Por que a linha de alerta fala de ação, e não de causa
+
+A linha fixa diz "use o endereço temporário por enquanto", e não "o domínio não
+chega ao servidor". A diferença importa num dos três casos.
+
+Quando o servidor do site não resolve, quem está cega é a **checagem** — não há
+informação sobre o domínio. Uma linha fixa que afirmasse causa estaria errada ali,
+e mandaria o usuário mexer num DNS que pode estar perfeito.
+
+É o mesmo exagero que o `cez-verify` acabou de eliminar do caso do CDN ([A12](#a12)),
+e reintroduzi-lo numa linha fixa desfaria o ganho. A causa vai no `summary`, que é
+escrito por caso e admite não saber quando não sabe.
