@@ -30,7 +30,24 @@ setup() {
 @test "o bundle nao depende de node_modules ao lado" {
   # Um bundle que ainda importe pacote externo quebraria na maquina de quem
   # instalou o plugin, onde nao ha node_modules nenhum.
-  ! grep -qE '^import .* from "(@modelcontextprotocol|zod)' "$BUNDLE"
+  #
+  # A versao anterior citava @modelcontextprotocol e zod pelo nome, e por isso NAO
+  # teria pego o `yaml` quando ele entrou como dependencia — uma lista de nomes
+  # envelhece a cada dependencia nova, e o sintoma seria o plugin quebrando so na
+  # maquina de quem instalou.
+  # A regra e por FORMA, e nao por lista de nomes: todo import ou e relativo (".")
+  # ou e builtin ("node:"). Qualquer outro e pacote, venha ele de onde vier.
+  #
+  # Contar em vez de casar o complemento evita o ponto cego de uma regex negativa:
+  # um pacote cujo nome comece com "n" — `nanoid` — passaria por "node:" numa
+  # comparacao apressada. Aqui, se um import nao for permitido, os numeros diferem.
+  total=$(grep -cE '^import .* from' "$BUNDLE")
+  permitidos=$(grep -cE '^import .* from "(node:|[.])' "$BUNDLE")
+  [ "$total" -eq "$permitidos" ] || {
+    echo "import de pacote externo em $BUNDLE:" >&2
+    grep -nE '^import .* from' "$BUNDLE" | grep -vE 'from "(node:|[.])' >&2
+    false
+  }
 }
 
 @test "o servidor sobe e anuncia as tools pelo protocolo" {
@@ -98,7 +115,19 @@ LIB="mcp/cloudez-auth.mjs"
 }
 
 @test "a biblioteca nao depende de node_modules ao lado" {
-  ! grep -qE '^import .* from "(@modelcontextprotocol|zod)' "$LIB"
+  # A regra e por FORMA, e nao por lista de nomes: todo import ou e relativo (".")
+  # ou e builtin ("node:"). Qualquer outro e pacote, venha ele de onde vier.
+  #
+  # Contar em vez de casar o complemento evita o ponto cego de uma regex negativa:
+  # um pacote cujo nome comece com "n" — `nanoid` — passaria por "node:" numa
+  # comparacao apressada. Aqui, se um import nao for permitido, os numeros diferem.
+  total=$(grep -cE '^import .* from' "$LIB")
+  permitidos=$(grep -cE '^import .* from "(node:|[.])' "$LIB")
+  [ "$total" -eq "$permitidos" ] || {
+    echo "import de pacote externo em $LIB:" >&2
+    grep -nE '^import .* from' "$LIB" | grep -vE 'from "(node:|[.])' >&2
+    false
+  }
 }
 
 # A razao de o servidor nao ser o unico bundle: importa-lo sobe um transporte
@@ -135,7 +164,19 @@ ESTADO="mcp/cloudez-state.mjs"
 }
 
 @test "o bundle do estado nao depende de node_modules ao lado" {
-  ! grep -qE '^import .* from "(@modelcontextprotocol|zod)' "$ESTADO"
+  # A regra e por FORMA, e nao por lista de nomes: todo import ou e relativo (".")
+  # ou e builtin ("node:"). Qualquer outro e pacote, venha ele de onde vier.
+  #
+  # Contar em vez de casar o complemento evita o ponto cego de uma regex negativa:
+  # um pacote cujo nome comece com "n" — `nanoid` — passaria por "node:" numa
+  # comparacao apressada. Aqui, se um import nao for permitido, os numeros diferem.
+  total=$(grep -cE '^import .* from' "$ESTADO")
+  permitidos=$(grep -cE '^import .* from "(node:|[.])' "$ESTADO")
+  [ "$total" -eq "$permitidos" ] || {
+    echo "import de pacote externo em $ESTADO:" >&2
+    grep -nE '^import .* from' "$ESTADO" | grep -vE 'from "(node:|[.])' >&2
+    false
+  }
 }
 
 # Mesma razao do teste equivalente da biblioteca de auth: se alguem apontar o

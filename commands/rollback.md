@@ -44,8 +44,9 @@ Mas continue não *deduzindo* produção: se o usuário não disse, pergunte.
 cloudez_get_site(domain: "<domain>")
 ```
 
-Guarde o `stack`: **`container_docker` muda o procedimento** — nesse caso o passo
-5 é obrigatório, e sem ele o rollback não surte efeito nenhum.
+Confirme o `stack`: este plugin só publica `container_docker`. O passo 5 é
+obrigatório — sem ele o rollback troca o symlink e não surte efeito nenhum, porque
+quem responde é o container, que continua rodando a imagem antiga.
 
 ## 3. Escolher o alvo, e confirmar
 
@@ -93,9 +94,7 @@ Se falhar com `rollback_failed`, **isso é incidente** — reporte na hora, com
 todos os logs, sem tentar mais nada. O site está num estado que você não
 conhece.
 
-**Em site tradicional, o rollback termina aqui.** Vá para o passo 6.
-
-## 5. Reconstruir o container — só em `container_docker`
+## 5. Reconstruir o container
 
 **Sem este passo o rollback não fez nada de visível.** O `cloudez_rollback` troca
 o symlink e só; o container continua rodando a imagem construída no deploy que

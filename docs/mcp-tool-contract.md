@@ -336,7 +336,10 @@ devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
   "site": {
     "domain": "meusite.com.br",
     "name": "meusite",
-    "stack": "static",
+    "stack": "container_docker",
+    "app_root_path": "claude/current",
+    "custom_port": "3000",
+    "temporary_address": "meusite-com-br.srv-12.cloudez.io",
     "ssh": {
       "host": "srv-12.cloudez.io",
       "port": 22,
@@ -402,16 +405,32 @@ não tem efeito visível: sem erro em lugar nenhum, que é o pior formato de fal
 
 ---
 
-### 3.4 `cloudez_set_app_root_path` — **mutating**
+### 3.4 `cloudez_configure_site` — **mutating**
 
-Altera o `app_root_path` do site: o diretório que o servidor web entrega,
-relativo a `~/<domain>/www`.
+Ajusta os dois valores do site de que o deploy depende: o `app_root_path` — o
+diretório que o servidor web entrega, relativo a `~/<domain>/www` — e a
+`custom_port` — a porta do host para onde o nginx da Cloudez encaminha `/`.
 
-Existe por causa de uma falha silenciosa. O deploy publica em `<root>/current`, e
-com o `root` que o `cloudez-setup` grava isso é `claude/current`. Se o
-`app_root_path` apontar para outro lugar, o deploy roda inteiro, sem erro nenhum,
-e o site continua servindo o conteúdo antigo — o usuário só descobre comparando o
-que publicou com o que o navegador mostra.
+Existe por causa de duas falhas silenciosas, e elas são diferentes:
+
+- **document root errado**: o deploy publica em `<root>/current`, e com o `root`
+  que o `cloudez-setup` grava isso é `claude/current`. Apontando para outro
+  lugar, o deploy roda inteiro, sem erro nenhum, e o site continua servindo o
+  conteúdo antigo — o usuário só descobre comparando o que publicou com o que o
+  navegador mostra;
+- **porta errada**: o container sobe, o deploy se declara bem-sucedido, e o site
+  responde **502** — o nginx encaminha para uma porta onde não há ninguém
+  escutando.
+
+**Os dois num PATCH só, e isso não é economia de round-trip.** São
+pré-requisitos da mesma publicação: em chamadas separadas, a segunda falhando
+deixa o site com metade da configuração e nada no retorno dizendo isso.
+
+**A invariante da porta não é um número fixo.** É `custom_port` == porta que o
+Compose do projeto publica. O `3000` é o default de quando somos nós que
+escrevemos o Compose; num projeto que já tem um, quem manda é o arquivo, e é a
+Cloudez que se ajusta. Foi por isso que esta tool deixou de tratar só do
+document root.
 
 ```jsonc
 // input
@@ -419,43 +438,51 @@ que publicou com o que o navegador mostra.
   "type": "object",
   "properties": {
     "domain": { "type": "string" },
-    "app_root_path": { "type": "string", "description": "Relativo a ~/<domain>/www. Normalmente 'claude/current'." }
+    "app_root_path": { "type": "string", "description": "Relativo a ~/<domain>/www. Normalmente 'claude/current'." },
+    "custom_port": { "type": "string", "description": "Porta do host que o nginx encaminha para '/'. Default do plugin: '3000'." }
   },
-  "required": ["domain", "app_root_path"],
+  "required": ["domain"],
   "additionalProperties": false
 }
 ```
 
+Passe só o que quiser alterar. O que já estiver correto não gasta escrita.
+
 ```jsonc
 // output
-{ "domain": "meusite.com.br", "app_root_path": "claude/current",
-  "previous_app_root_path": "public_html", "changed": true }
+{ "domain": "meusite.com.br",
+  "app_root_path": "claude/current", "custom_port": "3000",
+  "previous_app_root_path": "public_html",
+  "changed": ["app_root_path"] }
 ```
 
-`changed: false` significa que o valor já estava correto e nenhuma escrita foi
-feita.
+`changed` é a **lista** dos slugs efetivamente escritos, e não um booleano: com
+dois campos, "mudou" sozinho não diz qual. Lista vazia significa que tudo já
+estava correto e nenhuma escrita foi feita.
 
 **Sem `idempotency_key`, e a exceção é deliberada.** A regra da seção 2 existe
-porque as outras mutating criam recursos, e repetir cria dois. Esta atribui um
-valor fixo: repetir dá no mesmo. A chave existiria só para cumprir formalidade.
+porque as outras mutating criam recursos, e repetir cria dois. Esta atribui
+valores fixos: repetir dá no mesmo. A chave existiria só para cumprir
+formalidade.
 
 **O corpo do `PATCH` repete a forma em que a configuração é lida:**
 
 ```jsonc
 PATCH /v3/website/<id>/
-{ "values": [ { "slug": "app_root_path", "value": "claude/current" } ] }
+{ "values": [ { "slug": "app_root_path", "value": "claude/current" },
+              { "slug": "custom_port",   "value": "3000" } ] }
 ```
 
 **A tool relê o site depois de escrever**, e a releitura confere três coisas:
 
-1. **o valor mudou de fato.** Uma escrita que se declara bem-sucedida sem ter
-   efeito é pior do que uma que falha: manda o usuário fazer deploy confiante num
-   document root errado, e o sintoma que volta é "publiquei e o site não mudou",
+1. **cada valor mudou de fato.** Uma escrita que se declara bem-sucedida sem ter
+   efeito é pior do que uma que falha: manda o usuário fazer deploy confiante numa
+   configuração errada, e o sintoma que volta é "publiquei e o site não mudou",
    o mais difícil de ligar à causa;
 2. **nenhum outro slug sumiu.** Sob a semântica confirmada isso nunca dispara —
    e é por isso que fica: se um dia disparar, a API mudou de comportamento, e o
    sintoma seria a configuração do site apagada em silêncio por um comando que só
-   queria ajustar o document root;
+   queria ajustar dois valores;
 3. **o site ainda é encontrável pelo domínio.** Se a busca deixar de achá-lo logo
    depois da escrita, isso **não** vira `site_not_found`: ele respondeu um
    instante antes, e o erro mandaria o usuário procurar no painel um problema que
@@ -467,6 +494,7 @@ não existe no servidor — um site que já estava no ar fica fora dele nesse
 intervalo.
 
 ---
+
 
 ### 3.5 `cloudez_authorize_ssh_key` — **mutating**
 
@@ -733,7 +761,8 @@ Sobe o container da release ativa: `docker compose up -d` no servidor. Só faz
 sentido em site cuja aplicação roda em container.
 
 Existe porque **publicar arquivos não põe uma aplicação em container no ar.** O
-nginx da Cloudez encaminha `/` para uma porta local (127.0.0.1:8080 por padrão) e
+nginx da Cloudez encaminha `/` para uma porta local (127.0.0.1:3000 por padrão,
+na `custom_port` do site) e
 quem escuta ali é o container do usuário. Sem este passo o deploy termina em
 `succeeded` e o site responde 502 no primeiro deploy, ou segue servindo a release
 anterior nos seguintes — falha invisível para quem lê o JSON de retorno.
@@ -751,7 +780,7 @@ anterior nos seguintes — falha invisível para quem lê o JSON de retorno.
     "project": "meusite-com-br",
     "containers": [
       { "name": "meusite-com-br-web-1", "state": "running",
-        "ports": "0.0.0.0:8080->80/tcp" }
+        "ports": "127.0.0.1:3000->3000/tcp" }
     ]
   } }
 ```
@@ -981,7 +1010,69 @@ como resultado preserva a latência e as tentativas — que é o que distingue
 
 ---
 
-### 3.14 Fora do escopo, por enquanto
+### 3.14 `cloudez_check_dns` — read-only
+
+Compara para onde o domínio resolve com o servidor onde a Cloudez hospeda o site.
+
+**Pergunta diferente do `cloudez_health_check`**, e é por isso que são duas tools:
+aquele diz se o site **responde**; este diz se o **DNS do domínio já chegou aqui**.
+As duas precisam de resposta ao fim de um deploy, e nenhuma implica a outra — o
+site pode responder pelo endereço temporário com o DNS ainda apontando para outro
+lugar, e pode apontar certo e mesmo assim estar fora do ar.
+
+Existe porque o caso mais comum de "o deploy falhou" não é falha nenhuma: é o
+primeiro deploy de um domínio recém-apontado, em que o endereço oficial ainda não
+resolve e o usuário conclui que a publicação não funcionou.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": { "domain": { "type": "string" } },
+  "required": ["domain"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output — aponta
+{ "domain": "meusite.com.br",
+  "domain_ips": ["203.0.113.10"],
+  "server_host": "srv-12.cloudez.io",
+  "server_ips": ["203.0.113.10"],
+  "points_to_server": true }
+```
+
+```jsonc
+// output — não aponta, e o motivo importa
+{ "domain": "meusite.com.br",
+  "domain_ips": ["104.21.5.7"],
+  "server_host": "srv-12.cloudez.io",
+  "server_ips": ["203.0.113.10"],
+  "points_to_server": false,
+  "note": "O domínio resolve para outro lugar que não o servidor do site. ..." }
+```
+
+**`points_to_server: false` NÃO significa configuração errada**, e tratá-lo assim
+manda a maior parte dos usuários procurar problema onde não há. São três casos
+distintos, e o `note` diz qual é:
+
+| Situação | O que é |
+|---|---|
+| `domain_ips` vazio | O domínio não resolve. Registro ainda não criado, ou propagação não terminada |
+| IPs que não são do servidor | Ou o DNS aponta para o lugar errado, **ou** o domínio está atrás de um CDN/proxy — caso em que é esperado e o site funciona normalmente |
+| `server_ips` vazio | A checagem não conseguiu resolver o próprio servidor. Limitação da verificação, não problema do site |
+
+Quem chama **não deve afirmar que o DNS está errado** sem confirmar com o usuário
+qual dos casos é.
+
+Resolve A e AAAA. Ausência de registro não é erro: "não resolve" é uma resposta, e
+a mais comum logo depois de apontar um domínio novo — deixar a exceção subir faria
+o deploy terminar em erro por causa de um DNS que ainda vai propagar.
+
+---
+
+### 3.15 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:
@@ -1116,10 +1207,15 @@ A chave SSH usada pelo transporte é do usuário, em `~/.ssh/`. O MCP nunca a v�
 O que segue aberto, e o que a prática já respondeu. As respostas ficam aqui, e
 não apagadas, porque uma pergunta removida volta a ser feita.
 
-1. **A Cloudez emite tokens com escopo?** Um token que alcance staging mas não
+1. **`cloudez_find_compose` e `cloudez_list_local_ssh_keys` não têm seção aqui.**
+   As duas existem, são chamadas pelos comandos, e entraram depois desta seção 3
+   sem passar por ela. O `find_compose` ficou mais relevante agora que devolve as
+   portas publicadas — é dele que sai a porta com que a `custom_port` da 3.4 tem
+   de bater. Documentar as duas é dívida deste contrato, não do servidor.
+2. **A Cloudez emite tokens com escopo?** Um token que alcance staging mas não
    produção daria à seção 5 um token por environment, limitando estrago. Hoje é um
    token de usuário, gerado no painel, com acesso a tudo que a conta acessa.
-2. ~~**Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
+3. ~~**Os dados de SSH (`host`, `user`, `port`) e o `root` estão disponíveis na
    API, a partir do domínio?**~~ **Path confirmado:**
    `GET /v3/website/?domain=<domínio>` (sobreponível por `CLOUDEZ_API_SITE_PATH`,
    com `{domain}` interpolado).
@@ -1141,7 +1237,7 @@ não apagadas, porque uma pergunta removida volta a ser feita.
    **Este caminho já rodou de ponta a ponta contra a Cloudez**, com a chave indo
    parar na conta certa. Isso exercita, junto, o `cloudez_auth_status`, o
    `cloudez_get_site` e o mapeamento de `user`. O que ainda não foi exercitado
-   contra a API real é o `cloudez_set_app_root_path` e o deploy em si.
+   contra a API real é o `cloudez_configure_site` e o deploy em si.
 
    **Faltam os slugs de `stack` e `current_release`**, hoje assumidos com esses
    nomes e não verificados. Campo não reconhecido some do retorno em vez de virar
@@ -1150,18 +1246,18 @@ não apagadas, porque uma pergunta removida volta a ser feita.
 
    Também vale confirmar se `?domain=` é filtro exato ou parcial — a
    implementação assume o pior caso e confere por igualdade.
-3. ~~**A Cloudez suporta o padrão de releases + symlink?**~~ **Sim.** Deploys e
+4. ~~**A Cloudez suporta o padrão de releases + symlink?**~~ **Sim.** Deploys e
    rollbacks rodaram contra servidor real, várias vezes. O `begin`/`finalize`
    continua em duas etapas, e o rollback troca o symlink.
-4. ~~**Alguma stack precisa de restart/reload depois da troca do symlink?**~~
+5. ~~**Alguma stack precisa de restart/reload depois da troca do symlink?**~~
    **Container precisa; estático não.** É por isso que existe o
    `cloudez_compose_up` (seção 3.9) e não um campo no `finalize`: a troca do
    symlink diz ao Docker QUAL código usar, e subir o container é um passo
    próprio, com falhas próprias.
-5. ~~**O `finalize` é síncrono?**~~ **É.** Nenhuma execução real precisou de
+6. ~~**O `finalize` é síncrono?**~~ **É.** Nenhuma execução real precisou de
    polling. O `cloudez_get_deploy_status` segue especificado e não implementado,
    por não ter consumidor: o deploy termina dentro da própria chamada.
-6. ~~**Quantas releases o servidor retém?**~~ **A retenção é nossa**, não do
+7. ~~**Quantas releases o servidor retém?**~~ **A retenção é nossa**, não do
    servidor: `KEEP_RELEASES = 5` no `finalize`, mais `KEEP_REPLACED = 2` para os
    diretórios `.current-<release_id>` postos de lado.
 

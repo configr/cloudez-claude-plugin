@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_check_dns, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -101,14 +101,15 @@ suja costuma ser exatamente a correção às pressas que se está tentando publi
 
 ## 4. Decidir o que subir
 
-O diretório publicado vem dos argumentos. Sem ele, **o que se publica depende de
-a aplicação rodar em container ou não**, e são decisões opostas:
+O diretório publicado vem dos argumentos. Sem ele, confirme onde está o Compose:
 
 ```
 cloudez_find_compose(directory: "<diretório candidato>")
 ```
 
-### `compose: true` — aplicação em container
+**`compose: false` — pare.** Este plugin publica aplicação em container, e só. Sem
+Compose o deploy publicaria arquivos que ninguém executa. Ofereça o
+`/cloudez:compose`, que escreve o arquivo junto com o usuário.
 
 Publique o **diretório do arquivo de Compose**, que é o contexto de build — em
 geral a raiz do projeto. É lá que estão o `Dockerfile` e o `compose`, e sem eles
@@ -121,19 +122,6 @@ diretório sem `Dockerfile` e sem `compose`, e o container não teria como exist
 O `sync` exclui o `.git`, então publicar a raiz não carrega o histórico do
 repositório. O resto vai inteiro: o que não deve entrar na imagem é assunto do
 `.dockerignore`, aplicado no build.
-
-### `compose: false` — aplicação tradicional
-
-Como antes: se o projeto tem build (`package.json` com script `build`, por
-exemplo), rode o build e use o diretório de saída; se não tem, pergunte ao
-usuário qual diretório subir.
-
-Aqui **não** publique a raiz do repositório — ela levaria `node_modules` e o
-resto do código-fonte para um servidor que só vai servir arquivos.
-
-Se o build falhar, **pare** — não sincronize um build quebrado. Mostre o erro e,
-se for algo que você consegue corrigir (import faltando, erro de tipo), corrija e
-rode de novo antes de seguir.
 
 ## 4b. Medir o site antes de publicar
 
@@ -181,8 +169,9 @@ não tem nada publicável. Quase sempre é o passo 4 tendo apontado para a raiz 
 um repositório sem build em vez do diretório de saída. Volte ao passo 4.
 
 Se `files` ou `bytes` vierem absurdos para o projeto (dezenas de milhares de
-arquivos num site estático, por exemplo), **pare e confirme com o usuário** antes
-de publicar: costuma ser `node_modules` indo junto num caminho `compose: false`.
+arquivos para o que o projeto é, por exemplo), **pare e confirme com o usuário**
+antes de publicar: costuma ser `node_modules` ou artefato de build indo junto por
+falta de `.dockerignore`.
 
 ## 5. Registrar a release
 
@@ -252,9 +241,9 @@ reusando a mesma `idempotency_key`. Só trate como chave ausente se continuar
 falhando depois disso — mandá-lo conferir o cadastro que ele acabou de fazer o
 faz procurar defeito onde não há.
 
-## 6b. Construir a imagem — só quando `compose: true`
+## 6b. Construir a imagem
 
-**Aplicação tradicional pula este passo.** Não há imagem a construir.
+
 
 ```
 cloudez_compose_build(deploy_id: "<deploy_id>")
@@ -308,13 +297,9 @@ Os dois mais recentes sempre ficam.
 `previous_release_id` **não aparece** quando não havia release anterior — é o
 caso do primeiro deploy do site. Campo ausente, não string vazia.
 
-## 8. Subir o container — só quando `compose: true`
+## 8. Subir o container
 
-**Aplicação tradicional para aqui.** Trocar o symlink já pôs o conteúdo no ar, e
-não há container nenhum a subir. Pule este passo.
-
-**Aplicação em container não.** Publicar os arquivos não põe uma aplicação em
-container no ar: o nginx da Cloudez encaminha `/` para uma porta local, e quem
+Publicar os arquivos não põe uma aplicação em container no ar: o nginx da Cloudez encaminha `/` para uma porta local, e quem
 escuta ali é o container do usuário. Sem este passo o deploy termina em
 `succeeded` com o site respondendo **502** no primeiro deploy, ou servindo a
 **release anterior** nos seguintes — falha que não aparece em nenhum JSON de
@@ -442,6 +427,45 @@ que reconstrói e religa tudo.
 a confirmação — e um rollback que não devolve o site ao ar é o pior estado
 possível para se declarar resolvido.
 
+## 9b. Onde ver a versão nova
+
+Um deploy que termina sem dizer onde olhar obriga o usuário a adivinhar — e no
+caso mais comum, o primeiro deploy de um domínio recém-apontado, o endereço
+oficial ainda não funciona e ele conclui que o deploy falhou.
+
+São dois endereços, e eles falham por motivos diferentes:
+
+```
+cloudez_check_dns(domain: "<domain>")
+```
+
+O `temporary_address` veio do `cloudez_get_site` do passo 2 — não guarde esse
+valor em lugar nenhum, releia sempre. Ele muda quando a Cloudez move o site, e uma
+cópia num arquivo do projeto envelheceria em silêncio.
+
+Feche o relato com este bloco, exatamente nesta forma:
+
+```
+Nova versão da aplicação disponível em:
+  https://<temporary_address>   ✅
+  https://<domain>              ✅  ou  ⚠️
+```
+
+**O endereço temporário é sempre ✅** quando o passo 9 deu `healthy: true`: ele
+aponta para o servidor por construção, sem depender de DNS de ninguém.
+
+**O oficial depende do `points_to_server`:**
+
+| Retorno | Marca | O que dizer |
+|---|---|---|
+| `points_to_server: true` | ✅ | Nada. Os dois funcionam |
+| `false`, com `domain_ips` vazio | ⚠️ | O DNS do domínio ainda não aponta para cá, ou não terminou de propagar. Use o endereço temporário enquanto isso |
+| `false`, com IPs que não são do servidor | ⚠️ | **Leia o `note` antes de falar.** Pode ser DNS apontado para o lugar errado — ou o domínio atrás de um CDN, caso em que está tudo certo e o ⚠️ é só informativo. **Não afirme que está errado**: diga o que observou e pergunte se há CDN na frente |
+| `false`, com `server_ips` vazio | ⚠️ | A checagem não conseguiu resolver o servidor. Diga que não deu para verificar, e não conclua nada sobre o domínio |
+
+Se o site não tem `temporary_address`, mostre só o oficial — não invente um
+endereço nem prometa que existe.
+
 ## Como reportar
 
 Comece pelo resultado: subiu ou não subiu, em qual ambiente, qual `release_id`.
@@ -457,10 +481,14 @@ rollbacks executados, e o domínio para ele conferir.
 
 Se houve rollback, diga explicitamente **qual versão está no ar agora**.
 
-Se for o primeiro deploy deste site, lembre que o document root no painel da
-Cloudez precisa apontar para `<root>/current` — com o `root` que o `setup` gera,
-`~/<domain>/www/claude/current`. Sem isso o deploy roda inteiro sem erro e o site
-continua servindo o conteúdo antigo.
+Se for o primeiro deploy deste site, os dois valores que o `/cloudez:setup` grava
+precisam estar certos no painel da Cloudez, e cada um falha de um jeito:
+
+- **document root** apontando para `<root>/current` — com o `root` que o `setup`
+  gera, `~/<domain>/www/claude/current`. Errado, o deploy roda inteiro sem erro e o
+  site continua servindo o conteúdo antigo;
+- **`custom_port`** igual à porta que o Compose publica. Errado, o container sobe,
+  o deploy se declara bem-sucedido e o site responde **502**.
 
 ## Inspeção sem deploy
 

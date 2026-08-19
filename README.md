@@ -122,7 +122,8 @@ Com o plugin ativo:
 - `/cloudez:compose [diretório]` — escreve o `docker-compose.yml` da aplicação,
   junto com o usuário. Não é geração por template: o comando lê o projeto,
   pergunta o que ele não responde e propõe. As restrições do ambiente — a porta
-  publicada é a **8080**, o dado que precisa sobreviver vai em volume nomeado —
+  publicada precisa bater com a `custom_port` do site (**3000** por padrão), o
+  dado que precisa sobreviver vai em volume nomeado —
   entram sem negociação;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é

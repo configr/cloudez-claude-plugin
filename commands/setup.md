@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment>
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_set_app_root_path, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -154,21 +154,45 @@ nada por conta própria: leia o arquivo e diga se o environment pedido já está
 Se não estiver, mostre um bloco novo no mesmo formato dos existentes e pergunte
 antes de acrescentar.
 
-## 5. Document root do site
+## 5. O que o site precisa ter configurado na Cloudez
 
 Último passo, e o que evita a falha mais confusa deste plugin.
 
-O `cloudez_get_site` do passo 2 devolveu o `app_root_path` do site — o diretório
-que o servidor web entrega, relativo a `~/<domain>/www`. O deploy publica em
-`<root>/current`, e com o `root` que o `setup` grava isso é **`claude/current`**.
+São **dois** valores, e o deploy depende dos dois. O `cloudez_get_site` do passo 2
+já devolveu ambos.
 
-**Se `app_root_path` já for `claude/current`**, diga que está tudo certo e siga.
+**O tipo do site, antes de tudo.** Este plugin publica aplicação em container, e
+só. Se o `stack` não for `container_docker`, **pare aqui**: a Cloudez serviria os
+arquivos como estáticos, o container nunca subiria, e o deploy rodaria inteiro sem
+erro nenhum. Diga que o tipo do site precisa ser trocado para Docker no painel da
+Cloudez, e que o setup continua quando isso estiver feito. Não tente corrigir por
+conta própria — o tipo muda o que a Cloudez provisiona, e não é reversível por um
+comando nosso.
 
-**Se for qualquer outra coisa** — inclusive ausente — explique o problema em
-termos do que vai acontecer, não do campo: com o document root apontando para
-outro lugar, o deploy vai rodar inteiro, sem erro nenhum, e o site vai continuar
-servindo o conteúdo antigo. É uma falha silenciosa, e o usuário só descobre
-comparando o que publicou com o que o navegador mostra.
+**O `app_root_path`** é o diretório que o servidor web entrega, relativo a
+`~/<domain>/www`. O deploy publica em `<root>/current`, e com o `root` que o
+`setup` grava isso é **`claude/current`**.
+
+**A `custom_port`** é a porta do host para onde o nginx da Cloudez encaminha `/`.
+Ela precisa bater com a porta que o Compose publica. Neste passo o projeto pode
+ainda não ter Compose nenhum — então:
+
+- **tem Compose** (o `ports` do `cloudez_find_compose` traz um `published`): a
+  `custom_port` tem de valer exatamente esse número;
+- **não tem**: use **3000**, que é o que o `/cloudez:compose` vai escrever depois.
+
+**Se os dois já estiverem certos**, diga que está tudo certo e siga.
+
+**Se algum estiver diferente** — inclusive ausente — explique em termos do que vai
+acontecer, não do campo:
+
+- **document root errado**: o deploy roda inteiro, sem erro nenhum, e o site
+  continua servindo o conteúdo antigo. O usuário só descobre comparando o que
+  publicou com o que o navegador mostra;
+- **porta errada**: o container sobe, o deploy se declara bem-sucedido, e o site
+  responde **502** — o nginx encaminha para uma porta onde não há ninguém.
+
+As duas são falhas silenciosas no deploy e barulhentas depois, longe da causa.
 
 **Ofereça ajustar, e espere a resposta.** Diga qual é o valor atual e qual
 passaria a ser. Duas coisas que ele precisa saber para decidir:
@@ -179,20 +203,27 @@ passaria a ser. Duas coisas que ele precisa saber para decidir:
   para um que já está no ar, é decisão dele, e o caminho seguro é ajustar logo
   antes do primeiro deploy, não agora.
 
-**Se aceitar:**
+**Se aceitar**, os dois vão na MESMA chamada — passe só o que estiver errado:
 
 ```
-cloudez_set_app_root_path(domain: "<domain>", app_root_path: "claude/current")
+cloudez_configure_site(
+  domain: "<domain>",
+  app_root_path: "claude/current",
+  custom_port: "<3000, ou a porta que o Compose publica>"
+)
 ```
 
-Confirme pelo retorno: `changed: true` é ajuste feito, `changed: false` é valor
-que já estava correto. Se vier erro dizendo que o valor **não mudou**, não diga
-que o document root foi ajustado — a alteração não pegou, e um deploy contando
-com ela vai parecer não ter efeito.
+Uma escrita só, e não duas, porque são pré-requisitos da mesma publicação: em
+chamadas separadas, a segunda falhando deixa o site com metade da configuração e
+nada no retorno dizendo isso.
 
-**Se recusar**, tudo bem: registre que o `app_root_path` continua em outro valor
-e que o primeiro deploy não vai aparecer no site até isso mudar. Não insista e
-não ajuste mesmo assim.
+Confirme pelo retorno: `changed` é a **lista** de valores efetivamente escritos —
+vazia quando já estava tudo certo. Se vier erro dizendo que o valor **não mudou**,
+não diga que a configuração foi ajustada: a alteração não pegou, e um deploy
+contando com ela vai parecer não ter efeito.
+
+**Se recusar**, tudo bem: registre o que continua diferente e o que vai acontecer
+por causa disso no primeiro deploy. Não insista e não ajuste mesmo assim.
 
 ## 6. Chave SSH desta máquina
 
@@ -253,8 +284,8 @@ autorizada — pelo painel, se ele preferir fazer à mão.
 
 ## 7. Como a aplicação roda
 
-O site na Cloudez pode ser um app em container ou uma aplicação tradicional, e o
-que decide é o arquivo de Compose no projeto. Descubra qual dos dois:
+O site já foi confirmado como `container_docker` no passo 5. Falta saber se o
+projeto tem o arquivo que faz o container existir — e qual porta ele publica:
 
 ```
 cloudez_find_compose()
@@ -264,20 +295,22 @@ Ela procura os quatro nomes que o Compose aceita, **na ordem que o próprio
 Compose usa** — `compose.yaml`, `compose.yml`, `docker-compose.yaml`,
 `docker-compose.yml` — e devolve o que seria efetivamente usado.
 
-Compare com o `stack` que o `cloudez_get_site` devolveu no passo 2. São quatro
-combinações, e duas delas são problema:
+O tipo do site já foi confirmado no passo 5 — se não fosse `container_docker`, o
+setup teria parado lá. Então sobram dois casos:
 
-| Projeto | Site na Cloudez | O que dizer |
-|---|---|---|
-| tem Compose | tipo Docker | Combina. Diga qual arquivo será usado e siga |
-| não tem | tipo tradicional | Combina. Siga sem comentar |
-| **tem Compose** | **tipo tradicional** | O container **não vai subir**: a Cloudez vai servir os arquivos como estáticos. O tipo do site se corrige no painel |
-| **não tem** | **tipo Docker** | O deploy vai publicar arquivos que ninguém executa. **Ofereça o `/cloudez:compose`**, que escreve o arquivo junto com o usuário |
+| Projeto | O que dizer |
+|---|---|
+| tem Compose | Diga qual arquivo será usado, e **qual porta ele publica** (o `ports` do retorno). Se essa porta não bate com a `custom_port` que o passo 5 gravou, diga isso agora: é a divergência que dá 502 |
+| não tem | O deploy publicaria arquivos que ninguém executa. **Ofereça o `/cloudez:compose`**, que escreve o arquivo junto com o usuário |
 
-Nos dois casos de divergência, **não corrija por conta própria**. O tipo do site
-é decisão do painel. E o Compose não se gera de template: depende do que a
-aplicação é, como sobe e do que precisa em volta — por isso o `/cloudez:compose`
+**Não gere o Compose por conta própria.** Ele não sai de template: depende do que
+a aplicação é, como sobe e do que precisa em volta — por isso o `/cloudez:compose`
 é uma conversa, e não um passo automático daqui.
+
+Se vier `parse_error` em vez de `ports`, diga que o arquivo existe mas não pôde
+ser lido, e mostre a mensagem. Um Compose que este plugin não entende não impede o
+deploy, mas impede conferir a porta — e o usuário precisa saber que essa
+verificação não aconteceu.
 
 Se vier `ignored`, o projeto tem mais de um arquivo de Compose. Diga qual será
 usado e quais serão ignorados — um arquivo editado que nunca entra em nada é
