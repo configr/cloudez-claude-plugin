@@ -7,12 +7,14 @@ allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
 a publicar.
 
-O deploy acontece em três etapas com estado entre elas: registrar a release,
-sincronizar os arquivos, ativar. As duas pontas de control plane —
-`cloudez_begin_deploy` e `cloudez_finalize_deploy` (mais `cloudez_compose_build` e
-`cloudez_compose_up` em site de container) — são **tools do MCP**; o transporte
-do meio (`cloudez-sync`)
-segue local, porque o MCP nunca move bytes. Tanto a tool quanto o adaptador
+Dez passos, em três fases: **preparar** (nada muda), **publicar** (há estado no
+servidor a partir daqui) e **confirmar** (ativar não é publicar). A fase do meio é
+uma transação com estado entre os passos: registrar a release, sincronizar os
+arquivos, construir, ativar, subir.
+
+As pontas de control plane — `cloudez_begin_deploy`, `cloudez_finalize_deploy`,
+`cloudez_compose_build` e `cloudez_compose_up` — são **tools do MCP**; o transporte
+do meio (`cloudez-sync`) segue local, porque o MCP nunca move bytes. Tanto a tool quanto o adaptador
 devolvem JSON estruturado — **leia esse JSON, não presuma sucesso pelo exit code
 nem por a chamada ter retornado.** O único adaptador em shell que resta é o
 transporte, `cloudez-sync`; ele está no `PATH` enquanto o plugin está ativo,
@@ -23,14 +25,21 @@ ter um `.cloudez.yaml`. Se não tiver, pare e mande o usuário rodar
 `/cloudez:setup <domain> <environment>` — sem os dados de servidor não há deploy,
 e eles não são seus para inventar.
 
-## 0. Autenticação
+# Preparar
+
+Nada aqui muda nada — são as três leituras que dizem o que publicar, para onde, e
+como o site estava antes. Se alguma falhar, o deploy não começou.
+
+## 1. O alvo: quem, qual environment, qual site
+
+### Autenticação
 
 Chame `cloudez_auth_status`. Se vier `authenticated: false`, **pare** e mande o
 usuário rodar `/cloudez:login`. Nunca peça o token na conversa, e não conduza o
 login daqui: o procedimento dele mora em um lugar só, e é lá que estão as
 permissões que ele precisa — este comando não roda o `cloudez-login`.
 
-## 1. Environment
+### Environment
 
 Os environments são as chaves de `cloudez:` no `.cloudez.yaml`. Sem argumento,
 escolha nesta ordem: `default`, se existir; senão `staging`, se existir; senão
@@ -46,7 +55,7 @@ coisa.
 
 Se o environment pedido não existir no arquivo, **pare** e liste os que existem.
 
-## 2. Confirmar o site na Cloudez
+### Confirmar o site na Cloudez
 
 Do bloco do environment, pegue o `domain` e busque o site:
 
@@ -79,10 +88,12 @@ falharia com permissão negada no meio do caminho.
 **`upstream_unavailable`** — leia o `hint`. Se disser que a **rota** não existe,
 o problema é o endpoint do servidor MCP: não afirme que o site sumiu da conta.
 
-## 3. Identificar o que está sendo publicado (se houver git)
+## 2. O que publicar
+
+### O commit, se houver git
 
 **Nem todo projeto é um repositório git, e o deploy não depende de um.** O que
-identifica a release é o hash do conteúdo publicado, coletado no passo 4c.
+identifica a release é o hash do conteúdo publicado, coletado no passo 3.
 
 Rode `git rev-parse HEAD` **uma vez**. Se falhar — não é repositório, ou não há
 commit — siga sem `ref`; não é erro e não merece comentário ao usuário.
@@ -99,7 +110,7 @@ rollback sem destino confiável. Com o hash do conteúdo essa preocupação deix
 de existir, e parar o deploy passou a custar mais do que resolvia — a árvore
 suja costuma ser exatamente a correção às pressas que se está tentando publicar.
 
-## 4. Decidir o que subir
+### O diretório
 
 O diretório publicado vem dos argumentos. Sem ele, confirme onde está o Compose:
 
@@ -123,7 +134,9 @@ O `sync` exclui o `.git`, então publicar a raiz não carrega o histórico do
 repositório. O resto vai inteiro: o que não deve entrar na imagem é assunto do
 `.dockerignore`, aplicado no build.
 
-## 4b. Medir o site antes de publicar
+## 3. Medir antes
+
+### Como o site responde agora
 
 ```
 cloudez_health_check(domain: "<domain>", attempts: 1)
@@ -151,58 +164,63 @@ prática a primeira requisição a um domínio costuma vir bem mais lenta que as
 seguintes — cache frio de borda e handshake de TLS, não o seu deploy. Não
 apresente essa queda ao usuário como melhora.
 
-## 4c. Identificar o conteúdo
+### O hash do que vai subir
 
 ```
-cloudez-sync --hash-only <diretório decidido no passo 4>
+cloudez-sync --hash-only <diretório decidido no passo 2>
 ```
 
 Devolve `content_sha256`, `files` e `bytes`. **Guarde o `content_sha256`** — é o
 que identifica a release, com ou sem git.
 
-Roda sobre o diretório do passo 4, depois do build e antes de qualquer coisa
+Roda sobre o diretório do passo 2, depois do build e antes de qualquer coisa
 tocar a rede. Não envia nada; só lê. Cobre exatamente o conjunto de arquivos que
 o `cloudez-sync` vai transmitir, incluindo a exclusão do `.git`.
 
 **Erro `build_output_empty` dizendo que só há `.git`** — o diretório escolhido
-não tem nada publicável. Quase sempre é o passo 4 tendo apontado para a raiz de
-um repositório sem build em vez do diretório de saída. Volte ao passo 4.
+não tem nada publicável. Quase sempre é o passo 2 tendo apontado para a raiz de
+um repositório sem build em vez do diretório de saída. Volte ao passo 2.
 
 Se `files` ou `bytes` vierem absurdos para o projeto (dezenas de milhares de
 arquivos para o que o projeto é, por exemplo), **pare e confirme com o usuário**
 antes de publicar: costuma ser `node_modules` ou artefato de build indo junto por
 falta de `.dockerignore`.
 
-## 5. Registrar a release
+# Publicar
+
+A partir daqui há estado no servidor. Cada passo devolve JSON — **leia o JSON**,
+não presuma sucesso por a chamada ter retornado.
+
+## 4. Registrar a release
 
 ```
 cloudez_begin_deploy(
   domain: "<domain>",
   root: "<root do bloco do environment no .cloudez.yaml>",
-  content_sha256: "<content_sha256 do passo 4c>",
-  ref: "<sha do passo 3, se houver>",
+  content_sha256: "<content_sha256 do passo 3>",
+  ref: "<sha do passo 2, se houver>",
   environment: "<environment>"
 )
 ```
 
-**`content_sha256` vai sempre.** O `ref` vai só quando o passo 3 conseguiu o
+**`content_sha256` vai sempre.** O `ref` vai só quando o passo 2 conseguiu o
 commit — omita o campo fora de um repositório, não mande string vazia.
 
 O `release_id` que volta é `<timestamp>-<sufixo>`, e a letra do sufixo diz de
 onde ele veio: `g1a2b3c` é commit, `c9f8e7d` é conteúdo. Use o `release_id` do
 retorno ao falar com o usuário; não o monte por conta própria.
 
-**Erro `release_unidentifiable`** — a chamada foi sem os dois. Volte ao passo 4c;
+**Erro `release_unidentifiable`** — a chamada foi sem os dois. Volte ao passo 3;
 não invente um `ref`.
 
 A tool resolve o destino ssh sozinha, pelo `domain` (o mesmo `cloudez_get_site`
-do passo 2) — **não passe host, user nem port**. O `root` vem do `.cloudez.yaml`
+do passo 1) — **não passe host, user nem port**. O `root` vem do `.cloudez.yaml`
 (o bloco do environment): é a única fonte dele, e a tool não o busca na API de
 propósito.
 
 Este passo **já conecta por ssh** — ele prepara o diretório de release no
 servidor. Uma falha de permissão aqui volta como `ssh_failed` (retryable), o
-mesmo caso descrito no passo 6, com a mesma exceção para a chave recém-autorizada.
+mesmo caso descrito no passo 5, com a mesma exceção para a chave recém-autorizada.
 
 **Não passe `idempotency_key`.** O servidor gera uma. O campo existe para um
 retry não virar um segundo deploy, e ele aceita a sua se você tiver a mesma chave
@@ -215,9 +233,9 @@ subconjunto que o Git Bash do Windows embarca, então o deploy simplesmente não
 passava deste passo naquela plataforma.
 
 Guarde o `deploy_id` do retorno. O destino ssh já foi gravado no estado do
-deploy, e é de lá que o `cloudez-sync` o lê no passo 6.
+deploy, e é de lá que o `cloudez-sync` o lê no passo 5.
 
-## 6. Sincronizar
+## 5. Sincronizar
 
 ```sh
 cloudez-sync <deploy_id> <diretorio>
@@ -241,7 +259,7 @@ reusando a mesma `idempotency_key`. Só trate como chave ausente se continuar
 falhando depois disso — mandá-lo conferir o cadastro que ele acabou de fazer o
 faz procurar defeito onde não há.
 
-## 6b. Construir a imagem
+## 6. Construir a imagem
 
 
 
@@ -313,7 +331,7 @@ Roda `docker compose up -d` na release recém-ativada. **Depois do `finalize`,
 nunca antes** — é este passo que troca o container em serviço, e invertida a
 ordem ele subiria a release anterior.
 
-Se o passo 6b rodou, a imagem já existe e o `up` só recria o container: segundos,
+Se o passo 6 rodou, a imagem já existe e o `up` só recria o container: segundos,
 em vez do build inteiro. Se não rodou, ele reconstrói com `--build` — o caminho
 antigo, correto e mais lento.
 
@@ -346,12 +364,17 @@ está — os dois são ação da Cloudez, não do usuário:
   daquele servidor.
 
 **`compose_missing`** é outra coisa: o deploy publicou um diretório sem Compose.
-Quase sempre significa que o passo 4 publicou a saída de um build em vez do
+Quase sempre significa que o passo 2 publicou a saída de um build em vez do
 contexto de build. O container continua rodando a versão anterior.
 
 **Verifique o site depois.** Este é o único passo cujo sucesso não se comprova
 pelo próprio retorno: o container pode subir e a aplicação não responder. Bata no
 domínio e confira o que voltou antes de declarar o deploy pronto.
+
+# Confirmar
+
+Ativar não é publicar. O que decide é o site responder — e o usuário saber onde
+ver o resultado.
 
 ## 9. Verificar que o site responde
 
@@ -378,7 +401,7 @@ sugere:
 
 Ofereça o rollback (passo 10, e em site container o passo 8 de novo depois dele).
 
-**`healthy: true`, mas `body_sha256` igual ao do passo 4b** — o site responde e
+**`healthy: true`, mas `body_sha256` igual ao do passo 3** — o site responde e
 está servindo **exatamente o mesmo conteúdo de antes do deploy**. Não afirme que
 a publicação deu certo. Diga isso ao usuário e pergunte se a release deveria ter
 alterado a página consultada: pode ser legítimo — nem toda release muda a home —
@@ -387,47 +410,12 @@ ou pode ser um deploy que não surtiu efeito.
 **`attempts` maior que 1** — vale mencionar. A aplicação demorou a subir, e isso
 é informação sobre ela que só este passo revela.
 
-**Não compare `latency_ms` nem `attempts` com os do passo 4b.** As duas medições
+**Não compare `latency_ms` nem `attempts` com os do passo 3.** As duas medições
 usam número de tentativas diferente, de propósito, e a primeira requisição a um
 domínio vem inflada por cache frio e handshake de TLS. O único campo comparável
 entre os dois passos é o `body_sha256`.
 
-## 10. Rollback
-
-Fora de um deploy, isto é o `/cloudez:rollback` — que confirma o alvo com o
-usuário e verifica o resultado. Aqui está inline porque um rollback disparado no
-meio de um deploy que falhou acontece dentro deste fluxo, e não há como invocar
-outro comando daqui. **Os dois textos precisam mudar juntos.**
-
-O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 5.
-
-```
-cloudez_rollback(domain: "<domain>", root: "<root>")                          # volta para a anterior
-cloudez_rollback(domain: "<domain>", root: "<root>", to_release_id: "<id>")   # volta para uma específica
-```
-
-O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Alvo
-que não existe mais volta `release_not_found` com a lista do que sobrou — não
-escolha outro por conta. Se o rollback também falhar (`rollback_failed`), isso é
-um incidente — reporte imediatamente com todos os logs, sem tentar mais nada.
-
-**Em aplicação em container, o rollback não termina aqui.** Ele troca o symlink,
-e só: o container segue rodando a imagem construída no deploy anterior, então o
-site continua servindo o que você acabou de tentar tirar do ar. É preciso
-reconstruir a imagem a partir da release de destino — `cloudez_compose_build`
-seguido de `cloudez_compose_up`, ambos com o `deploy_id` dela. O
-`cloudez_compose_build` aceita release já ativa justamente para isto.
-
-Se não houver um deploy ativo para essa release, um `cloudez_begin_deploy` novo
-com os mesmos identificadores (o `content_sha256` do passo 4c, e o `ref` se
-houver), seguido de sync + compose_build + finalize + compose_up, é o caminho
-que reconstrói e religa tudo.
-
-**Rode o passo 9 de novo depois do rollback.** Voltar o symlink é o remédio, não
-a confirmação — e um rollback que não devolve o site ao ar é o pior estado
-possível para se declarar resolvido.
-
-## 9b. Onde ver a versão nova
+### Onde ver a versão nova
 
 Um deploy que termina sem dizer onde olhar obriga o usuário a adivinhar — e no
 caso mais comum, o primeiro deploy de um domínio recém-apontado, o endereço
@@ -439,7 +427,7 @@ São dois endereços, e eles falham por motivos diferentes:
 cloudez_check_dns(domain: "<domain>")
 ```
 
-O `temporary_address` veio do `cloudez_get_site` do passo 2 — não guarde esse
+O `temporary_address` veio do `cloudez_get_site` do passo 1 — não guarde esse
 valor em lugar nenhum, releia sempre. Ele muda quando a Cloudez move o site, e uma
 cópia num arquivo do projeto envelheceria em silêncio.
 
@@ -466,6 +454,41 @@ aponta para o servidor por construção, sem depender de DNS de ninguém.
 Se o site não tem `temporary_address`, mostre só o oficial — não invente um
 endereço nem prometa que existe.
 
+## 10. Rollback
+
+Fora de um deploy, isto é o `/cloudez:rollback` — que confirma o alvo com o
+usuário e verifica o resultado. Aqui está inline porque um rollback disparado no
+meio de um deploy que falhou acontece dentro deste fluxo, e não há como invocar
+outro comando daqui. **Os dois textos precisam mudar juntos.**
+
+O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 4.
+
+```
+cloudez_rollback(domain: "<domain>", root: "<root>")                          # volta para a anterior
+cloudez_rollback(domain: "<domain>", root: "<root>", to_release_id: "<id>")   # volta para uma específica
+```
+
+O servidor mantém as 5 releases mais recentes; o rollback alcança até ali. Alvo
+que não existe mais volta `release_not_found` com a lista do que sobrou — não
+escolha outro por conta. Se o rollback também falhar (`rollback_failed`), isso é
+um incidente — reporte imediatamente com todos os logs, sem tentar mais nada.
+
+**Em aplicação em container, o rollback não termina aqui.** Ele troca o symlink,
+e só: o container segue rodando a imagem construída no deploy anterior, então o
+site continua servindo o que você acabou de tentar tirar do ar. É preciso
+reconstruir a imagem a partir da release de destino — `cloudez_compose_build`
+seguido de `cloudez_compose_up`, ambos com o `deploy_id` dela. O
+`cloudez_compose_build` aceita release já ativa justamente para isto.
+
+Se não houver um deploy ativo para essa release, um `cloudez_begin_deploy` novo
+com os mesmos identificadores (o `content_sha256` do passo 3, e o `ref` se
+houver), seguido de sync + compose_build + finalize + compose_up, é o caminho
+que reconstrói e religa tudo.
+
+**Rode o passo 9 de novo depois do rollback.** Voltar o symlink é o remédio, não
+a confirmação — e um rollback que não devolve o site ao ar é o pior estado
+possível para se declarar resolvido.
+
 ## Como reportar
 
 Comece pelo resultado: subiu ou não subiu, em qual ambiente, qual `release_id`.
@@ -476,19 +499,13 @@ rollback. Quando houver commit, mencione-o junto — a pessoa reconhece o commit
 não o hash de conteúdo.
 
 Não descreva os passos que correram bem — o usuário não precisa saber que o envio
-funcionou. Descreva o que ele precisa fazer alguma coisa a respeito: falhas,
-rollbacks executados, e o domínio para ele conferir.
+funcionou. Descreva o que ele precisa fazer alguma coisa a respeito: falhas e
+rollbacks executados.
+
+O bloco de endereços do passo 9 fecha o relato, e não se resume nem se substitui:
+é por ele que o usuário sabe onde olhar.
 
 Se houve rollback, diga explicitamente **qual versão está no ar agora**.
-
-Se for o primeiro deploy deste site, os dois valores que o `/cloudez:setup` grava
-precisam estar certos no painel da Cloudez, e cada um falha de um jeito:
-
-- **document root** apontando para `<root>/current` — com o `root` que o `setup`
-  gera, `~/<domain>/www/claude/current`. Errado, o deploy roda inteiro sem erro e o
-  site continua servindo o conteúdo antigo;
-- **`custom_port`** igual à porta que o Compose publica. Errado, o container sobe,
-  o deploy se declara bem-sucedido e o site responde **502**.
 
 ## Inspeção sem deploy
 
@@ -498,7 +515,7 @@ Quando o usuário só quer saber o estado:
 cloudez_list_releases(domain: "<domain>", root: "<root>")   # o que está no servidor, qual é a atual
 ```
 
-Também aqui o destino vem do `cloudez_get_site` — passos 0 a 2 antes.
+Também aqui o destino vem do `cloudez_get_site` — passos 1 a 2 antes.
 
 ---
 
@@ -511,5 +528,5 @@ destrutiva daqui, e ela só apareceria quando as duas divergissem.
 Todo o control plane já é tool do servidor MCP: `cloudez_begin_deploy`,
 `cloudez_finalize_deploy`, `cloudez_compose_build`, `cloudez_compose_up`,
 `cloudez_list_releases` e
-`cloudez_rollback`. O passo 6 é a exceção permanente: o transporte (`cloudez-sync`)
+`cloudez_rollback`. O passo 5 é a exceção permanente: o transporte (`cloudez-sync`)
 continua local, já que o MCP nunca transporta arquivos.
