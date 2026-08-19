@@ -20,6 +20,11 @@ nem por a chamada ter retornado.** O único adaptador em shell que resta é o
 transporte, `cloudez-sync`; ele está no `PATH` enquanto o plugin está ativo,
 chame pelo nome, sem caminho.
 
+Os passos dizem **o que fazer**. O **apêndice**, no fim, diz **por que** cada trava
+existe — quase tudo lá é defeito que já aconteceu. Não precisa ler para executar,
+mas leia a entrada antes de afrouxar qualquer regra: a maioria parece excesso de
+zelo até você conhecer o caso que a criou.
+
 Todos os caminhos são relativos à raiz do projeto sendo publicado, que precisa
 ter um `.cloudez.yaml`. Se não tiver, pare e mande o usuário rodar
 `/cloudez:setup <domain> <environment>` — sem os dados de servidor não há deploy,
@@ -69,10 +74,7 @@ cloudez_get_site(domain: "<domain>")
 destino sozinho pelo `domain` e o grava no estado do deploy, e é de lá que o
 `cloudez-sync`, o `finalize` e o `compose_up` o leem.
 
-Esses dados não estão no `.cloudez.yaml` de propósito. Uma cópia do host num
-arquivo versionado envelhece: se a Cloudez mover o site de servidor, o valor
-escrito continua apontando para o antigo e o deploy vai para o lugar errado sem
-reclamar. Buscá-los a cada deploy é o que evita isso.
+Eles não estão no `.cloudez.yaml` de propósito — [A1](#a1).
 
 **`match: "candidates"` ou `site_not_found`** — **pare.** O `domain` veio de um
 arquivo versionado: se não casa exatamente com um site da conta, a config está
@@ -104,11 +106,7 @@ que o `ref` não representa. Isso **não interrompe o deploy** — o hash do con
 identifica a release corretamente de qualquer forma. Avise o usuário em uma
 linha, dizendo que o `release_id` vai sair marcado pelo conteúdo, e siga.
 
-Antes isto era um bloqueio, pela razão certa na época: o `ref` era a única
-referência da release, e um commit que não correspondia ao disco deixava o
-rollback sem destino confiável. Com o hash do conteúdo essa preocupação deixou
-de existir, e parar o deploy passou a custar mais do que resolvia — a árvore
-suja costuma ser exatamente a correção às pressas que se está tentando publicar.
+Isto já foi um bloqueio — [A2](#a2).
 
 ### O diretório
 
@@ -145,24 +143,14 @@ cloudez_health_check(domain: "<domain>", attempts: 1)
 **Guarde o `body_sha256`.** É a referência: comparado com o de depois, ele é o
 único sinal independente de stack sobre a publicação ter mudado alguma coisa.
 
-Sem essa medição, o passo 9 só consegue dizer que o site responde — e a release
-anterior também responde. Foi assim que um `app_root_path` errado passou por
-deploy bem-sucedido enquanto o site servia o conteúdo velho.
+Sem ela, o passo 9 só consegue dizer que o site responde — e a release anterior
+também responde. [A3](#a3).
 
 Uma falha aqui **não interrompe o deploy**: site fora do ar antes de publicar é
 justamente o que se está tentando consertar. Só registre e siga.
 
-**Do que esta medição devolve, guarde só o `body_sha256`.** O `attempts: 1` é
-deliberado e assimétrico em relação ao passo 9, que usa o padrão: lá as
-tentativas existem porque um container recém-recriado leva segundos para
-escutar, e aqui não há nada subindo — insistir só atrasaria o deploy quando o
-site já está fora do ar.
-
-A consequência é que **`latency_ms` e `attempts` das duas medições não são
-comparáveis**, e a diferença entre elas não diz nada sobre a aplicação. Na
-prática a primeira requisição a um domínio costuma vir bem mais lenta que as
-seguintes — cache frio de borda e handshake de TLS, não o seu deploy. Não
-apresente essa queda ao usuário como melhora.
+**Guarde só o `body_sha256`.** O `attempts: 1` é deliberado, e por isso
+`latency_ms` e `attempts` **não são comparáveis** com os do passo 9 — [A4](#a4).
 
 ### O hash do que vai subir
 
@@ -228,9 +216,7 @@ de uma chamada anterior — mas **não invente uma**: você não tem como gerar 
 aleatório de forma confiável, e uma chave repetida por engano devolve um deploy
 antigo em vez de criar o novo.
 
-Isto já foi obrigatório, com o valor vindo de `uuidgen`. O binário não existe no
-subconjunto que o Git Bash do Windows embarca, então o deploy simplesmente não
-passava deste passo naquela plataforma.
+[A5](#a5) conta por que isto já foi obrigatório e deixou de ser.
 
 Guarde o `deploy_id` do retorno. O destino ssh já foi gravado no estado do
 deploy, e é de lá que o `cloudez-sync` o lê no passo 5.
@@ -241,10 +227,7 @@ deploy, e é de lá que o `cloudez-sync` o lê no passo 5.
 cloudez-sync <deploy_id> <diretorio>
 ```
 
-**Este é o único que não leva as variáveis**, e não é esquecimento: o
-`begin-deploy` resolveu o destino uma vez e o gravou no estado do deploy, e é de
-lá que o `sync` o lê. Passá-las de novo aqui não teria efeito — e se uma delas
-viesse diferente, o envio iria para um servidor e a ativação para outro.
+**Este é o único que não leva as variáveis**, e não é esquecimento — [A6](#a6).
 
 Falha aqui é quase sempre SSH: chave não configurada, host desconhecido,
 permissão. O campo `logs` do erro traz a saída do `tar` e do `ssh`. Chave ausente
@@ -270,16 +253,8 @@ cloudez_compose_build(deploy_id: "<deploy_id>")
 Roda `docker compose build` no **diretório da release**, com o symlink ainda
 apontando para a versão anterior.
 
-**Antes do `finalize`, e é o ponto todo.** Enquanto o build roda — e num projeto
-de verdade ele leva minutos — o site inteiro segue no ar coerente: symlink
-antigo, container antigo. Construindo depois de ativar, como era antes, o
-servidor passa o build inteiro num estado misto, com os arquivos novos no disco e
-o container servindo os antigos. E se o build quebra, esse estado fica: o deploy
-retorna erro com a release já ativada, e o site continua na versão velha sem nada
-que o desfaça. **Aqui, build quebrado é deploy que não começou.**
-
-O build lê `releases/<release_id>` explicitamente, nunca `current` — era
-justamente a dependência do symlink que obrigava a ordem antiga.
+**Antes do `finalize`, e é o ponto todo:** aqui, build quebrado é deploy que não
+começou. [A7](#a7).
 
 **`compose_build_failed`** é falha do **projeto**: Dockerfile, dependência,
 contexto. Leia o `hint`, que traz a saída do build. Corrija e recomece o deploy;
@@ -317,11 +292,7 @@ caso do primeiro deploy do site. Campo ausente, não string vazia.
 
 ## 8. Subir o container
 
-Publicar os arquivos não põe uma aplicação em container no ar: o nginx da Cloudez encaminha `/` para uma porta local, e quem
-escuta ali é o container do usuário. Sem este passo o deploy termina em
-`succeeded` com o site respondendo **502** no primeiro deploy, ou servindo a
-**release anterior** nos seguintes — falha que não aparece em nenhum JSON de
-retorno, só no navegador.
+Publicar os arquivos não põe uma aplicação em container no ar — [A9](#a9).
 
 ```
 cloudez_compose_up(deploy_id: "<deploy_id>")
@@ -347,11 +318,8 @@ servindo" e "a release nova está no disco". O `state` responde `running` nos do
 casos. Quando vier `false` e o deploy deveria ter mudado alguma coisa, cruze com
 o `body_sha256` do passo 9.
 
-O `project` vem do domínio, não do diretório. Isso sobrepõe um `name:` que o
-usuário tenha no compose dele, e é deliberado — o daemon do Docker é um só para
-todos os sites da máquina, e o nome derivado do diretório seria `current` para
-todos eles. Dois sites deste plugin no mesmo servidor viravam o mesmo projeto, e
-o deploy de um derrubava o container do outro.
+O `project` vem do domínio, não do diretório, e sobrepõe um `name:` do usuário —
+[A8](#a8).
 
 Erros que **não se resolvem no projeto** e cujo `hint` você deve repassar como
 está — os dois são ação da Cloudez, não do usuário:
@@ -410,26 +378,19 @@ ou pode ser um deploy que não surtiu efeito.
 **`attempts` maior que 1** — vale mencionar. A aplicação demorou a subir, e isso
 é informação sobre ela que só este passo revela.
 
-**Não compare `latency_ms` nem `attempts` com os do passo 3.** As duas medições
-usam número de tentativas diferente, de propósito, e a primeira requisição a um
-domínio vem inflada por cache frio e handshake de TLS. O único campo comparável
-entre os dois passos é o `body_sha256`.
+**Não compare `latency_ms` nem `attempts` com os do passo 3** — o único campo
+comparável entre os dois passos é o `body_sha256`. [A4](#a4).
 
 ### Onde ver a versão nova
 
-Um deploy que termina sem dizer onde olhar obriga o usuário a adivinhar — e no
-caso mais comum, o primeiro deploy de um domínio recém-apontado, o endereço
-oficial ainda não funciona e ele conclui que o deploy falhou.
-
-São dois endereços, e eles falham por motivos diferentes:
+São dois endereços, e eles falham por motivos diferentes ([A10](#a10)):
 
 ```
 cloudez_check_dns(domain: "<domain>")
 ```
 
-O `temporary_address` veio do `cloudez_get_site` do passo 1 — não guarde esse
-valor em lugar nenhum, releia sempre. Ele muda quando a Cloudez move o site, e uma
-cópia num arquivo do projeto envelheceria em silêncio.
+O `temporary_address` veio do `cloudez_get_site` do passo 1. **Não guarde esse
+valor** — releia sempre. [A11](#a11).
 
 Feche o relato com este bloco, exatamente nesta forma:
 
@@ -530,3 +491,135 @@ Todo o control plane já é tool do servidor MCP: `cloudez_begin_deploy`,
 `cloudez_list_releases` e
 `cloudez_rollback`. O passo 5 é a exceção permanente: o transporte (`cloudez-sync`)
 continua local, já que o MCP nunca transporta arquivos.
+
+# Apêndice — por que cada trava existe
+
+Os passos acima dizem **o que fazer**. Isto diz **por que**, e quase tudo aqui é
+defeito que já aconteceu — não precaução teórica.
+
+Ler não é obrigatório para executar o deploy. Mas antes de remover, afrouxar ou
+"simplificar" qualquer regra dos passos, leia a entrada dela: a maioria parece
+excesso de zelo até você conhecer o caso que a criou.
+
+<a id="a1"></a>
+
+### A1 — Por que o destino ssh não mora no .cloudez.yaml
+
+Uma cópia do host num arquivo versionado envelhece: se a Cloudez mover o site de
+servidor, o valor escrito continua apontando para o antigo, e o deploy vai para o
+lugar errado sem reclamar. Buscá-los a cada deploy é o que evita isso.
+
+É a mesma razão pela qual o `temporary_address` também não é guardado ([A11](#a11)).
+
+<a id="a2"></a>
+
+### A2 — Por que árvore suja não bloqueia mais o deploy
+
+Era a razão certa na época: o `ref` era a única referência da release, e um commit
+que não correspondia ao disco deixava o rollback sem destino confiável.
+
+Com o hash do conteúdo essa preocupação deixou de existir, e parar o deploy passou
+a custar mais do que resolvia — a árvore suja costuma ser exatamente a correção às
+pressas que se está tentando publicar.
+
+<a id="a3"></a>
+
+### A3 — Por que medir o site ANTES de publicar
+
+Foi assim que um `app_root_path` errado passou por deploy bem-sucedido enquanto o
+site servia o conteúdo velho: todos os passos em `succeeded`, o site no ar, e nada
+publicado.
+
+O `body_sha256` é o único sinal independente de stack sobre a publicação ter
+mudado alguma coisa.
+
+<a id="a4"></a>
+
+### A4 — Por que as duas medições de saúde não são comparáveis
+
+O `attempts: 1` aqui é assimétrico em relação ao passo 9, que usa o padrão. Lá as
+tentativas existem porque um container recém-recriado leva segundos para escutar;
+aqui não há nada subindo, e insistir só atrasaria o deploy quando o site já está
+fora do ar.
+
+A consequência é que a diferença de latência entre as duas medições não diz nada
+sobre a aplicação. Na prática a primeira requisição a um domínio vem bem mais lenta
+que as seguintes — cache frio de borda e handshake de TLS, não o seu deploy. **Não
+apresente essa queda ao usuário como melhora.**
+
+<a id="a5"></a>
+
+### A5 — Por que não se inventa uma idempotency_key
+
+O campo já foi obrigatório, com o valor vindo de `uuidgen`. O binário não existe no
+subconjunto que o Git Bash do Windows embarca, então o deploy simplesmente não
+passava deste passo naquela plataforma.
+
+Hoje o servidor gera a chave. Ele aceita a sua se você tiver a mesma de uma chamada
+anterior — mas uma chave repetida por engano devolve um deploy antigo em vez de
+criar o novo, e você não tem como gerar valor aleatório de forma confiável.
+
+<a id="a6"></a>
+
+### A6 — Por que o sync não recebe host, user nem port
+
+O `begin_deploy` resolveu o destino uma vez e o gravou no estado do deploy, e é de
+lá que o `sync` o lê.
+
+Passá-las de novo aqui não teria efeito — e se uma delas viesse diferente, o envio
+iria para um servidor e a ativação para outro.
+
+<a id="a7"></a>
+
+### A7 — Por que o build vem ANTES do finalize
+
+Enquanto o build roda — e num projeto de verdade ele leva minutos — o site inteiro
+segue no ar coerente: symlink antigo, container antigo.
+
+Construindo depois de ativar, como era antes, o servidor passa o build inteiro num
+estado misto: arquivos novos no disco, container servindo os antigos. E se o build
+quebra, esse estado FICA — o deploy retorna erro com a release já ativada, e o site
+continua na versão velha sem nada que o desfaça.
+
+O build lê `releases/<release_id>` explicitamente, nunca `current`. Era justamente a
+dependência do symlink que obrigava a ordem antiga.
+
+<a id="a8"></a>
+
+### A8 — Por que o nome do projeto Compose vem do domínio
+
+O daemon do Docker é um só para todos os sites da máquina, e o nome derivado do
+diretório seria `current` para todos eles.
+
+Dois sites deste plugin no mesmo servidor viravam o mesmo projeto Compose, e o
+deploy de um derrubava o container do outro.
+
+<a id="a9"></a>
+
+### A9 — Por que o passo 8 existe
+
+O nginx da Cloudez encaminha `/` para uma porta local, e quem escuta ali é o
+container do usuário.
+
+Sem este passo o deploy termina em `succeeded` com o site respondendo **502** no
+primeiro deploy, ou servindo a **release anterior** nos seguintes — falha que não
+aparece em nenhum JSON de retorno, só no navegador.
+
+<a id="a10"></a>
+
+### A10 — Por que o bloco de endereços fecha o deploy
+
+Um deploy que termina sem dizer onde olhar obriga o usuário a adivinhar.
+
+No caso mais comum — o primeiro deploy de um domínio recém-apontado — o endereço
+oficial ainda não funciona, e ele conclui que o deploy falhou quando não falhou.
+
+<a id="a11"></a>
+
+### A11 — Por que o temporary_address não é guardado
+
+Ele muda quando a Cloudez move o site, e uma cópia num arquivo do projeto
+envelheceria em silêncio.
+
+É a mesma razão pela qual o bloco `ssh` saiu do `.cloudez.yaml` ([A1](#a1)) — dado
+derivado do servidor não se copia para o projeto.
