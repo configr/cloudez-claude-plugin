@@ -83,6 +83,8 @@ O que procurar, e por quê:
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
 | Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`) |
+| Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 2 |
+| Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
 **Pergunte o que o projeto não responde.** Credenciais, qual banco de verdade,
 se aquele Redis é opcional, se o build precisa de variável de ambiente. E
@@ -207,6 +209,58 @@ Este é o dev-ismo mais comum de todos, e num arquivo que já existe ele quase
 sempre está lá — de propósito, porque localmente é exatamente o que se quer. Não
 apague do arquivo do usuário: remova na sobreposição (passo 3).
 
+### O container precisa CONSEGUIR escrever em `shared/`
+
+Esta é a que mais custa a aparecer, porque o deploy fica verde inteiro.
+
+Os diretórios de `shared/` são criados no servidor pelo **usuário SSH do site**.
+Uma imagem bem feita roda como **não-root**, com um uid próprio — 1001 é o mais
+comum. Os dois números não coincidem, e o kernel decide pelo número: o container
+**lê e não escreve**. O sintoma é 500 na primeira gravação, que costuma ser dias
+depois do deploy, quando o primeiro usuário tenta enviar alguma coisa.
+
+**Verifique no Dockerfile.** Se houver `USER` apontando para alguém que não é
+root, o problema existe:
+
+```dockerfile
+RUN addgroup -S nodejs -g 1001 && adduser -S nextjs -u 1001
+USER nextjs
+```
+
+A correção vai na **sobreposição**, e faz o container rodar com a identidade dona
+do `shared/`:
+
+```yaml
+services:
+  app:
+    user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"
+```
+
+O deploy exporta as duas variáveis antes de chamar o Compose, com o `id -u` e o
+`id -g` do usuário SSH — e devolve o valor em `compose.host_uid`.
+
+**Não crave o número.** Cada environment é um site com seu próprio usuário SSH, e
+um uid literal no arquivo versionado só estaria certo para um deles. As variáveis
+resolvem no servidor, a cada deploy.
+
+E isto só funciona **na sobreposição**: localmente o `docker compose up` não lê
+esse arquivo, e as variáveis não existem na máquina do usuário. Pôr o `user:` no
+arquivo base faria o Compose interpolar para `user: ':'` — inválido, e o Compose
+apenas **avisa**, não falha.
+
+**A ressalva.** Rodando com outro uid, o processo deixa de ser dono do que a
+imagem construiu. Todo caminho que a aplicação escreve DENTRO da imagem — e não
+só o de dados — precisa ser revisto: o Next em modo standalone grava em
+`/app/.next/cache`, que pertence ao usuário da imagem. Se o projeto tiver um
+caminho assim, ele também precisa de volume, ou a aplicação quebra em outro lugar.
+
+Vale saber, para pesar: **volume nomeado não tem esse problema** — o Docker copia
+a dona do caminho da imagem na primeira montagem, e por isso "funcionava antes".
+Ele também não é alcançado pela poda, que só apaga `releases/<id>`. O que o
+`shared/` compra sobre ele é o dado visível no host: backup por `tar`, inspeção
+direta, e imunidade à renomeação do projeto do Compose. É uma troca, não um
+upgrade — e o preço dela é exatamente esta seção.
+
 ### Sem `container_name`
 
 O `cloudez_compose_up` roda o Compose com `-p <domínio>`, para dois sites no
@@ -252,6 +306,7 @@ dev-ismos perigosos moram justamente nas listas:
 | `volumes: [".:/app"]` | **não** (ver abaixo) | `!reset` ou `!override` |
 | serviço só de dev (Adminer, Mailhog) | **não**, não há como remover | `profiles: ["dev"]` no serviço |
 | `- ./storage:/app/storage` | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
+| `USER` não-root no Dockerfile | não se aplica | `user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"` — ver passo 2 |
 
 Acrescentar `127.0.0.1:3000:3000` a um `3000:3000` que já existe deixa os **dois**
 publicados: conflito de porta, e a aplicação exposta por fora do nginx do mesmo
@@ -378,9 +433,12 @@ Diga ao usuário, nesta ordem:
    entendeu é uma configuração que sumiu de produção sem explicação;
 4. quais diretórios vão para `shared/`, e que o conteúdo versionado deles só é
    usado na PRIMEIRA vez — depois disso quem manda é o servidor;
-5. que a porta publicada e a `custom_port` do site precisam continuar iguais — se
+5. se você pôs `user:` na sobreposição, diga por quê em uma linha — sem isso o
+   container não escreveria no `shared/` — e que o uid efetivo vem em
+   `compose.host_uid` no retorno do deploy;
+6. que a porta publicada e a `custom_port` do site precisam continuar iguais — se
    você alterou uma delas aqui, diga qual e por quê;
-6. que o deploy é `/cloudez:deploy`, e que o passo de verificação vai dizer se a
+7. que o deploy é `/cloudez:deploy`, e que o passo de verificação vai dizer se a
    aplicação respondeu de verdade.
 
 Não rode o deploy por conta própria. Escrever o arquivo e publicar são decisões

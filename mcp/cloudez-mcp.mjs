@@ -27758,6 +27758,8 @@ done
 if docker compose version >/dev/null 2>&1; then DC='docker compose'
 elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
 else exit 4; fi
+CLOUDEZ_UID=$(id -u); CLOUDEZ_GID=$(id -g); export CLOUDEZ_UID CLOUDEZ_GID
+echo "HOST_UID $CLOUDEZ_UID:$CLOUDEZ_GID"
 ver=$($DC version --short 2>/dev/null | head -1 | tr -d ' ')
 ver=\${ver#v}
 echo "COMPOSE_VERSION \${ver:-desconhecida}"
@@ -27884,6 +27886,7 @@ function composeFiles(stdout) {
   const files = matchLine(stdout, "FILES");
   const ignored = matchLine(stdout, "OVERRIDE_IGNORED");
   const version2 = matchLine(stdout, "COMPOSE_VERSION");
+  const hostUid = matchLine(stdout, "HOST_UID");
   return {
     ...files ? { files: files.split(" ").filter(Boolean) } : {},
     ...ignored ? { override_ignored: ignored } : {},
@@ -27891,7 +27894,8 @@ function composeFiles(stdout) {
     // versão de Compose a frota tem?" — uma pergunta que, sem isto, exigiria
     // entrar em cada servidor, e que decide se a subtração da sobreposição
     // funciona.
-    ...version2 && version2 !== "desconhecida" ? { version: version2 } : {}
+    ...version2 && version2 !== "desconhecida" ? { version: version2 } : {},
+    ...hostUid ? { host_uid: hostUid } : {}
   };
 }
 function diagnose(out) {
