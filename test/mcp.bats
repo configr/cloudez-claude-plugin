@@ -196,3 +196,20 @@ ESTADO="mcp/cloudez-state.mjs"
   "
   [ "$status" -eq 0 ]
 }
+
+# O plugin e distribuido pelo que esta COMMITADO, e a suite roda contra a arvore
+# de TRABALHO. A diferenca entre as duas nao era verificada por nada.
+#
+# Foi assim que o bin/_ignore.mjs ficou de fora de um commit: `git commit -am`
+# estagia os modificados e nao os novos. A versao publicada saiu sem o modulo, e o
+# cloudez-sync morria no import antes de fazer qualquer coisa — com a suite verde.
+@test "todo import relativo aponta para arquivo rastreado pelo git" {
+  # Fora de um repositorio (plugin instalado) nao ha o que conferir.
+  git -C "$PLUGIN_ROOT" rev-parse --git-dir >/dev/null 2>&1 || skip "nao e um repositorio git"
+
+  run node "$PLUGIN_ROOT/test/helpers/imports.mjs" "$PLUGIN_ROOT"
+  [ "$status" -eq 0 ] || {
+    echo "$output"
+    false
+  }
+}
