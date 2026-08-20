@@ -119,12 +119,15 @@ Com o plugin ativo:
   (`cloudez_get_site`), então **exige autenticação** e começa pelo
   `/cloudez:login`. Domínio que não está na conta é erro, não config criada com
   aviso: um typo aceito aqui só apareceria no deploy, longe da causa;
-- `/cloudez:compose [diretório]` — escreve o `docker-compose.yml` da aplicação,
-  junto com o usuário. Não é geração por template: o comando lê o projeto,
-  pergunta o que ele não responde e propõe. As restrições do ambiente — a porta
-  publicada precisa bater com a `custom_port` do site (**3000** por padrão), o
-  dado que precisa sobreviver vai em volume nomeado —
-  entram sem negociação;
+- `/cloudez:compose [diretório]` — escreve o Compose da aplicação, junto com o
+  usuário. Não é geração por template: o comando lê o projeto, pergunta o que ele
+  não responde e propõe. As restrições do ambiente — a porta publicada precisa
+  bater com a `custom_port` do site (**3000** por padrão), o dado que precisa
+  sobreviver vai em volume nomeado — entram sem negociação.
+  **Se já existe um Compose no projeto, ele não é reescrito**: o arquivo é o de
+  desenvolvimento, é o que o usuário roda todo dia, e as diferenças de produção
+  vão para um `docker-compose.cloudez.yml` que só o servidor lê. Localmente
+  continua sendo `docker compose up`, sem argumento;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
   acionado quando você pedir em linguagem natural ("sobe o site", "publica em
