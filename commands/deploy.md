@@ -315,8 +315,14 @@ caso do primeiro deploy do site. Campo ausente, não string vazia.
 Este passo também grava o **manifesto da release** no servidor, em
 `<root>/.cloudez/deploys/<release_id>.json`: release, commit, hash do conteúdo e
 a hora do servidor. É o que responde "o que está no ar e de qual commit veio" a
-quem não tem o estado local — inclusive a outra pessoa da equipe. Não precisa ser
-mencionado no relato; existe para ser lido no servidor quando alguém precisar.
+quem não tem o estado local — inclusive a outra pessoa da equipe.
+
+O campo **`manifest`** do retorno traz o caminho gravado. Ele só aparece quando a
+escrita deu certo, então a **ausência dele é informação**: o deploy segue válido
+(a escrita é best-effort e não invalida uma release já ativada), mas aquele
+servidor ficou sem registro do que está rodando. **Mencione ao usuário quando
+faltar** — em silêncio, um manifesto que nunca foi gravado é indistinguível de um
+gravado, e ninguém descobre até precisar dele.
 
 ## 8. Subir o container
 

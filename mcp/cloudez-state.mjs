@@ -1,4 +1,4 @@
-// cloudez-mcp 0.2.5 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.6 — gerado por 'npm run bundle'. Nao edite.
 
 // src/deploy-state.ts
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";

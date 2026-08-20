@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.5 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.6 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27730,10 +27730,12 @@ if [ -n "$old" ]; then
 fi`;
   const pruneOut = await sshRun(ssh, prune);
   const pruned = matchLine(pruneOut.stdout, "PRUNED");
+  const manifesto = matchLine(pruneOut.stdout, "MANIFEST");
   state.status = "succeeded";
   if (previous) state.previous_release_id = previous;
   if (moved) state.replaced_directory = moved;
   if (pruned) state.pruned_replaced = Number(pruned);
+  if (manifesto) state.manifest = manifesto;
   return saveState(state);
 }
 function matchLine(out, tag) {
@@ -27800,10 +27802,9 @@ function manifestoRemoto(root, releaseId, dados) {
   const json = JSON.stringify({ ...dados, deployed_at: "@@CEZ_AGORA@@" });
   return `mkdir -p '${root}/.cloudez/deploys'
 cez_agora=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-cat <<'CEZ_MANIFESTO' | sed "s|@@CEZ_AGORA@@|$cez_agora|" > '${root}/.cloudez/deploys/${releaseId}.json'
+cat <<'CEZ_MANIFESTO' | sed "s|@@CEZ_AGORA@@|$cez_agora|" > '${root}/.cloudez/deploys/${releaseId}.json' && echo 'MANIFEST ${root}/.cloudez/deploys/${releaseId}.json'
 ${json}
 CEZ_MANIFESTO
-echo 'MANIFEST ${root}/.cloudez/deploys/${releaseId}.json'
 `;
 }
 function posixNorm(caminho) {
