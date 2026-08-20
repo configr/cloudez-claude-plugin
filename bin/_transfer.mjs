@@ -43,12 +43,19 @@ export function transferir(dep, localDir) {
   // literalmente, sem interpretar aspas. Suportado pelo bsdtar (Windows e macOS)
   // e pelo GNU tar.
   //
+  // A ORDEM não é estética: `-C` vem ANTES de `-T`, e inverter quebra em Linux.
+  // No GNU tar o `-C` é POSICIONAL — vale só para os caminhos que aparecem depois
+  // dele —, e como os nomes entram pelo `-T`, um `-C` no fim não os alcança: o tar
+  // procura cada arquivo no diretório errado e produz um pacote VAZIO, avisando
+  // apenas que "these options are positional". O bsdtar aceita as duas ordens, o
+  // que faz o defeito passar despercebido em macOS e explodir no servidor.
+  //
   // Efeito colateral registrado: diretório VAZIO deixa de ser enviado. O tar com
   // `.` os transportava; a lista só tem arquivos. O hash já os ignorava, então o
   // identificador não muda de semântica — e diretório que a aplicação precisa
   // costuma vir de `mkdir` dela ou do `shared/` do deploy.
   const { entries, ignore } = listarPayload(localDir)
-  const tarArgs = ["-czf", "-", "--null", "-T", "-", "-C", localDir]
+  const tarArgs = ["-czf", "-", "-C", localDir, "--null", "-T", "-"]
 
   const remoto = `tar xzf - -C ${aspasParaShellRemoto(dep.ssh.path)}`
   const sshArgs = [

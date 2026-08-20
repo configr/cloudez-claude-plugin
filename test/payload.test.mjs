@@ -80,7 +80,7 @@ test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS &&
   const lista = entries.map((e) => e.rel).join("\0") + "\0"
 
   // Mesma invocação do transfer, menos a compressão: aqui interessa a lista.
-  const pacote = tarReal(["-cf", "-", "--null", "-T", "-", "-C", dir], lista)
+  const pacote = tarReal(["-cf", "-", "-C", dir, "--null", "-T", "-"], lista)
   assert.equal(pacote.status, 0, `tar -c falhou: ${pacote.stderr}`)
 
   // A comparação é por EXTRAÇÃO, e não pela listagem do `tar -t`: o bsdtar

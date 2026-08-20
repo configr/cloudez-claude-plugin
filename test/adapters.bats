@@ -457,7 +457,7 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
         process.stdout.write(m.listarPayload("ctx").entries.map((e) => e.rel).join("\0") + "\0")
       })' "$PLUGIN_ROOT/bin/_payload.mjs"
   }
-  listagem=$(listar | real_tar -czf - --null -T - -C ctx | real_tar -tzf -)
+  listagem=$(listar | real_tar -czf - -C ctx --null -T - | real_tar -tzf -)
 
   # Sem prefixo `./`: os nomes vem da lista, relativos ao -C.
   [ "$(printf '%s\n' "$listagem" | grep -c '\.git/')" -eq 0 ]
@@ -482,7 +482,9 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   d=$(deploy_state dpl_test)
   mkdir -p dist/sub && touch dist/index.html dist/sub/a.js
   cloudez-sync "$d" dist >/dev/null
-  grep -qE 'tar .*-C dist$' "$MOCK_LOG"
+  # `-C` ANTES do `-T`: no GNU tar ele e posicional, e no fim nao alcanca os
+  # nomes que vem pela stdin — o pacote sai vazio.
+  grep -qE 'tar .*-C dist --null -T -' "$MOCK_LOG"
   grep -qE 'tar-stdin index.html sub/a.js|tar-stdin sub/a.js index.html' "$MOCK_LOG"
   ! grep -qE 'tar-stdin .*(^| )dist/' "$MOCK_LOG"
 }
