@@ -103,6 +103,25 @@ function cabecalho(tipo, rel, exe, tamanho) {
   return `${tipo} ${rel} ${exe} ${tamanho}\0`
 }
 
+/**
+ * Nomes que a lista enviada ao tar não sabe representar.
+ *
+ * A lista vai por stdin separada por QUEBRA DE LINHA, e não por NUL: o `--null`
+ * existe no bsdtar e no GNU tar, mas não no busybox — que é o tar de qualquer
+ * imagem Alpine, base comum de CI para projeto Node. Trocar o separador devolveu
+ * esse ambiente, ao custo de três caracteres:
+ *
+ *   - `\n` e `\r` partem a lista, e um nome viraria dois;
+ *   - a BARRA INVERTIDA é interpretada pelo GNU tar como escape quando os nomes
+ *     não vêm com `--null`. Medido: um arquivo `com\tbarra.txt` devolve
+ *     "Cannot stat: No such file or directory", porque o tar procurou por um nome
+ *     com TAB. Espaço e aspas passam ilesos — só estes três não.
+ *
+ * Recusar é a escolha, e não pular: um arquivo que não vai junto produziria uma
+ * release incompleta com identificador de aparência normal.
+ */
+const NOME_INTRANSPORTAVEL = /[\n\r\\]/
+
 /** Barra normal em qualquer plataforma — o `filepath.ToSlash` do Go. */
 function toSlash(p) {
   return sep === "/" ? p : p.split(sep).join("/")
@@ -126,6 +145,7 @@ export function listarPayload(localDir) {
   const ignore = carregarIgnore(localDir)
   const entries = []
   const podados = []
+  const impossiveis = []
 
   const caminhar = (dir, prefixo) => {
     for (const d of readdirSync(dir, { withFileTypes: true })) {
@@ -153,6 +173,7 @@ export function listarPayload(localDir) {
       }
 
       const st = lstatSync(path)
+      if (NOME_INTRANSPORTAVEL.test(rel)) impossiveis.push(rel)
       entries.push({ rel, path, mode: st.mode, symlink: st.isSymbolicLink() })
     }
   }
@@ -168,6 +189,20 @@ export function listarPayload(localDir) {
   // mesmo conteúdo hashear diferente entre este port e as releases já publicadas.
   entries.sort((a, b) => Buffer.compare(Buffer.from(a.rel, "utf8"), Buffer.from(b.rel, "utf8")))
   podados.sort()
+
+  // Recusa em vez de transportar errado. Ver NOME_INTRANSPORTAVEL: o tar não
+  // conseguiria encontrar estes arquivos, e o modo de falha silencioso é o pior
+  // possível — uma release publicada SEM eles, com identificador de aparência
+  // normal e sem erro em lugar nenhum.
+  if (impossiveis.length > 0) {
+    const erro = new Error(
+      `Nome de arquivo que o transporte não sabe carregar: ${impossiveis.sort().slice(0, 10).join(", ")}. ` +
+        "A lista de arquivos vai para o tar separada por quebra de linha, e ele interpreta a barra invertida " +
+        "como escape — um nome com \\n, \\r ou \\ não chega do outro lado. Renomeie os arquivos.",
+    )
+    erro.code = "filename_unsupported"
+    throw erro
+  }
 
   return {
     entries,

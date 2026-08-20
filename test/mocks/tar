@@ -11,7 +11,7 @@ printf 'tar-env COPYFILE_DISABLE=%s\n' "${COPYFILE_DISABLE:-}" >> "${MOCK_LOG:-/
 # mesmo conjunto que o hash percorre. Sem registrar aqui, nenhum teste consegue
 # afirmar sobre o que de fato seria empacotado.
 if [ ! -t 0 ]; then
-  printf 'tar-stdin %s\n' "$(tr '\0' ' ' | sed 's/ *$//')" >> "${MOCK_LOG:-/dev/null}"
+  printf 'tar-stdin %s\n' "$(tr '\n' ' ' | sed 's/ *$//')" >> "${MOCK_LOG:-/dev/null}"
 fi
 
 [ -n "${MOCK_TAR_STDERR:-}" ] && printf '%s\n' "$MOCK_TAR_STDERR" >&2

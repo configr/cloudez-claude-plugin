@@ -39,9 +39,11 @@ export function transferir(dep, localDir) {
   // Passando a lista, o conjunto é o MESMO objeto que o hash percorre — não há
   // duas regras para concordar.
   //
-  // `--null` porque nome de arquivo pode ter espaço, e com ele o tar lê os nomes
-  // literalmente, sem interpretar aspas. Suportado pelo bsdtar (Windows e macOS)
-  // e pelo GNU tar.
+  // Separador é a QUEBRA DE LINHA, não o NUL. O `--null` seria mais seguro para
+  // nome de arquivo esquisito, mas o busybox não o conhece — e busybox é o tar de
+  // qualquer imagem Alpine, base comum de CI para projeto Node. Os nomes que a
+  // quebra de linha não sabe carregar são RECUSADOS lá no `_payload.mjs`, em vez
+  // de transportados errado.
   //
   // A ORDEM não é estética: `-C` vem ANTES de `-T`, e inverter quebra em Linux.
   // No GNU tar o `-C` é POSICIONAL — vale só para os caminhos que aparecem depois
@@ -55,7 +57,7 @@ export function transferir(dep, localDir) {
   // identificador não muda de semântica — e diretório que a aplicação precisa
   // costuma vir de `mkdir` dela ou do `shared/` do deploy.
   const { entries, ignore } = listarPayload(localDir)
-  const tarArgs = ["-czf", "-", "-C", localDir, "--null", "-T", "-"]
+  const tarArgs = ["-czf", "-", "-C", localDir, "-T", "-"]
 
   const remoto = `tar xzf - -C ${aspasParaShellRemoto(dep.ssh.path)}`
   const sshArgs = [
@@ -86,7 +88,7 @@ export function transferir(dep, localDir) {
   // tar só começa a produzir saída depois de ler os nomes, e o pipe do sistema
   // absorve a lista — que é de nomes, não de conteúdo.
   tar.stdin.on("error", () => {}) // EPIPE quando o tar morre antes de ler tudo.
-  tar.stdin.end(entries.map((e) => e.rel).join("\0") + "\0")
+  tar.stdin.end(entries.map((e) => e.rel).join("\n") + "\n")
 
   // O `tar.stdout` entra como stdin do ssh: o Node duplica o descritor para o
   // filho, então os bytes vão do tar ao ssh sem passar por aqui.

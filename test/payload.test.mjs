@@ -77,10 +77,10 @@ test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS &&
   })
 
   const { entries } = listarPayload(dir)
-  const lista = entries.map((e) => e.rel).join("\0") + "\0"
+  const lista = entries.map((e) => e.rel).join("\n") + "\n"
 
   // Mesma invocação do transfer, menos a compressão: aqui interessa a lista.
-  const pacote = tarReal(["-cf", "-", "-C", dir, "--null", "-T", "-"], lista)
+  const pacote = tarReal(["-cf", "-", "-C", dir, "-T", "-"], lista)
   assert.equal(pacote.status, 0, `tar -c falhou: ${pacote.stderr}`)
 
   // A comparação é por EXTRAÇÃO, e não pela listagem do `tar -t`: o bsdtar
@@ -381,4 +381,53 @@ test("sem arquivo de padrão, o retorno não ganha campo", () => {
 test("padrão que exclui tudo deixa zero arquivos publicáveis", () => {
   const dir = escrever({ ".cloudezignore": "*\n", "a.js": "1", "b.js": "2" })
   assert.equal(listarPayload(dir).entries.length, 0)
+})
+
+// ── nomes que o transporte não sabe carregar ─────────────────────────────────
+//
+// A lista vai ao tar separada por QUEBRA DE LINHA, e não por NUL: o `--null`
+// existe no bsdtar e no GNU tar, mas não no busybox — que é o tar de qualquer
+// imagem Alpine, base comum de CI para projeto Node.
+//
+// O preço são três caracteres, e recusá-los é a escolha: um arquivo que não vai
+// junto produziria uma release incompleta com identificador de aparência normal.
+
+const recusa = (dir) => {
+  try {
+    listarPayload(dir)
+    return null
+  } catch (e) {
+    return e
+  }
+}
+
+test("barra invertida no nome é recusada", { skip: NO_WINDOWS && "nome com barra invertida não existe no Windows" }, () => {
+  // Medido no GNU tar: `com\tbarra.txt` numa lista sem --null vira uma busca por
+  // um nome com TAB, e devolve "Cannot stat".
+  const e = recusa(escrever({ "com\\tbarra.txt": "x", "ok.txt": "y" }))
+  assert.ok(e, "devia recusar")
+  assert.equal(e.code, "filename_unsupported")
+  assert.match(e.message, /com\\tbarra\.txt/)
+})
+
+test("quebra de linha no nome é recusada", { skip: NO_WINDOWS && "nome com \\n não existe no Windows" }, () => {
+  // Partiria a lista em dois nomes, e nenhum dos dois existe.
+  const e = recusa(escrever({ "duas\nlinhas.txt": "x" }))
+  assert.ok(e, "devia recusar")
+  assert.equal(e.code, "filename_unsupported")
+})
+
+// Só os três. Espaço e aspas atravessam a lista sem escape nenhum — conferido no
+// GNU tar —, e recusá-los seria barrar nome de arquivo perfeitamente comum.
+test("espaço e aspas no nome PASSAM", () => {
+  const dir = escrever({ "com espaço.txt": "x", 'com "aspas".txt': "y" })
+  assert.equal(recusa(dir), null)
+  assert.equal(listarPayload(dir).entries.length, 2)
+})
+
+// A recusa vem antes de qualquer byte viajar: quem falha é a listagem, não o tar.
+test("a recusa não depende de o tar existir", { skip: NO_WINDOWS && "idem" }, () => {
+  const e = recusa(escrever({ "x\\y.txt": "1" }))
+  assert.equal(e.code, "filename_unsupported")
+  assert.match(e.message, /Renomeie/)
 })

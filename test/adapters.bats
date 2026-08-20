@@ -397,7 +397,7 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   mkdir -p dist/.git && touch dist/index.html dist/.git/HEAD dist/.gitignore
   run cloudez-sync "$d" dist
   [ "$status" -eq 0 ]
-  grep -q -- '--null -T -' "$MOCK_LOG"
+  grep -q -- '-T -' "$MOCK_LOG"
   grep -q 'tar-stdin .*index.html' "$MOCK_LOG"
   grep -q 'tar-stdin .*\.gitignore' "$MOCK_LOG"
   ! grep -q 'tar-stdin .*\.git/HEAD' "$MOCK_LOG"
@@ -454,10 +454,10 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   listar() {
     node -e '
       import(process.argv[1]).then((m) => {
-        process.stdout.write(m.listarPayload("ctx").entries.map((e) => e.rel).join("\0") + "\0")
+        process.stdout.write(m.listarPayload("ctx").entries.map((e) => e.rel).join("\n") + "\n")
       })' "$PLUGIN_ROOT/bin/_payload.mjs"
   }
-  listagem=$(listar | real_tar -czf - -C ctx --null -T - | real_tar -tzf -)
+  listagem=$(listar | real_tar -czf - -C ctx -T - | real_tar -tzf -)
 
   # Sem prefixo `./`: os nomes vem da lista, relativos ao -C.
   [ "$(printf '%s\n' "$listagem" | grep -c '\.git/')" -eq 0 ]
@@ -484,7 +484,7 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   cloudez-sync "$d" dist >/dev/null
   # `-C` ANTES do `-T`: no GNU tar ele e posicional, e no fim nao alcanca os
   # nomes que vem pela stdin — o pacote sai vazio.
-  grep -qE 'tar .*-C dist --null -T -' "$MOCK_LOG"
+  grep -qE 'tar .*-C dist -T -' "$MOCK_LOG"
   grep -qE 'tar-stdin index.html sub/a.js|tar-stdin sub/a.js index.html' "$MOCK_LOG"
   ! grep -qE 'tar-stdin .*(^| )dist/' "$MOCK_LOG"
 }
@@ -589,3 +589,26 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
 # Ordem invertida nao e detalhe de estilo: o build le `current`, entao rodar
 # antes do finalize construiria a imagem a partir da release ANTERIOR, e o
 # deploy publicaria arquivos novos servindo codigo velho sem sinal disso.
+
+# A lista vai ao tar separada por quebra de linha (o busybox nao conhece --null),
+# e tres caracteres nao atravessam. Recusar e a escolha: um arquivo que nao vai
+# junto produziria uma release incompleta com identificador de aparencia normal.
+@test "sync recusa nome de arquivo que o transporte nao carrega" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/index.html "dist/com\\tbarra.txt"
+
+  run cloudez-sync "$d" dist
+  [ "$status" -ne 0 ]
+  [ "$(campo "$output" .error.code)" = "filename_unsupported" ]
+
+  # E nada foi enviado: a recusa acontece antes de o tar existir.
+  [ ! -f "$MOCK_LOG" ] || ! grep -q 'tar-stdin' "$MOCK_LOG"
+}
+
+@test "o --hash-only recusa pelo mesmo motivo, e nao como falha de leitura" {
+  mkdir -p dist && touch dist/index.html "dist/com\\tbarra.txt"
+
+  run cloudez-sync --hash-only dist
+  [ "$status" -ne 0 ]
+  [ "$(campo "$output" .error.code)" = "filename_unsupported" ]
+}

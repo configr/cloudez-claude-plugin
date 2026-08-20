@@ -88,6 +88,10 @@ function apenasHash(dir) {
   try {
     h = hashPayload(dir)
   } catch (e) {
+    // Nome que o transporte não sabe carregar é recusa própria, e não falha de
+    // leitura: o arquivo foi lido sem problema — ele é que não chegaria do outro
+    // lado. Dizer `hash_failed` mandaria procurar defeito de disco.
+    if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
     die("hash_failed", `Não foi possível ler '${dir}' por inteiro: ${e.message}`)
   }
 
@@ -124,7 +128,16 @@ async function sincronizar(deployId, dir) {
 
   conferirDiretorio(dir)
 
-  const { stats, logs, erro } = await transferir(dep, dir)
+  let resultado
+  try {
+    resultado = await transferir(dep, dir)
+  } catch (e) {
+    // A recusa por nome intransportável acontece ANTES de o tar existir, então
+    // nada foi enviado e o deploy fica exatamente onde estava.
+    if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
+    throw e
+  }
+  const { stats, logs, erro } = resultado
   if (erro) {
     // retryable porque a causa mais comum é rede ou chave recém-autorizada, e o
     // deploy fica exatamente onde estava: o estado só avança quando o transporte

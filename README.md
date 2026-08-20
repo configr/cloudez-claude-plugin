@@ -686,9 +686,21 @@ Sem isto, o contexto de build de um projeto Node viaja inteiro: 38 mil arquivos
 e 532 MB num site cujo fonte tem 0,3 MB, multiplicados pelas cinco releases que
 o servidor retém — e refeitos pelo `npm ci` da imagem de qualquer jeito.
 
-A lista resultante é a MESMA que o `cloudez-sync` entrega ao `tar` (por
-`--null -T -`) e que o `content_sha256` cobre. Não há duas regras para
+A lista resultante é a MESMA que o `cloudez-sync` entrega ao `tar` (por `-T -`,
+com os nomes pela stdin) e que o `content_sha256` cobre. Não há duas regras para
 divergirem, que era o risco de traduzir padrões de gitignore para `--exclude`.
+
+O separador é a quebra de linha, e não o NUL: `--null` seria mais seguro para nome
+de arquivo esquisito, mas o busybox não o conhece — e busybox é o tar de qualquer
+imagem Alpine, base comum de CI para projeto Node. O preço são três caracteres,
+que o sync **recusa** em vez de transportar errado: `\n` e `\r`, que partiriam a
+lista, e a **barra invertida**, que o GNU tar interpreta como escape quando os
+nomes não vêm com `--null`. Espaço e aspas passam ilesos.
+
+E a ordem dos argumentos importa: o `-C` vem **antes** do `-T`. No GNU tar ele é
+posicional, e no fim da linha não alcança os nomes que chegam pela stdin — o
+pacote sai vazio, com um aviso fácil de não ler. O bsdtar aceita as duas ordens,
+o que fez esse defeito passar despercebido em macOS e quebrar só no CI.
 
 Um efeito colateral registrado: **diretório vazio deixa de ser enviado**. O tar
 com `.` os transportava; a lista só tem arquivos. O hash já os ignorava, então o
