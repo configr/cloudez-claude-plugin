@@ -123,11 +123,13 @@ Com o plugin ativo:
   usuário. Não é geração por template: o comando lê o projeto, pergunta o que ele
   não responde e propõe. As restrições do ambiente — a porta publicada precisa
   bater com a `custom_port` do site (**3000** por padrão), o dado que precisa
-  sobreviver vai em volume nomeado — entram sem negociação.
+  sobreviver sai do diretório da release — entram sem negociação.
   **Se já existe um Compose no projeto, ele não é reescrito**: o arquivo é o de
   desenvolvimento, é o que o usuário roda todo dia, e as diferenças de produção
   vão para um `docker-compose.cloudez.yml` que só o servidor lê. Localmente
-  continua sendo `docker compose up`, sem argumento;
+  continua sendo `docker compose up`, sem argumento. É essa sobreposição que
+  também liga os diretórios de dado a `claude/shared/`, no modelo do Capistrano —
+  sem isso a poda de releases apagaria o que o container escreveu;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
   acionado quando você pedir em linguagem natural ("sobe o site", "publica em

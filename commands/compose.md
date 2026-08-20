@@ -145,25 +145,56 @@ segundo dá **502** e parece problema de rede.
 Muitos frameworks escutam em `localhost` por padrão em desenvolvimento. Confira,
 e ajuste no comando de start ou por variável de ambiente.
 
-### Dado que precisa sobreviver vai em volume nomeado
+### Dado que precisa sobreviver vai para `shared/`
 
 O deploy publica em `releases/<id>/` e aponta o symlink `current` para lá. **O
-diretório de cada release é apagado** — a retenção mantém as cinco últimas.
+diretório de cada release é apagado** — a retenção mantém as cinco últimas. O
+deploy que apaga não tem nada de errado, e é por isso que o dado perdido é tão
+caro de diagnosticar: ele some cinco deploys depois de ter sido escrito.
 
-Então:
+`shared/` é irmão de `releases/`, então a poda nunca o alcança:
+
+```
+claude/
+├── releases/20260820T…/     ← apagado na poda
+│   └── storage → ../../shared/storage
+├── current → releases/20260820T…/
+└── shared/
+    └── storage/             ← o dado mora aqui
+```
+
+Na prática, **bind relativo**:
 
 ```yaml
 volumes:
-  - dados:/var/lib/postgresql/data      # sobrevive ao deploy
-# - ./dados:/var/lib/postgresql/data    # SOME quando a release for podada
+  - ./storage:/app/storage      # o deploy liga isto a shared/storage
 ```
 
-Um bind mount relativo aponta para dentro da release atual. Ele funciona no
-primeiro deploy, e no sexto o diretório já não existe.
+O deploy lê a configuração **efetiva** (base + sobreposição, já mesclada), e todo
+bind relativo que sobreviver vira um diretório em `shared/`, com o caminho dentro
+da release trocado por um symlink — refeito a cada deploy. É o modelo do
+Capistrano.
 
-Pelo mesmo motivo, **não monte o código-fonte no container** (`- .:/app`). Além
-de apagar o que a imagem construiu, prende o container a um diretório que vai
-ser podado.
+Duas coisas nunca entram, e pelo mesmo motivo — são a aplicação, não o dado:
+
+- a **raiz da release** (`- .:/app`);
+- o **`build.context`** de qualquer serviço. Num monorepo a aplicação não está na
+  raiz, e `- ./api:/app` com contexto `./api` é a mesma situação uma pasta abaixo.
+  O que está *sob* o contexto continua entrando: `./api/uploads` é dado.
+
+Na primeira vez, o conteúdo que a release traz **semeia** o `shared/` — um
+projeto que versiona `storage/` com estrutura dentro não quebra. Dali em diante
+quem manda é o `shared/`, e o que a release trouxer é descartado. Tem de ser
+assim: se a release pudesse sobrescrever, todo deploy apagaria produção.
+
+**Isto só acontece com sobreposição presente.** É ela que liga o mecanismo. Se o
+projeto tem dado que precisa sobreviver e você está escrevendo o Compose do zero,
+escreva também a sobreposição — sem ela o bind relativo continua apontando para
+dentro da release, e a poda leva o dado.
+
+E **não monte o código-fonte no container** (`- .:/app`). Além de apagar o que a
+imagem construiu, é o caso que o deploy recusa a compartilhar — se ele fosse para
+`shared/`, todo deploy passaria a servir os arquivos do primeiro.
 
 Este é o dev-ismo mais comum de todos, e num arquivo que já existe ele quase
 sempre está lá — de propósito, porque localmente é exatamente o que se quer. Não
@@ -213,6 +244,7 @@ dev-ismos perigosos moram justamente nas listas:
 | `ports: ["3000:3000"]` | **não**, acumula | `ports: !override` com o mapeamento certo |
 | `volumes: [".:/app"]` | **não**, acumula | `!reset` ou `!override` — ver abaixo |
 | serviço só de dev (Adminer, Mailhog) | **não**, não há como remover | `profiles: ["dev"]` no serviço |
+| `- ./storage:/app/storage` | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
 
 Acrescentar `127.0.0.1:3000:3000` a um `3000:3000` que já existe deixa os **dois**
 publicados: conflito de porta, e a aplicação exposta por fora do nginx do mesmo
@@ -265,6 +297,27 @@ services:
     restart: unless-stopped
 ```
 
+### O que sobrevive ao deploy
+
+Os binds relativos que você **deixar** na configuração efetiva viram diretórios em
+`shared/` (passo 2). Isso muda o que a sobreposição precisa fazer com `volumes`:
+ela não remove tudo, remove o que é *fonte* e preserva o que é *dado*.
+
+```yaml
+services:
+  app:
+    volumes: !override
+      - ./storage:/app/storage     # fica: vira shared/storage
+      # o `- .:/app` do arquivo do usuário não é repetido, e some
+```
+
+Um `!reset null` seco em `volumes` também apaga o bind de dado — use quando não
+houver nenhum a preservar.
+
+Depois do deploy, `compose.shared` diz o que foi ligado e `compose.shared_created`
+o que nasceu ali. Um diretório reaparecendo em `shared_created` num deploy que não
+é o primeiro significa que alguém apagou o de `shared/`.
+
 ### A versão do Compose no servidor
 
 `!reset` e `!override` exigem Docker Compose **2.24+**. Num servidor mais velho o
@@ -302,9 +355,11 @@ Diga ao usuário, nesta ordem:
    alterado — é a garantia de que o `docker compose up` local continua igual;
 3. o que a sobreposição **remove**, item a item. Um `!reset` que o usuário não
    entendeu é uma configuração que sumiu de produção sem explicação;
-4. que a porta publicada e a `custom_port` do site precisam continuar iguais — se
+4. quais diretórios vão para `shared/`, e que o conteúdo versionado deles só é
+   usado na PRIMEIRA vez — depois disso quem manda é o servidor;
+5. que a porta publicada e a `custom_port` do site precisam continuar iguais — se
    você alterou uma delas aqui, diga qual e por quê;
-5. que o deploy é `/cloudez:deploy`, e que o passo de verificação vai dizer se a
+6. que o deploy é `/cloudez:deploy`, e que o passo de verificação vai dizer se a
    aplicação respondeu de verdade.
 
 Não rode o deploy por conta própria. Escrever o arquivo e publicar são decisões

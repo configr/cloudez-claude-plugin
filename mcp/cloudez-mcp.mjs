@@ -27781,6 +27781,102 @@ if [ -n "$overlay" ]; then
 fi
 `;
 }
+function posixNorm(caminho) {
+  const partes = [];
+  for (const seg of caminho.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") partes.pop();
+    else partes.push(seg);
+  }
+  return (caminho.startsWith("/") ? "/" : "") + partes.join("/");
+}
+function dentroDe(base, alvo) {
+  if (alvo === base) return void 0;
+  const prefixo = base.endsWith("/") ? base : `${base}/`;
+  if (!alvo.startsWith(prefixo)) return void 0;
+  return alvo.slice(prefixo.length) || void 0;
+}
+var NOME_OK = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+function sharedDirsFromConfig(config2, releaseDirs) {
+  const services = config2?.services;
+  if (!services || typeof services !== "object") return { dirs: [], recusados: [] };
+  const bases = (Array.isArray(releaseDirs) ? releaseDirs : [releaseDirs]).filter(Boolean).map(posixNorm);
+  const contextos = /* @__PURE__ */ new Set();
+  const fontes = /* @__PURE__ */ new Set();
+  for (const corpo of Object.values(services)) {
+    const svc = corpo;
+    const ctx = svc?.build?.context;
+    if (typeof ctx === "string") contextos.add(posixNorm(ctx));
+    if (!Array.isArray(svc?.volumes)) continue;
+    for (const item of svc.volumes) {
+      const v = item;
+      if (v?.type !== "bind" || typeof v.source !== "string") continue;
+      fontes.add(posixNorm(v.source));
+    }
+  }
+  const dirs = [];
+  const recusados = [];
+  for (const fonte of [...fontes].sort()) {
+    if (contextos.has(fonte)) continue;
+    const rel = bases.map((b) => dentroDe(b, fonte)).find(Boolean);
+    if (!rel) continue;
+    if (NOME_OK.test(rel)) dirs.push(rel);
+    else recusados.push(rel);
+  }
+  return { dirs, recusados };
+}
+function linkSharedScript(root, dirs) {
+  let sh = "";
+  for (const nome of dirs) {
+    const S = `'${root}/shared/${nome}'`;
+    const R = `'${nome}'`;
+    sh += `if [ ! -e ${S} ]; then
+  mkdir -p "$(dirname ${S})"
+  if [ -d ${R} ] && [ ! -L ${R} ]; then cp -a ${R} ${S}; echo "SEEDED ${nome}"; else mkdir -p ${S}; fi
+  echo "SHARED_CREATED ${nome}"
+fi
+rm -rf ${R}
+mkdir -p "$(dirname ${R})"
+ln -s ${S} ${R}
+echo "SHARED ${nome}"
+`;
+  }
+  return sh;
+}
+function matchLines(out, tag) {
+  return out.split("\n").filter((l) => l.startsWith(`${tag} `)).map((l) => l.slice(tag.length + 1).trim());
+}
+function planSharedDirs(stdout, releaseId) {
+  if (matchLine(stdout, "FILES") === "") return { dirs: [], absRoot: "" };
+  const releaseDir = matchLine(stdout, "RELEASE_DIR");
+  const releaseDirP = matchLine(stdout, "RELEASE_DIR_P") || releaseDir;
+  const inicio = stdout.split("\n").findIndex((l) => l.startsWith("{"));
+  const json = inicio >= 0 ? stdout.split("\n").slice(inicio).join("\n") : "";
+  let plano;
+  try {
+    plano = sharedDirsFromConfig(JSON.parse(json), [releaseDir, releaseDirP]);
+  } catch (err) {
+    throw new ToolError("compose_failed", `N\xE3o foi poss\xEDvel ler a configura\xE7\xE3o efetiva da release ${releaseId}.`, {
+      hint: `Sem ela n\xE3o h\xE1 como saber quais diret\xF3rios precisam sobreviver ao deploy, e seguir escreveria o dado dentro da release, que a poda apaga. Erro: ${err instanceof Error ? err.message : String(err)}`
+    });
+  }
+  const absRoot = releaseDirP.replace(/\/releases\/[^/]+$/, "");
+  if (plano.dirs.length > 0 && (absRoot === releaseDirP || !absRoot)) {
+    throw new ToolError("compose_failed", `N\xE3o foi poss\xEDvel localizar o 'shared/' a partir de '${releaseDirP}'.`, {
+      hint: "O diret\xF3rio da release deveria terminar em '/releases/<id>'. Confira o `root` no .cloudez.yaml."
+    });
+  }
+  if (plano.recusados.length > 0) {
+    throw new ToolError(
+      "shared_dir_unsafe",
+      `Diret\xF3rio com nome que o deploy n\xE3o sabe compartilhar: ${plano.recusados.join(", ")}.`,
+      {
+        hint: "S\xE3o aceitos letras, n\xFAmeros, ponto, h\xEDfen, sublinhado e barra. O nome entra num comando remoto, e recusar \xE9 mais seguro do que citar. Renomeie o diret\xF3rio \u2014 deix\xE1-lo de fora faria o dado ser apagado pela poda de releases, sem erro nenhum no deploy."
+      }
+    );
+  }
+  return { dirs: plano.dirs, absRoot };
+}
 function composeFiles(stdout) {
   const files = matchLine(stdout, "FILES");
   const ignored = matchLine(stdout, "OVERRIDE_IGNORED");
@@ -27878,9 +27974,27 @@ async function composeUp(deployId2) {
   const ssh = state.ssh;
   const { root, release_id: releaseId } = state;
   const project = resolveProject(state);
+  const cfg = await sshRun(
+    ssh,
+    composePrelude(`${root}/current`) + `if [ -n "$overlay" ]; then
+  echo "RELEASE_DIR $(pwd)"
+  echo "RELEASE_DIR_P $(pwd -P)"
+  $DC $FILES -p '${project}' config --format json
+fi
+`
+  );
+  if (cfg.code !== 0) {
+    throwPreludeError(cfg.code, releaseId, cfg.stdout);
+    throw new ToolError("compose_failed", `A configura\xE7\xE3o da release ${releaseId} n\xE3o p\xF4de ser lida.`, {
+      hint: diagnose(`${cfg.stdout}
+${cfg.stderr}`) ?? (`${cfg.stdout}
+${cfg.stderr}`.trim() || void 0)
+    });
+  }
+  const plano = planSharedDirs(cfg.stdout, releaseId);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + `before=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+  const up = composePrelude(`${root}/current`) + linkSharedScript(plano.absRoot, plano.dirs) + `before=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
 $DC $FILES -p '${project}' up -d${buildFlag} --remove-orphans
 after=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
 if [ "$before" = "$after" ]; then echo 'RECREATED no'; else echo 'RECREATED yes'; fi
@@ -27896,10 +28010,18 @@ ${res.stderr}`;
   }
   const containers = res.stdout.split("\n").map((line) => line.split("	")).filter((f) => f[0] === "PS" && f.length === 4).map((f) => ({ name: f[1], state: f[2], ports: f[3] }));
   const recreated = matchLine(res.stdout, "RECREATED");
+  const shared = matchLines(res.stdout, "SHARED");
+  const criados = matchLines(res.stdout, "SHARED_CREATED");
   state.compose = {
     project,
     built,
     ...composeFiles(res.stdout),
+    ...shared.length > 0 ? { shared } : {},
+    // Separado dos demais porque é o único deploy em que aquele diretório nasceu.
+    // Depois disto ele é dado do usuário, e um `shared_created` reaparecendo
+    // significa que alguém apagou o de `shared/` — o que o retorno precisa deixar
+    // ver, e não normalizar.
+    ...criados.length > 0 ? { shared_created: criados } : {},
     ...recreated ? { recreated: recreated === "yes" } : {},
     containers
   };
@@ -28426,7 +28548,7 @@ server.registerTool(
   "cloudez_compose_up",
   {
     title: "Subir o container da release ativa",
-    description: "Sobe o container da release ativa com `docker compose up -d` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy. Se o Usa os MESMOS arquivos do build (base + docker-compose.cloudez.yml, quando existe), e devolve em `compose.files` quais foram; `compose.override_ignored` avisa que um `*.override.*` do reposit\xF3rio deixou de ser mesclado. cloudez_compose_build j\xE1 rodou, sobe a imagem pronta; se n\xE3o, reconstr\xF3i com `--build` (mais lento, e o site fica em estado misto durante o build). Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
+    description: "Sobe o container da release ativa com `docker compose up -d` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy. Se o Usa os MESMOS arquivos do build (base + docker-compose.cloudez.yml, quando existe), e devolve em `compose.files` quais foram; `compose.override_ignored` avisa que um `*.override.*` do reposit\xF3rio deixou de ser mesclado. Havendo sobreposi\xE7\xE3o, tamb\xE9m LIGA a `shared/` todo bind relativo que sobreviver ao merge \u2014 menos a raiz da release e o `build.context`, que s\xE3o a aplica\xE7\xE3o e n\xE3o dado. \xC9 o que faz o dado escapar da poda de releases; vem em `compose.shared`, e `compose.shared_created` diz o que nasceu neste deploy. cloudez_compose_build j\xE1 rodou, sobe a imagem pronta; se n\xE3o, reconstr\xF3i com `--build` (mais lento, e o site fica em estado misto durante o build). Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
     inputSchema: object({
       deploy_id: string2().describe("deploy_id de uma release j\xE1 finalizada (status succeeded)")
     }),
