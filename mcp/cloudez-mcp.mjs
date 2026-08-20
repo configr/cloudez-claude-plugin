@@ -27544,9 +27544,13 @@ function sshRun(target, command) {
 // src/deploy-state.ts
 import { createHash as createHash2 } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join as join2 } from "node:path";
 function stateDir() {
-  return process.env.CLOUDEZ_STATE_DIR || ".cloudez/state";
+  return process.env.CLOUDEZ_STATE_DIR || join2(homedir(), ".cloudez", "state");
+}
+function stateDirLegado() {
+  return ".cloudez/state";
 }
 function statePath(deployId2) {
   return join2(stateDir(), `${deployId2}.json`);
@@ -27571,11 +27575,13 @@ function deployId(releaseId, idempotencyKey) {
   return `dpl_${hash.slice(0, 8)}`;
 }
 function loadState(deployId2) {
-  try {
-    return JSON.parse(readFileSync(statePath(deployId2), "utf8"));
-  } catch {
-    throw new ToolError("deploy_not_found", `deploy_id '${deployId2}' desconhecido. Chame cloudez_begin_deploy primeiro.`);
+  for (const dir of [stateDir(), stateDirLegado()]) {
+    try {
+      return JSON.parse(readFileSync(join2(dir, `${deployId2}.json`), "utf8"));
+    } catch {
+    }
   }
+  throw new ToolError("deploy_not_found", `deploy_id '${deployId2}' desconhecido. Chame cloudez_begin_deploy primeiro.`);
 }
 function saveState(state) {
   const file = statePath(state.deploy_id);
@@ -27709,7 +27715,14 @@ mv -Tf '${root}/.current.tmp.$$' '${root}/current'`;
     });
   }
   const moved = matchLine(act.stdout, "MOVED");
-  const prune = `ls -1dt '${root}/releases/'*/ 2>/dev/null | tail -n +${KEEP_RELEASES + 1} | xargs -r rm -rf
+  const prune = manifestoRemoto(root, releaseId, {
+    release_id: releaseId,
+    domain: state.domain,
+    environment: state.environment,
+    ref: state.ref,
+    content_sha256: state.content_sha256,
+    ...previous ? { previous_release_id: previous } : {}
+  }) + `ls -1dt '${root}/releases/'*/ 2>/dev/null | tail -n +${KEEP_RELEASES + 1} | xargs -r rm -rf
 old=$(ls -1dt '${root}/.current-'*/ 2>/dev/null | tail -n +${KEEP_REPLACED + 1})
 if [ -n "$old" ]; then
   printf '%s\\n' "$old" | xargs -r rm -rf
@@ -27781,6 +27794,16 @@ if [ -n "$overlay" ]; then
     fi
   fi
 fi
+`;
+}
+function manifestoRemoto(root, releaseId, dados) {
+  const json = JSON.stringify({ ...dados, deployed_at: "@@CEZ_AGORA@@" });
+  return `mkdir -p '${root}/.cloudez/deploys'
+cez_agora=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat <<'CEZ_MANIFESTO' | sed "s|@@CEZ_AGORA@@|$cez_agora|" > '${root}/.cloudez/deploys/${releaseId}.json'
+${json}
+CEZ_MANIFESTO
+echo 'MANIFEST ${root}/.cloudez/deploys/${releaseId}.json'
 `;
 }
 function posixNorm(caminho) {

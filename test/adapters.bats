@@ -389,12 +389,48 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
 # O diretorio publicado deixou de ser sempre um build: numa aplicacao em
 # container o que se envia e o CONTEXTO, que costuma ser a raiz do repositorio.
 # Sem exclusao, todo deploy levaria o historico inteiro do git pela rede.
+#
+# A exclusao deixou de morar num --exclude do tar: a LISTA vai por stdin, e e a
+# mesma que o hash percorre. Nao ha duas regras para concordar.
 @test "sync exclui o .git do que empacota" {
   d=$(deploy_state dpl_test)
-  mkdir -p dist && touch dist/index.html
+  mkdir -p dist/.git && touch dist/index.html dist/.git/HEAD dist/.gitignore
   run cloudez-sync "$d" dist
   [ "$status" -eq 0 ]
-  grep -q -- '--exclude .git' "$MOCK_LOG"
+  grep -q -- '--null -T -' "$MOCK_LOG"
+  grep -q 'tar-stdin .*index.html' "$MOCK_LOG"
+  grep -q 'tar-stdin .*\.gitignore' "$MOCK_LOG"
+  ! grep -q 'tar-stdin .*\.git/HEAD' "$MOCK_LOG"
+}
+
+# O que motivou o .gitignore: o contexto de build de um projeto Node carrega
+# node_modules e a saida do build, refeitos no servidor de qualquer jeito.
+@test "sync respeita o .gitignore e o .cloudezignore" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist/node_modules/x dist/tmp
+  touch dist/index.html dist/node_modules/x/a.js dist/tmp/b
+  printf 'node_modules\n' > dist/.gitignore
+  printf 'tmp/\n' > dist/.cloudezignore
+
+  run cloudez-sync "$d" dist
+  [ "$status" -eq 0 ]
+  grep -q 'tar-stdin .*index.html' "$MOCK_LOG"
+  ! grep -q 'tar-stdin .*node_modules' "$MOCK_LOG"
+  ! grep -q 'tar-stdin .*tmp/b' "$MOCK_LOG"
+}
+
+# O .dockerignore descreve o que nao entra no contexto enviado ao daemon, e ali e
+# CORRETO excluir o Dockerfile e o compose. O deploy publica o diretorio para
+# construir depois, no servidor: respeita-lo faria todo site em container falhar.
+@test "REGRESSAO: sync NAO le o .dockerignore" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/Dockerfile dist/docker-compose.yml
+  printf 'Dockerfile\ndocker-compose.yml\n' > dist/.dockerignore
+
+  run cloudez-sync "$d" dist
+  [ "$status" -eq 0 ]
+  grep -q 'tar-stdin .*Dockerfile' "$MOCK_LOG"
+  grep -q 'tar-stdin .*docker-compose.yml' "$MOCK_LOG"
 }
 
 # Este roda o tar DE VERDADE, nao o mock. O comportamento de --exclude difere
@@ -411,13 +447,25 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   # PATH reduzido: `tar` no PATH da suite e o MOCK, que nao empacota nada. Sem
   # isto o teste passa vazio, afirmando sobre uma listagem que nunca existiu.
   real_tar() { PATH=/usr/bin:/bin tar "$@"; }
-  listagem=$(real_tar -czf - --exclude .git -C ctx . | real_tar -tzf -)
 
-  [ "$(printf '%s\n' "$listagem" | grep -c '/\.git/')" -eq 0 ]
-  printf '%s\n' "$listagem" | grep -q '\./\.gitignore'
-  printf '%s\n' "$listagem" | grep -q '\./\.github/'
-  printf '%s\n' "$listagem" | grep -q '\./Dockerfile'
-  printf '%s\n' "$listagem" | grep -q '\./compose\.yaml'
+  # A lista vem do modulo de payload, que e a fonte que o transfer usa. Ela vai
+  # por PIPE e nao por variavel: `$( )` do bash descarta bytes NUL, que sao
+  # justamente o separador.
+  listar() {
+    node -e '
+      import(process.argv[1]).then((m) => {
+        process.stdout.write(m.listarPayload("ctx").entries.map((e) => e.rel).join("\0") + "\0")
+      })' "$PLUGIN_ROOT/bin/_payload.mjs"
+  }
+  listagem=$(listar | real_tar -czf - --null -T - -C ctx | real_tar -tzf -)
+
+  # Sem prefixo `./`: os nomes vem da lista, relativos ao -C.
+  [ "$(printf '%s\n' "$listagem" | grep -c '\.git/')" -eq 0 ]
+  printf '%s\n' "$listagem" | grep -qx '\.gitignore'
+  printf '%s\n' "$listagem" | grep -q '^\.github/'
+  printf '%s\n' "$listagem" | grep -qx 'Dockerfile'
+  printf '%s\n' "$listagem" | grep -qx 'compose\.yaml'
+  printf '%s\n' "$listagem" | grep -qx 'src/app\.js'
 }
 
 @test "sync desliga os metadados AppleDouble do macOS" {
@@ -428,11 +476,15 @@ real_tar() { PATH=/usr/bin:/bin tar "$@"; }
   grep -q 'tar-env COPYFILE_DISABLE=1' "$MOCK_LOG"
 }
 
+# `-C dist` com nomes RELATIVOS envia o conteudo, nao o diretorio: sem isso o
+# site sobe aninhado um nivel. E o mesmo motivo da barra final no rsync.
 @test "sync envia o CONTEUDO do diretorio, nao o diretorio" {
   d=$(deploy_state dpl_test)
-  mkdir -p dist && touch dist/index.html
+  mkdir -p dist/sub && touch dist/index.html dist/sub/a.js
   cloudez-sync "$d" dist >/dev/null
-  grep -qE 'tar .*-C dist \.$' "$MOCK_LOG"
+  grep -qE 'tar .*-C dist$' "$MOCK_LOG"
+  grep -qE 'tar-stdin index.html sub/a.js|tar-stdin sub/a.js index.html' "$MOCK_LOG"
+  ! grep -qE 'tar-stdin .*(^| )dist/' "$MOCK_LOG"
 }
 
 @test "sync propaga falha do transporte" {

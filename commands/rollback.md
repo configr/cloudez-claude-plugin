@@ -103,7 +103,7 @@ observado: `status: rolled_back` com o `to_release_id` correto, e o site
 inalterado.
 
 Você precisa do `deploy_id` da release de destino. Ele está no estado local:
-procure em `.cloudez/state/*.json` o arquivo cujo `release_id` seja o alvo.
+procure em `~/.cloudez/state/*.json` o arquivo cujo `release_id` seja o alvo.
 
 ```
 cloudez_compose_build(deploy_id: "<deploy_id do alvo>")

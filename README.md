@@ -184,7 +184,7 @@ ativo.
       domínio, contrato §3.12)
 - [x] Tools de ciclo de vida no MCP, 1ª leva: `cloudez_begin_deploy`,
       `cloudez_finalize_deploy`, `cloudez_compose_up` (SSH via child_process,
-      estado compartilhado com o `cloudez-sync` pelo arquivo `.cloudez/state/`)
+      estado compartilhado com o `cloudez-sync` pelo arquivo `~/.cloudez/state/`)
 - [x] Tools de ciclo de vida no MCP, 2ª leva: `cloudez_list_releases` e
       `cloudez_rollback` — todo o control plane agora é MCP; em `bin/` só resta o
       transporte `cloudez-sync`. Suíte do MCP em 113 testes (ssh e API falsos)
@@ -203,7 +203,7 @@ ativo.
       `cloudez_health_check`
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
-      `compose_up` são chaveados por `deploy_id` (estado em `.cloudez/state/`).
+      `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).
       Voltar de outra máquina, ou depois da poda de 7 dias, deixa a release
       alcançável e a imagem não — hoje o contorno é refazer o deploy no commit
       correspondente. Chavear as duas por release resolveria
@@ -585,9 +585,59 @@ ssh, que é o que `~/` significa. Caminho absoluto continua absoluto.
 **Não há bloco `ssh` na config.** Host e usuário vêm da conta do usuário, pelo
 `cloudez_get_site` (`cloud.fqdn` e `user.username`), a cada deploy. Quem os
 resolve é o `cloudez_begin_deploy`, **uma vez**, e os grava no estado do deploy em
-`.cloudez/state/` — é de lá que o `cloudez-sync`, o `finalize` e o `compose_up` os
-leem. Resolver a cada passo abriria a porta para o envio ir a um servidor e a
+`~/.cloudez/state/` — é de lá que o `cloudez-sync`, o `finalize` e o `compose_up`
+os leem. Resolver a cada passo abriria a porta para o envio ir a um servidor e a
 ativação a outro.
+
+O caminho é **absoluto**, e isso é correção de defeito. Era `.cloudez/state/`,
+relativo, e o arquivo tem dois escritores que resolviam esse relativo contra
+diretórios diferentes: o servidor MCP contra o diretório da sessão, o
+`cloudez-sync` contra o diretório de onde foi chamado. Enquanto coincidiam
+funcionava; quando não, o `begin_deploy` gravava num lugar e o sync procurava
+noutro, e o deploy morria com `deploy_not_found` sem nada de errado com ele. O
+home já era a casa do plugin — o token mora em `~/.cloudez/token` desde sempre.
+
+A leitura ainda cai no `.cloudez/state/` do diretório atual quando não acha no
+home, para um deploy em andamento no momento do upgrade não ficar órfão. A
+escrita é sempre no home. `CLOUDEZ_STATE_DIR` continua sobrepondo os dois, e é o
+que a suíte usa para isolar.
+
+**Não se guarda o estado no servidor**, e a razão é onde ele é LIDO: o
+`cloudez-sync` lê dali o destino ssh para então conectar, e um estado no servidor
+precisaria do destino para ser lido — que é o dado que ele contém. Além disso o
+sync deixaria de funcionar sem token, já que resolver o destino de novo passa
+pela API.
+
+### O manifesto da release, no servidor
+
+O que o servidor ganha, em vez do estado, é um manifesto por release em
+`<root>/.cloudez/deploys/<release_id>.json`, escrito pelo `finalize`:
+
+```json
+{
+  "release_id": "20260820T182630Z-g2c4bc8a",
+  "domain": "claudetestdocker.cloudez.io",
+  "environment": "docker",
+  "ref": "2c4bc8a94dda089632dd57b2d41da05f454daec9",
+  "content_sha256": "10ebd7ad…",
+  "previous_release_id": "20260820T181556Z-g7751486",
+  "deployed_at": "2026-08-20T18:26:41Z"
+}
+```
+
+Ele responde "o que está no ar e de qual commit veio" sem depender da máquina de
+quem publicou — antes disso, quem não tivesse o estado local dependia do nome do
+diretório da release.
+
+Mora em `<root>/.cloudez/`, e não dentro da release, por duas razões: a poda
+apaga `releases/<id>` e levaria o histórico junto, e escrever dentro da release
+sujaria a árvore publicada depois de o `content_sha256` já a ter descrito. O
+caminho fica acima do `app_root_path` (`claude/current`), então o nginx não o
+serve.
+
+A hora vem do `date` do **servidor**: o relógio de quem publica pode estar em
+qualquer lugar, e o manifesto é lido de lá. Escrevê-lo é best-effort, como a
+poda — falhar aqui não invalida um deploy que já ativou.
 
 Houve uma fase em que o modelo repassava esses valores aos adaptadores por
 ambiente, em `CLOUDEZ_SSH_HOST`, `CLOUDEZ_SSH_USER` e `CLOUDEZ_SSH_PORT`. Essas
@@ -598,6 +648,51 @@ Uma cópia do host num arquivo versionado envelhece: se a Cloudez mover o site d
 servidor, o valor escrito continua apontando para o antigo e o deploy vai para o
 lugar errado sem reclamar. Buscar a cada vez custa uma chamada e elimina a
 classe inteira de erro.
+
+### O que o deploy NÃO publica
+
+O `cloudez-sync` sempre exclui o `.git`. Além dele, lê dois arquivos de padrão na
+raiz do diretório publicado:
+
+| Arquivo | Para quê |
+|---|---|
+| `.gitignore` | O que o projeto já ignora — `node_modules`, `dist`, `.next` |
+| `.cloudezignore` | O que só o deploy precisa excluir, ou reincluir |
+
+Os padrões são avaliados na ordem acima e **o último que casa decide**, como no
+git. Como o `.cloudezignore` é lido por último, um `!` nele reabilita o que o
+`.gitignore` excluiu — que é o caso do artefato ignorado pelo git mas necessário
+em produção:
+
+```gitignore
+# .cloudezignore
+!dist            # o build vai ao ar, ainda que o git o ignore
+relatorios/      # isto nunca precisou sair da minha máquina
+```
+
+A sintaxe é a do `.gitignore`: comentário com `#`, negação com `!`, âncora com
+`/` no início ou no meio, diretório com `/` no fim, e os curingas `*`, `?` e
+`**`. **Só os arquivos da raiz** do diretório publicado são lidos — um
+`app/.gitignore` não vale aqui, diferente do git.
+
+**O `.dockerignore` não é lido**, e é decisão, não esquecimento: ele descreve o
+que não entra no contexto enviado ao daemon, e ali é correto excluir o
+`Dockerfile` e o `docker-compose.yml`, porque o Docker os recebe por outro
+caminho. O deploy publica esse diretório para construir **depois**, no servidor —
+respeitá-lo faria todo site em container falhar com `compose_missing`. Quem
+quiser aquelas regras aqui copia o que serve para o `.cloudezignore`.
+
+Sem isto, o contexto de build de um projeto Node viaja inteiro: 38 mil arquivos
+e 532 MB num site cujo fonte tem 0,3 MB, multiplicados pelas cinco releases que
+o servidor retém — e refeitos pelo `npm ci` da imagem de qualquer jeito.
+
+A lista resultante é a MESMA que o `cloudez-sync` entrega ao `tar` (por
+`--null -T -`) e que o `content_sha256` cobre. Não há duas regras para
+divergirem, que era o risco de traduzir padrões de gitignore para `--exclude`.
+
+Um efeito colateral registrado: **diretório vazio deixa de ser enviado**. O tar
+com `.` os transportava; a lista só tem arquivos. O hash já os ignorava, então o
+identificador não muda de semântica.
 
 Um bloco `ssh` presente na config ainda é aceito como fallback, para arquivos
 escritos antes desta mudança não pararem de funcionar.

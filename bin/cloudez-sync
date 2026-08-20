@@ -91,11 +91,19 @@ function apenasHash(dir) {
     die("hash_failed", `Não foi possível ler '${dir}' por inteiro: ${e.message}`)
   }
 
-  // Um diretório cujo único conteúdo é `.git` passa pelo conferirDiretorio (não
-  // está vazio) e chega aqui sem nenhum arquivo publicável. Enviar isso criaria
-  // uma release vazia com identificador de aparência normal.
+  // Um diretório sem nada publicável passa pelo conferirDiretorio (não está
+  // vazio) e chega aqui com zero arquivos. Enviar isso criaria uma release vazia
+  // com identificador de aparência normal.
+  //
+  // A causa mudou de uma para duas quando o sync passou a ler `.gitignore` e
+  // `.cloudezignore`: pode ser um diretório só com `.git`, ou um padrão amplo
+  // demais. Dizer qual das duas é o que evita procurar no lugar errado.
   if (h.files === 0) {
-    die("build_output_empty", `Diretório '${dir}' não tem nenhum arquivo publicável (só \`.git\`, que o deploy exclui).`)
+    const fontes = h.ignored?.sources ?? []
+    const porque = fontes.length > 0
+      ? `os padrões de ${fontes.join(" e ")} excluíram tudo`
+      : "só há `.git`, que o deploy sempre exclui"
+    die("build_output_empty", `Diretório '${dir}' não tem nenhum arquivo publicável: ${porque}.`)
   }
 
   ok(h)

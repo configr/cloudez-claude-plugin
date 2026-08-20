@@ -162,17 +162,39 @@ Devolve `content_sha256`, `files` e `bytes`. **Guarde o `content_sha256`** — �
 que identifica a release, com ou sem git.
 
 Roda sobre o diretório do passo 2, depois do build e antes de qualquer coisa
-tocar a rede. Não envia nada; só lê. Cobre exatamente o conjunto de arquivos que
-o `cloudez-sync` vai transmitir, incluindo a exclusão do `.git`.
+tocar a rede. Não envia nada; só lê. Cobre **exatamente** o conjunto que o
+`cloudez-sync` transmite: o transporte recebe esta mesma lista, então não há duas
+regras para divergirem.
 
-**Erro `build_output_empty` dizendo que só há `.git`** — o diretório escolhido
-não tem nada publicável. Quase sempre é o passo 2 tendo apontado para a raiz de
-um repositório sem build em vez do diretório de saída. Volte ao passo 2.
+### O que fica de fora
 
-Se `files` ou `bytes` vierem absurdos para o projeto (dezenas de milhares de
-arquivos para o que o projeto é, por exemplo), **pare e confirme com o usuário**
-antes de publicar: costuma ser `node_modules` ou artefato de build indo junto por
-falta de `.dockerignore`.
+Sempre o `.git`. Além dele, os padrões de **`.gitignore`** e **`.cloudezignore`**
+da raiz do diretório publicado, nesta ordem — o último padrão que casa decide,
+como no git, então o `.cloudezignore` consegue desfazer com `!` o que o
+`.gitignore` excluiu.
+
+O `.dockerignore` **não** é lido, e isso é decisão e não esquecimento: ali é
+correto excluir o `Dockerfile` e o `docker-compose.yml`, porque o Docker os recebe
+por outro caminho — mas o deploy publica o diretório para construir depois, no
+servidor. Respeitá-lo faria todo site em container falhar com `compose_missing`.
+
+Havendo algum dos dois arquivos, o retorno traz `ignored` com as `sources` lidas,
+quantos caminhos foram podados (`pruned`) e quais (`paths`). **Mencione ao
+usuário** o que foi podado quando não for óbvio: um `dist/` no `.gitignore` que o
+servidor precisava é o tipo de coisa que só aparece como 404 depois.
+
+### Quando os números não fecham
+
+**Erro `build_output_empty`** — o diretório não tem nada publicável. A mensagem
+diz qual das duas causas é: só `.git`, ou padrão amplo demais. No primeiro caso,
+quase sempre o passo 2 apontou para a raiz de um repositório sem build em vez do
+diretório de saída; volte ao passo 2. No segundo, o padrão é do usuário e ele
+precisa saber qual arquivo o causou.
+
+Se `files` ou `bytes` ainda vierem absurdos para o projeto (dezenas de milhares
+de arquivos para o que o projeto é), **pare e confirme com o usuário** antes de
+publicar. Com os dois arquivos de padrão em uso isso ficou raro — mas um projeto
+sem `.gitignore` continua mandando `node_modules` inteiro.
 
 # Publicar
 
@@ -289,6 +311,12 @@ Os dois mais recentes sempre ficam.
 
 `previous_release_id` **não aparece** quando não havia release anterior — é o
 caso do primeiro deploy do site. Campo ausente, não string vazia.
+
+Este passo também grava o **manifesto da release** no servidor, em
+`<root>/.cloudez/deploys/<release_id>.json`: release, commit, hash do conteúdo e
+a hora do servidor. É o que responde "o que está no ar e de qual commit veio" a
+quem não tem o estado local — inclusive a outra pessoa da equipe. Não precisa ser
+mencionado no relato; existe para ser lido no servidor quando alguém precisar.
 
 ## 8. Subir o container
 

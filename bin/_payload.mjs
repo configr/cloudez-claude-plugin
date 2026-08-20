@@ -20,6 +20,8 @@ import { createHash } from "node:crypto"
 import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, readSync } from "node:fs"
 import { join, sep } from "node:path"
 
+import { carregarIgnore } from "./_ignore.mjs"
+
 /**
  * Resume o que seria enviado: sha do conteúdo, número de arquivos e bytes.
  *
@@ -45,7 +47,7 @@ import { join, sep } from "node:path"
  * os distingue de ausência depois de extraídos num diretório de release.
  */
 export function hashPayload(localDir) {
-  const entries = payloadEntries(localDir)
+  const { entries, ignore } = listarPayload(localDir)
 
   const sum = createHash("sha256")
   let total = 0
@@ -79,7 +81,14 @@ export function hashPayload(localDir) {
     }
   }
 
-  return { content_sha256: sum.digest("hex"), files: entries.length, bytes: total }
+  return {
+    content_sha256: sum.digest("hex"),
+    files: entries.length,
+    bytes: total,
+    // Só quando houve o que reportar: um projeto sem arquivo de padrão não ganha
+    // campo, e o retorno continua igual ao de sempre.
+    ...(ignore.sources.length > 0 ? { ignored: ignore } : {}),
+  }
 }
 
 /**
@@ -99,15 +108,24 @@ function toSlash(p) {
   return sep === "/" ? p : p.split(sep).join("/")
 }
 
-/**
- * Lista, em ordem estável, os arquivos que seriam enviados.
- *
- * Separada do hash para que o teste possa comparar este conjunto com o que o
- * `tar` do transfer de fato empacota — a duplicação da regra de exclusão só é
- * segura enquanto alguém verifica que as duas concordam.
- */
+/** Compatibilidade: a lista, sem os metadados de exclusão. */
 export function payloadEntries(localDir) {
+  return listarPayload(localDir).entries
+}
+
+/**
+ * Lista, em ordem estável, os arquivos que seriam enviados — e o que ficou de
+ * fora.
+ *
+ * Esta lista É o que o transfer empacota: o `_transfer.mjs` a passa ao tar por
+ * `--null -T -` em vez de repetir as regras em `--exclude`. Antes a exclusão
+ * estava escrita duas vezes e só um teste impedia as duas de divergirem; com
+ * padrão de usuário no meio, essa duplicação não se sustentaria.
+ */
+export function listarPayload(localDir) {
+  const ignore = carregarIgnore(localDir)
   const entries = []
+  const podados = []
 
   const caminhar = (dir, prefixo) => {
     for (const d of readdirSync(dir, { withFileTypes: true })) {
@@ -118,6 +136,14 @@ export function payloadEntries(localDir) {
       // cada nível dá o mesmo resultado que testá-lo uma vez no fim — mas mantém
       // a regra numa função com nome, que dá para testar direto.
       if (excluidoDoPayload(rel)) continue
+
+      // Não descer no que foi excluído é o que torna isto barato: `node_modules`
+      // custa uma comparação, e não a caminhada de 38 mil arquivos. Também é a
+      // regra do git — negação não reabilita arquivo sob diretório excluído.
+      if (!ignore.vazio && ignore.excluir(rel, d.isDirectory())) {
+        podados.push(rel)
+        continue
+      }
 
       // `isDirectory` aqui NÃO segue symlink, igual ao WalkDir do Go: um link
       // para diretório é uma entrada, não uma árvore a percorrer.
@@ -141,7 +167,18 @@ export function payloadEntries(localDir) {
   // nome de arquivo, por exemplo), e o Go ordena por byte — divergir aqui faria o
   // mesmo conteúdo hashear diferente entre este port e as releases já publicadas.
   entries.sort((a, b) => Buffer.compare(Buffer.from(a.rel, "utf8"), Buffer.from(b.rel, "utf8")))
-  return entries
+  podados.sort()
+
+  return {
+    entries,
+    ignore: {
+      sources: ignore.fontes,
+      pruned: podados.length,
+      // Os caminhos PODADOS, não os arquivos dentro deles: `node_modules` conta
+      // um, e não 38 mil. Limitado porque isto vai num JSON que alguém lê.
+      paths: podados.slice(0, 50),
+    },
+  }
 }
 
 /**

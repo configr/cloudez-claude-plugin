@@ -17,6 +17,8 @@
 
 import { spawn } from "node:child_process"
 
+import { listarPayload } from "./_payload.mjs"
+
 /**
  * Envia o conteúdo de `localDir` para o destino ssh gravado no estado do deploy.
  *
@@ -25,23 +27,28 @@ import { spawn } from "node:child_process"
  * aviso de host novo na primeira conexão, que não é falha).
  */
 export function transferir(dep, localDir) {
-  // "-C dir ." envia o CONTEÚDO do diretório, não o diretório. É o mesmo motivo
-  // da barra final no rsync: sem isso o site sobe aninhado um nível.
+  // A LISTA vai por stdin, em vez de `--exclude` e um `.` no fim.
   //
-  // --exclude=.git existe porque o diretório publicado deixou de ser sempre um
-  // build: numa aplicação em container o que se envia é o contexto de build, e
-  // ele costuma ser a raiz do repositório — onde moram o Dockerfile e o compose.
-  // Sem a exclusão, todo deploy carregaria o histórico inteiro do git pela rede,
-  // e ele não serve para nada dentro de uma imagem.
+  // A razão é o `.gitignore`. Enquanto a única exclusão era `.git`, a regra cabia
+  // num `--exclude` e o hash a repetia numa função — com um teste impedindo as
+  // duas de divergirem. Com padrão de usuário no meio isso deixa de ser viável:
+  // a semântica do gitignore (âncora, negação, `**`, diretório com barra) não tem
+  // tradução fiel para `--exclude`, e cada divergência seria um `release_id` que
+  // descreve um conjunto de bytes diferente do que subiu.
   //
-  // O padrão é o nome puro, sem barra: os dois tar tratam exclusão como
-  // NÃO-ancorada por padrão, então `.git` casa tanto `./.git` quanto o `.git` de
-  // um submódulo, e NÃO casa `.gitignore` nem `.github/` — que precisam
-  // sobreviver. Uma exclusão por prefixo comeria os dois.
+  // Passando a lista, o conjunto é o MESMO objeto que o hash percorre — não há
+  // duas regras para concordar.
   //
-  // --exclude vem antes de `-C`: o bsdtar exige que a opção preceda os caminhos
-  // a que se aplica.
-  const tarArgs = ["-czf", "-", "--exclude", ".git", "-C", localDir, "."]
+  // `--null` porque nome de arquivo pode ter espaço, e com ele o tar lê os nomes
+  // literalmente, sem interpretar aspas. Suportado pelo bsdtar (Windows e macOS)
+  // e pelo GNU tar.
+  //
+  // Efeito colateral registrado: diretório VAZIO deixa de ser enviado. O tar com
+  // `.` os transportava; a lista só tem arquivos. O hash já os ignorava, então o
+  // identificador não muda de semântica — e diretório que a aplicação precisa
+  // costuma vir de `mkdir` dela ou do `shared/` do deploy.
+  const { entries, ignore } = listarPayload(localDir)
+  const tarArgs = ["-czf", "-", "--null", "-T", "-", "-C", localDir]
 
   const remoto = `tar xzf - -C ${aspasParaShellRemoto(dep.ssh.path)}`
   const sshArgs = [
@@ -64,9 +71,15 @@ export function transferir(dep, localDir) {
   // que o bsdtar e o GNU tar escrevem diferente, e mandar bytes para depois
   // descartá-los é pior do que não mandar.
   const tar = spawn("tar", tarArgs, {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, COPYFILE_DISABLE: "1" },
   })
+
+  // A lista entra pela stdin do tar. Escrever antes de ligar o ssh não trava: o
+  // tar só começa a produzir saída depois de ler os nomes, e o pipe do sistema
+  // absorve a lista — que é de nomes, não de conteúdo.
+  tar.stdin.on("error", () => {}) // EPIPE quando o tar morre antes de ler tudo.
+  tar.stdin.end(entries.map((e) => e.rel).join("\0") + "\0")
 
   // O `tar.stdout` entra como stdin do ssh: o Node duplica o descritor para o
   // filho, então os bytes vão do tar ao ssh sem passar por aqui.
@@ -102,7 +115,8 @@ export function transferir(dep, localDir) {
     if (doTar) return { stats: "", logs, erro: doTar }
     if (doSsh) return { stats: "", logs, erro: doSsh }
 
-    return { stats: `tar+ssh -> ${dep.ssh.host}:${dep.ssh.path}`, logs, erro: null }
+    const resumo = ignore.sources.length > 0 ? ` (${ignore.sources.join("+")}: ${ignore.pruned} podados)` : ""
+    return { stats: `tar+ssh -> ${dep.ssh.host}:${dep.ssh.path}${resumo}`, logs, erro: null }
   })
 }
 

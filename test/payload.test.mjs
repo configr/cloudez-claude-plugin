@@ -17,7 +17,7 @@ import { dirname, join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { test } from "node:test"
 
-import { excluidoDoPayload, hashPayload, payloadEntries } from "../bin/_payload.mjs"
+import { excluidoDoPayload, hashPayload, listarPayload, payloadEntries } from "../bin/_payload.mjs"
 
 const NO_WINDOWS = process.platform === "win32"
 
@@ -55,10 +55,13 @@ function tarReal(args, stdin) {
 
 // O contrato central: o hash cobre exatamente o conjunto que o transfer envia. Se
 // divergirem, o release_id descreve algo que não foi ao ar — pior do que não ter
-// identificador. A regra de exclusão está escrita duas vezes (no
-// `excluidoDoPayload` e no tar do transfer) e este teste é o que impede as duas de
-// divergirem.
-test("o hash cobre o mesmo conjunto que o tar", { skip: NO_WINDOWS && "tar do Windows não confere aqui" }, () => {
+// identificador.
+//
+// A lista deixou de estar escrita duas vezes: o transfer passa ao tar a MESMA que
+// o hash percorre, por `--null -T -`. O que este teste ainda guarda é que o tar
+// empacota exatamente o que recebe — nem a mais (um `.` implícito reintroduzindo
+// o que foi podado) nem a menos (nome com espaço ou acento perdido no caminho).
+test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS && "tar do Windows não confere aqui" }, () => {
   const dir = escrever({
     "index.html": "<h1>oi</h1>",
     ".gitignore": "node_modules\n",
@@ -70,23 +73,29 @@ test("o hash cobre o mesmo conjunto que o tar", { skip: NO_WINDOWS && "tar do Wi
     "assets/img/logo.svg": "<svg/>",
     "docs/.gitkeep": "",
     "nested/deep/a/b/c.txt": "c",
+    "com espaço e acento.txt": "ç",
   })
 
-  // Mesmos argumentos do transfer, menos a compressão: aqui interessa a lista.
-  const pacote = tarReal(["-cf", "-", "--exclude", ".git", "-C", dir, "."])
+  const { entries } = listarPayload(dir)
+  const lista = entries.map((e) => e.rel).join("\0") + "\0"
+
+  // Mesma invocação do transfer, menos a compressão: aqui interessa a lista.
+  const pacote = tarReal(["-cf", "-", "--null", "-T", "-", "-C", dir], lista)
   assert.equal(pacote.status, 0, `tar -c falhou: ${pacote.stderr}`)
-  const listagem = tarReal(["-tf", "-"], pacote.stdout)
-  assert.equal(listagem.status, 0, `tar -t falhou: ${listagem.stderr}`)
 
-  const doTar = new Set()
-  for (const linha of listagem.stdout.toString().trim().split("\n")) {
-    const rel = linha.trim().replace(/^\.\//, "")
-    // Diretórios saem com barra final; o hash só considera arquivos.
-    if (rel === "" || rel === "." || rel.endsWith("/")) continue
-    doTar.add(rel)
-  }
+  // A comparação é por EXTRAÇÃO, e não pela listagem do `tar -t`: o bsdtar
+  // escapa não-ASCII em octal ali, e o teste passaria a afirmar sobre o formato
+  // de exibição do tar em vez do conteúdo do pacote.
+  const destino = mkdtempSync(join(tmpdir(), "cloudez-extraido-"))
+  const extracao = tarReal(["-xf", "-", "-C", destino], pacote.stdout)
+  assert.equal(extracao.status, 0, `tar -x falhou: ${extracao.stderr}`)
 
-  const doHash = new Set(payloadEntries(dir).map((e) => e.rel))
+  // Normalizado dos dois lados: o bsdtar do macOS converte a forma Unicode do
+  // nome ao empacotar (NFC/NFD), e sem isto o teste afirmaria sobre a
+  // normalização da plataforma em vez de sobre o conjunto de arquivos.
+  const norm = (r) => r.normalize("NFC")
+  const doTar = new Set(payloadEntries(destino).map((e) => norm(e.rel)))
+  const doHash = new Set(entries.map((e) => norm(e.rel)))
 
   for (const rel of doTar) assert.ok(doHash.has(rel), `o tar envia ${rel}, mas o hash não o cobre`)
   for (const rel of doHash) assert.ok(doTar.has(rel), `o hash cobre ${rel}, mas o tar não o envia`)
@@ -241,4 +250,135 @@ test("diretório vazio não muda o hash", () => {
   const nomes = payloadEntries(com).map((e) => e.rel)
   const ordenados = [...nomes].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
   assert.deepEqual(nomes, ordenados, `lista fora de ordem: ${nomes}`)
+})
+
+// ── .gitignore e .cloudezignore ──────────────────────────────────────────────
+//
+// O tar excluía só o `.git`, e o diretório publicado é o contexto de build: num
+// projeto Node ele levava `node_modules` e a saída do build — 532 MB e 38 mil
+// arquivos num site cujo fonte tem 0,3 MB, refeitos pelo build no servidor de
+// qualquer jeito.
+
+const rels = (dir) => listarPayload(dir).entries.map((e) => e.rel).sort()
+
+test("o .gitignore poda, e não desce no que podou", () => {
+  const dir = escrever({
+    ".gitignore": "node_modules\n.next\n",
+    "index.js": "1",
+    "node_modules/pacote/index.js": "2",
+    "node_modules/pacote/sub/mais.js": "3",
+    ".next/build.js": "4",
+  })
+
+  assert.deepEqual(rels(dir), [".gitignore", "index.js"])
+
+  const { ignore } = listarPayload(dir)
+  // Conta os caminhos PODADOS, não os arquivos dentro deles: é o que torna a
+  // exclusão barata — `node_modules` custa uma comparação, não 38 mil.
+  assert.deepEqual(ignore.paths, [".next", "node_modules"])
+  assert.deepEqual(ignore.sources, [".gitignore"])
+})
+
+test("o .cloudezignore também poda", () => {
+  const dir = escrever({ ".cloudezignore": "temp/\n", "a.js": "1", "temp/x": "2" })
+  assert.deepEqual(rels(dir), [".cloudezignore", "a.js"])
+})
+
+// A ordem de leitura é o que dá ao .cloudezignore a palavra final: ele resolve o
+// caso do artefato ignorado pelo git que PRECISA ir ao ar.
+test("o .cloudezignore desfaz o .gitignore com !", () => {
+  const dir = escrever({
+    ".gitignore": "dist\n",
+    ".cloudezignore": "!dist\n",
+    "dist/app.js": "1",
+    "src/a.js": "2",
+  })
+
+  assert.ok(rels(dir).includes("dist/app.js"), "o ! do .cloudezignore devia ter reabilitado")
+})
+
+// Decisão registrada: o .dockerignore descreve o que não entra no contexto
+// enviado ao daemon, e ali é CORRETO excluir o Dockerfile e o compose — o Docker
+// os recebe por outro caminho. O deploy publica o diretório para construir
+// depois, no servidor: respeitá-lo faria todo site em container falhar com
+// compose_missing.
+test("REGRESSÃO: o .dockerignore NÃO é lido", () => {
+  const dir = escrever({
+    ".dockerignore": "Dockerfile\ndocker-compose.yml\nnode_modules\n",
+    Dockerfile: "FROM node",
+    "docker-compose.yml": "services: {}",
+    "node_modules/x/y.js": "1",
+  })
+
+  const lista = rels(dir)
+  assert.ok(lista.includes("Dockerfile"), "sem o Dockerfile o build no servidor não existe")
+  assert.ok(lista.includes("docker-compose.yml"), "sem o compose o deploy falha com compose_missing")
+  assert.ok(lista.includes("node_modules/x/y.js"), "e nem a regra inofensiva vale — o arquivo não é lido")
+  assert.deepEqual(listarPayload(dir).ignore.sources, [])
+})
+
+test("a âncora com barra limita à raiz", () => {
+  const dir = escrever({
+    ".gitignore": "/build\n",
+    "build/a": "1",
+    "pacote/build/b": "2",
+  })
+
+  assert.deepEqual(rels(dir), [".gitignore", "pacote/build/b"])
+})
+
+test("sem âncora, vale em qualquer profundidade", () => {
+  const dir = escrever({ ".gitignore": "build\n", "build/a": "1", "pacote/build/b": "2", "c.js": "3" })
+  assert.deepEqual(rels(dir), [".gitignore", "c.js"])
+})
+
+test("a barra no fim casa só diretório", () => {
+  const dir = escrever({ ".gitignore": "build/\n", build: "sou um arquivo", "outro/build/a": "1" })
+  assert.deepEqual(rels(dir), [".gitignore", "build"])
+})
+
+test("os curingas", () => {
+  const dir = escrever({
+    ".gitignore": "*.log\ntmp?\nsrc/**/gerado.js\n",
+    "erro.log": "1",
+    "tmp1/a": "2",
+    "tmpXY/b": "3",
+    "src/a/b/gerado.js": "4",
+    "src/mantido.js": "5",
+  })
+
+  assert.deepEqual(rels(dir), [".gitignore", "src/mantido.js", "tmpXY/b"])
+})
+
+test("comentário e linha em branco não viram regra", () => {
+  const dir = escrever({ ".gitignore": "# nada\n\n   \n", "a.js": "1" })
+  assert.deepEqual(rels(dir), [".gitignore", "a.js"])
+})
+
+// O `.git` sai por uma regra própria, avaliada ANTES dos padrões — um `!` não o
+// traz de volta. Publicar o histórico do repositório numa imagem não é escolha
+// que se ofereça.
+test("nem um ! reabilita o .git", () => {
+  const dir = escrever({ ".cloudezignore": "!.git\n", ".git/HEAD": "ref", "a.js": "1" })
+  assert.deepEqual(rels(dir), [".cloudezignore", "a.js"])
+})
+
+// Igual ao git: negação não reabilita arquivo sob diretório excluído, porque o
+// diretório nem chega a ser percorrido.
+test("o ! não reabilita arquivo dentro de diretório podado", () => {
+  const dir = escrever({ ".gitignore": "dist\n!dist/importante.js\n", "dist/importante.js": "1", "a.js": "2" })
+  assert.deepEqual(rels(dir), [".gitignore", "a.js"])
+})
+
+test("sem arquivo de padrão, o retorno não ganha campo", () => {
+  const dir = escrever({ "a.js": "1" })
+  assert.equal(hashPayload(dir).ignored, undefined)
+  assert.deepEqual(listarPayload(dir).ignore.sources, [])
+})
+
+// Um `.gitignore` que exclua tudo deixaria o deploy publicar uma release vazia
+// com identificador de aparência normal — o cloudez-sync recusa isso.
+test("padrão que exclui tudo deixa zero arquivos publicáveis", () => {
+  const dir = escrever({ ".cloudezignore": "*\n", "a.js": "1", "b.js": "2" })
+  assert.equal(listarPayload(dir).entries.length, 0)
 })
