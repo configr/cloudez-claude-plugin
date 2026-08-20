@@ -127,9 +127,9 @@ Com o plugin ativo:
   **Se já existe um Compose no projeto, ele não é reescrito**: o arquivo é o de
   desenvolvimento, é o que o usuário roda todo dia, e as diferenças de produção
   vão para um `docker-compose.cloudez.yml` que só o servidor lê. Localmente
-  continua sendo `docker compose up`, sem argumento. É essa sobreposição que
-  também liga os diretórios de dado a `claude/shared/`, no modelo do Capistrano —
-  sem isso a poda de releases apagaria o que o container escreveu;
+  continua sendo `docker compose up`, sem argumento. Em paralelo, todo deploy em
+  container liga os diretórios de dado a `claude/shared/`, no modelo do
+  Capistrano — sem isso a poda de releases apagaria o que o container escreveu;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
   acionado quando você pedir em linguagem natural ("sobe o site", "publica em

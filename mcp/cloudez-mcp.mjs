@@ -27825,14 +27825,18 @@ function sharedDirsFromConfig(config2, releaseDirs) {
   }
   return { dirs, recusados };
 }
-function linkSharedScript(root, dirs) {
+function linkSharedScript(root, dirs, prevRelease) {
   let sh = "";
   for (const nome of dirs) {
     const S = `'${root}/shared/${nome}'`;
     const R = `'${nome}'`;
+    const P = prevRelease ? `'${prevRelease}/${nome}'` : "";
+    const daAnterior = P ? `  if [ -d ${P} ] && [ ! -L ${P} ]; then cp -a ${P} ${S}; echo "SEEDED_PREV ${nome}";
+  el` : `  `;
     sh += `if [ ! -e ${S} ]; then
   mkdir -p "$(dirname ${S})"
-  if [ -d ${R} ] && [ ! -L ${R} ]; then cp -a ${R} ${S}; echo "SEEDED ${nome}"; else mkdir -p ${S}; fi
+${daAnterior}if [ -d ${R} ] && [ ! -L ${R} ]; then cp -a ${R} ${S}; echo "SEEDED ${nome}";
+  else mkdir -p ${S}; fi
   echo "SHARED_CREATED ${nome}"
 fi
 rm -rf ${R}
@@ -27847,7 +27851,6 @@ function matchLines(out, tag) {
   return out.split("\n").filter((l) => l.startsWith(`${tag} `)).map((l) => l.slice(tag.length + 1).trim());
 }
 function planSharedDirs(stdout, releaseId) {
-  if (matchLine(stdout, "FILES") === "") return { dirs: [], absRoot: "" };
   const releaseDir = matchLine(stdout, "RELEASE_DIR");
   const releaseDirP = matchLine(stdout, "RELEASE_DIR_P") || releaseDir;
   const inicio = stdout.split("\n").findIndex((l) => l.startsWith("{"));
@@ -27976,11 +27979,9 @@ async function composeUp(deployId2) {
   const project = resolveProject(state);
   const cfg = await sshRun(
     ssh,
-    composePrelude(`${root}/current`) + `if [ -n "$overlay" ]; then
-  echo "RELEASE_DIR $(pwd)"
-  echo "RELEASE_DIR_P $(pwd -P)"
-  $DC $FILES -p '${project}' config --format json
-fi
+    composePrelude(`${root}/current`) + `echo "RELEASE_DIR $(pwd)"
+echo "RELEASE_DIR_P $(pwd -P)"
+$DC $FILES -p '${project}' config --format json
 `
   );
   if (cfg.code !== 0) {
@@ -27994,7 +27995,11 @@ ${cfg.stderr}`.trim() || void 0)
   const plano = planSharedDirs(cfg.stdout, releaseId);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + linkSharedScript(plano.absRoot, plano.dirs) + `before=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+  const up = composePrelude(`${root}/current`) + linkSharedScript(
+    plano.absRoot,
+    plano.dirs,
+    state.previous_release_id ? `${plano.absRoot}/releases/${state.previous_release_id}` : void 0
+  ) + `before=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
 $DC $FILES -p '${project}' up -d${buildFlag} --remove-orphans
 after=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
 if [ "$before" = "$after" ]; then echo 'RECREATED no'; else echo 'RECREATED yes'; fi
@@ -28012,6 +28017,7 @@ ${res.stderr}`;
   const recreated = matchLine(res.stdout, "RECREATED");
   const shared = matchLines(res.stdout, "SHARED");
   const criados = matchLines(res.stdout, "SHARED_CREATED");
+  const migrados = matchLines(res.stdout, "SEEDED_PREV");
   state.compose = {
     project,
     built,
@@ -28022,6 +28028,10 @@ ${res.stderr}`;
     // significa que alguém apagou o de `shared/` — o que o retorno precisa deixar
     // ver, e não normalizar.
     ...criados.length > 0 ? { shared_created: criados } : {},
+    // Estes vieram da release ANTERIOR: é a migração do dado de um site que já
+    // rodava. Acontece uma vez por diretório, e é a operação mais consequente que
+    // o deploy faz sem o usuário ter pedido — some do retorno seria errado.
+    ...migrados.length > 0 ? { shared_migrated: migrados } : {},
     ...recreated ? { recreated: recreated === "yes" } : {},
     containers
   };

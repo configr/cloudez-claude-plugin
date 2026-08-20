@@ -182,15 +182,22 @@ Duas coisas nunca entram, e pelo mesmo motivo — são a aplicação, não o dad
   raiz, e `- ./api:/app` com contexto `./api` é a mesma situação uma pasta abaixo.
   O que está *sob* o contexto continua entrando: `./api/uploads` é dado.
 
-Na primeira vez, o conteúdo que a release traz **semeia** o `shared/` — um
-projeto que versiona `storage/` com estrutura dentro não quebra. Dali em diante
-quem manda é o `shared/`, e o que a release trouxer é descartado. Tem de ser
-assim: se a release pudesse sobrescrever, todo deploy apagaria produção.
+Vale para todo site em container, com sobreposição ou sem — o bind relativo
+aponta para dentro da release de qualquer jeito.
 
-**Isto só acontece com sobreposição presente.** É ela que liga o mecanismo. Se o
-projeto tem dado que precisa sobreviver e você está escrevendo o Compose do zero,
-escreva também a sobreposição — sem ela o bind relativo continua apontando para
-dentro da release, e a poda leva o dado.
+Na primeira vez o `shared/` é **semeado**, e a fonte importa. Num site que já
+rodava, o dado de produção está na release **anterior** — é lá que o container no
+ar vem escrevendo —, e é de lá que ele vem. Num site novo não há anterior, e a
+fonte é o que a release traz, para um projeto que versiona `storage/` com
+estrutura dentro não quebrar.
+
+Dali em diante quem manda é o `shared/`, e o que a release trouxer é descartado.
+Tem de ser assim: se a release pudesse sobrescrever, todo deploy apagaria
+produção.
+
+Diga isso ao usuário quando o retorno trouxer `compose.shared_migrated`: aquele
+deploy **moveu o dado de produção** para um lugar novo. É a operação mais
+consequente que o deploy faz sem ninguém ter pedido.
 
 E **não monte o código-fonte no container** (`- .:/app`). Além de apagar o que a
 imagem construiu, é o caso que o deploy recusa a compartilhar — se ele fosse para
@@ -314,9 +321,10 @@ services:
 Um `!reset null` seco em `volumes` também apaga o bind de dado — use quando não
 houver nenhum a preservar.
 
-Depois do deploy, `compose.shared` diz o que foi ligado e `compose.shared_created`
-o que nasceu ali. Um diretório reaparecendo em `shared_created` num deploy que não
-é o primeiro significa que alguém apagou o de `shared/`.
+Depois do deploy, `compose.shared` diz o que foi ligado, `compose.shared_created`
+o que nasceu ali e `compose.shared_migrated` o que veio da release anterior. Um
+diretório reaparecendo em `shared_created` num deploy que não é o primeiro
+significa que alguém apagou o de `shared/`.
 
 ### A versão do Compose no servidor
 
