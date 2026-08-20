@@ -27106,6 +27106,137 @@ async function requireToken() {
 // src/deploys.ts
 import { randomUUID } from "node:crypto";
 
+// src/local.ts
+var import_yaml = __toESM(require_dist2(), 1);
+import { createHash } from "node:crypto";
+import { readdir, readFile as readFile2, stat } from "node:fs/promises";
+import { join } from "node:path";
+var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+var CLOUDEZ_OVERLAY_FILES = [
+  "docker-compose.cloudez.yml",
+  "docker-compose.cloudez.yaml",
+  "compose.cloudez.yml",
+  "compose.cloudez.yaml"
+];
+var COMPOSE_OVERRIDE_FILES = [
+  "compose.override.yaml",
+  "compose.override.yml",
+  "docker-compose.override.yaml",
+  "docker-compose.override.yml"
+];
+function extrairPortas(doc) {
+  const portas = [];
+  const services = doc?.services;
+  if (!services || typeof services !== "object") return portas;
+  for (const [service, corpo] of Object.entries(services)) {
+    const lista = corpo?.ports;
+    if (!Array.isArray(lista)) continue;
+    for (const item of lista) {
+      if (item && typeof item === "object") {
+        const o = item;
+        const porta2 = { service };
+        if (o.published !== void 0) porta2.published = String(o.published);
+        if (o.target !== void 0) porta2.target = String(o.target);
+        if (typeof o.host_ip === "string") porta2.host_ip = o.host_ip;
+        portas.push(porta2);
+        continue;
+      }
+      const bruto = String(item);
+      const partes = bruto.split(":");
+      const porta = { service };
+      if (partes.length === 1) {
+        porta.target = partes[0];
+      } else {
+        porta.target = partes[partes.length - 1];
+        porta.published = partes[partes.length - 2];
+        if (partes.length >= 3) porta.host_ip = partes.slice(0, partes.length - 2).join(":");
+      }
+      portas.push(porta);
+    }
+  }
+  return portas;
+}
+async function findCompose(directory = ".") {
+  const encontrados = [];
+  for (const nome of COMPOSE_FILES) {
+    try {
+      if ((await stat(join(directory, nome))).isFile()) encontrados.push(nome);
+    } catch {
+    }
+  }
+  if (encontrados.length === 0) {
+    try {
+      if (!(await stat(directory)).isDirectory()) throw new Error("nao e diretorio");
+    } catch {
+      throw new ToolError("dir_not_found", `Diret\xF3rio '${directory}' n\xE3o existe.`, {
+        hint: "Informe o diret\xF3rio que ser\xE1 publicado, ou nenhum para usar o atual."
+      });
+    }
+    return { directory, compose: false };
+  }
+  const [file, ...ignored] = encontrados;
+  const result = { directory, compose: true, file };
+  if (ignored.length > 0) result.ignored = ignored;
+  const overlays = [];
+  for (const nome of CLOUDEZ_OVERLAY_FILES) {
+    try {
+      if ((await stat(join(directory, nome))).isFile()) overlays.push(nome);
+    } catch {
+    }
+  }
+  if (overlays.length === 1) result.cloudez_file = overlays[0];
+  else if (overlays.length > 1) result.cloudez_ambiguous = overlays;
+  try {
+    result.ports = extrairPortas((0, import_yaml.parse)(await readFile2(join(directory, file), "utf8")));
+  } catch (err) {
+    result.parse_error = err instanceof Error ? err.message : String(err);
+  }
+  return result;
+}
+function fingerprint(material) {
+  const blob = Buffer.from(material, "base64");
+  return "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
+}
+async function listLocalSshKeys() {
+  const directory = process.env.CLOUDEZ_SSH_DIR || join(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
+  let entradas;
+  try {
+    entradas = await readdir(directory);
+  } catch {
+    throw new ToolError("no_ssh_dir", `N\xE3o h\xE1 diret\xF3rio ${directory} nesta m\xE1quina.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par de chaves com: ssh-keygen -t ed25519"
+    });
+  }
+  const keys = [];
+  for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
+    const caminho = join(directory, nome);
+    let conteudo;
+    try {
+      conteudo = await readFile2(caminho, "utf8");
+    } catch {
+      continue;
+    }
+    const [linha] = conteudo.split("\n");
+    const partes = (linha ?? "").trim().split(/\s+/);
+    const [type, material, ...resto] = partes;
+    if (!type || !material || !/^(ssh|ecdsa|sk)-/.test(type)) continue;
+    const comment = resto.join(" ");
+    keys.push({
+      path: caminho,
+      type,
+      key: `${type} ${material}`,
+      ...comment ? { comment } : {},
+      fingerprint: fingerprint(material)
+    });
+  }
+  if (keys.length === 0) {
+    throw new ToolError("no_public_key", `Nenhuma chave p\xFAblica SSH em ${directory}.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par com: ssh-keygen -t ed25519 \u2014 e n\xE3o gere por ele: o par tem que nascer na m\xE1quina de quem vai us\xE1-lo."
+    });
+  }
+  return { directory, keys };
+}
+
 // src/api.ts
 function classify(status, body) {
   if (status === 401) {
@@ -27411,14 +27542,14 @@ function sshRun(target, command) {
 }
 
 // src/deploy-state.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join as join2 } from "node:path";
 function stateDir() {
   return process.env.CLOUDEZ_STATE_DIR || ".cloudez/state";
 }
 function statePath(deployId2) {
-  return join(stateDir(), `${deployId2}.json`);
+  return join2(stateDir(), `${deployId2}.json`);
 }
 var KEY_FORMAT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 function assertIdempotencyKey(idempotencyKey) {
@@ -27433,10 +27564,10 @@ function assertIdempotencyKey(idempotencyKey) {
   }
 }
 function keyPath(idempotencyKey) {
-  return join(stateDir(), "key", idempotencyKey);
+  return join2(stateDir(), "key", idempotencyKey);
 }
 function deployId(releaseId, idempotencyKey) {
-  const hash = createHash("sha1").update(releaseId + idempotencyKey).digest("hex");
+  const hash = createHash2("sha1").update(releaseId + idempotencyKey).digest("hex");
   return `dpl_${hash.slice(0, 8)}`;
 }
 function loadState(deployId2) {
@@ -27475,7 +27606,7 @@ function pruneOldState() {
       return;
     }
     for (const entry of entries) {
-      const full = join(path, entry);
+      const full = join2(path, entry);
       try {
         const st = statSync(full);
         if (st.isDirectory()) sweep(full);
@@ -27617,10 +27748,52 @@ for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
   [ -f "$f" ] && { found=$f; break; }
 done
 [ -n "$found" ] || exit 3
+overlay=
+for f in ${CLOUDEZ_OVERLAY_FILES.join(" ")}; do
+  if [ -f "$f" ]; then
+    if [ -n "$overlay" ]; then echo "AMBIGUOUS $overlay $f"; exit 5; fi
+    overlay=$f
+  fi
+done
 if docker compose version >/dev/null 2>&1; then DC='docker compose'
 elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
 else exit 4; fi
+ver=$($DC version --short 2>/dev/null | head -1 | tr -d ' ')
+ver=\${ver#v}
+echo "COMPOSE_VERSION \${ver:-desconhecida}"
+FILES=
+if [ -n "$overlay" ]; then
+  FILES="-f $found -f $overlay"
+  echo "FILES $found $overlay"
+  for f in ${COMPOSE_OVERRIDE_FILES.join(" ")}; do
+    [ -f "$f" ] && echo "OVERRIDE_IGNORED $f"
+  done
+  if grep -qE '!reset|!override' "$overlay" 2>/dev/null; then
+    a=\${ver%%.*}; r=\${ver#*.}; b=\${r%%.*}
+    if [ -n "$a" ] && [ -n "$b" ]; then
+      case "$a$b" in
+        *[!0-9]*) ;;
+        *) if [ "$a" -gt 2 ] || { [ "$a" -eq 2 ] && [ "$b" -ge 24 ]; }; then :;
+           else echo "OLD_COMPOSE $ver"; exit 6; fi ;;
+      esac
+    fi
+  fi
+fi
 `;
+}
+function composeFiles(stdout) {
+  const files = matchLine(stdout, "FILES");
+  const ignored = matchLine(stdout, "OVERRIDE_IGNORED");
+  const version2 = matchLine(stdout, "COMPOSE_VERSION");
+  return {
+    ...files ? { files: files.split(" ").filter(Boolean) } : {},
+    ...ignored ? { override_ignored: ignored } : {},
+    // Gravada SEMPRE, com ou sem sobreposição. É a resposta acumulada para "que
+    // versão de Compose a frota tem?" — uma pergunta que, sem isto, exigiria
+    // entrar em cada servidor, e que decide se a subtração da sobreposição
+    // funciona.
+    ...version2 && version2 !== "desconhecida" ? { version: version2 } : {}
+  };
 }
 function diagnose(out) {
   if (/docker\.sock/.test(out) && /ermission denied/.test(out)) {
@@ -27629,9 +27802,12 @@ function diagnose(out) {
   if (/iptables/.test(out) && /No chain\/target\/match/.test(out)) {
     return "A integra\xE7\xE3o do Docker com o iptables est\xE1 quebrada no host: as chains DOCKER/DOCKER-FORWARD n\xE3o existem e nenhuma porta publicada funciona. Pe\xE7a \xE0 Cloudez um 'systemctl restart docker' \u2014 n\xE3o h\xE1 contorno no projeto que preserve o 'ports:' do compose.";
   }
+  if (/!reset|!override/.test(out) && /tag/.test(out)) {
+    return "O docker-compose.cloudez.yml usa as tags de merge !reset/!override, e o Compose do servidor n\xE3o as conhece \u2014 elas s\xF3 existem no v2 recente (2.24+). Confira com 'docker compose version'. Sem elas n\xE3o h\xE1 como REMOVER de produ\xE7\xE3o o que o arquivo do reposit\xF3rio traz de desenvolvimento: listas como 'ports' e 'volumes' se SOMAM em vez de substituir, ent\xE3o o bind mount do fonte e a porta sem 127.0.0.1 sobrevivem ao merge. Atualizar o Compose do servidor \xE9 a\xE7\xE3o da Cloudez.";
+  }
   return void 0;
 }
-function throwPreludeError(code, releaseId) {
+function throwPreludeError(code, releaseId, stdout = "") {
   if (code === 3) {
     throw new ToolError("compose_missing", `Nenhum arquivo de Compose na release ${releaseId}.`, {
       hint: "O deploy publicou um diret\xF3rio sem compose.yaml/docker-compose.yml. Em site do tipo Container Docker, publique o diret\xF3rio do Compose (o contexto de build), n\xE3o a sa\xEDda de um build local."
@@ -27641,6 +27817,25 @@ function throwPreludeError(code, releaseId) {
     throw new ToolError("docker_missing", "O servidor n\xE3o tem docker compose nem docker-compose.", {
       hint: "Isto \xE9 configura\xE7\xE3o do servidor, n\xE3o do projeto. Fale com a Cloudez."
     });
+  }
+  if (code === 5) {
+    throw new ToolError(
+      "compose_overlay_ambiguous",
+      `Mais de uma sobreposi\xE7\xE3o da Cloudez na release ${releaseId}.`,
+      {
+        hint: `Deixe s\xF3 uma entre ${CLOUDEZ_OVERLAY_FILES.join(", ")}. Escolher por preced\xEAncia aqui poria produ\xE7\xE3o no ar com a configura\xE7\xE3o do arquivo errado, sem avisar.`
+      }
+    );
+  }
+  if (code === 6) {
+    const ver = matchLine(stdout, "OLD_COMPOSE");
+    throw new ToolError(
+      "compose_too_old",
+      `O Docker Compose do servidor (${ver || "vers\xE3o n\xE3o identificada"}) n\xE3o conhece as tags de merge que a sobreposi\xE7\xE3o usa.`,
+      {
+        hint: "S\xE3o necess\xE1rios 2.24 ou mais novo. Atualizar o Compose do servidor \xE9 a\xE7\xE3o da Cloudez, n\xE3o do projeto \u2014 n\xE3o h\xE1 contorno no arquivo: sem as tags, 'ports' e 'volumes' se SOMAM em vez de substituir, e o deploy poria no ar a configura\xE7\xE3o de desenvolvimento sem falhar em nada."
+      }
+    );
   }
 }
 async function composeBuild(deployId2) {
@@ -27654,17 +27849,22 @@ async function composeBuild(deployId2) {
   const ssh = state.ssh;
   const { root, release_id: releaseId } = state;
   const project = resolveProject(state);
-  const build2 = composePrelude(`${root}/releases/${releaseId}`) + `$DC -p '${project}' build`;
+  const build2 = composePrelude(`${root}/releases/${releaseId}`) + `$DC $FILES -p '${project}' build`;
   const res = await sshRun(ssh, build2);
   const out = `${res.stdout}
 ${res.stderr}`;
   if (res.code !== 0) {
-    throwPreludeError(res.code, releaseId);
+    throwPreludeError(res.code, releaseId, res.stdout);
     throw new ToolError("compose_build_failed", `Falha ao construir a imagem da release ${releaseId}.`, {
       hint: diagnose(out) ?? (out.trim() || void 0)
     });
   }
-  state.compose = { ...state.compose ?? { containers: [] }, project, built: true };
+  state.compose = {
+    ...state.compose ?? { containers: [] },
+    project,
+    built: true,
+    ...composeFiles(res.stdout)
+  };
   return saveState(state);
 }
 async function composeUp(deployId2) {
@@ -27680,16 +27880,16 @@ async function composeUp(deployId2) {
   const project = resolveProject(state);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + `before=$($DC -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
-$DC -p '${project}' up -d${buildFlag} --remove-orphans
-after=$($DC -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+  const up = composePrelude(`${root}/current`) + `before=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
+$DC $FILES -p '${project}' up -d${buildFlag} --remove-orphans
+after=$($DC $FILES -p '${project}' ps -q 2>/dev/null | sort | tr '\\n' ' ')
 if [ "$before" = "$after" ]; then echo 'RECREATED no'; else echo 'RECREATED yes'; fi
-$DC -p '${project}' ps --format 'PS\\t{{.Name}}\\t{{.State}}\\t{{.Ports}}'`;
+$DC $FILES -p '${project}' ps --format 'PS\\t{{.Name}}\\t{{.State}}\\t{{.Ports}}'`;
   const res = await sshRun(ssh, up);
   const out = `${res.stdout}
 ${res.stderr}`;
   if (res.code !== 0) {
-    throwPreludeError(res.code, releaseId);
+    throwPreludeError(res.code, releaseId, res.stdout);
     throw new ToolError("compose_failed", `Falha ao subir o container da release ${releaseId}.`, {
       hint: diagnose(out) ?? (out.trim() || void 0)
     });
@@ -27699,6 +27899,7 @@ ${res.stderr}`;
   state.compose = {
     project,
     built,
+    ...composeFiles(res.stdout),
     ...recreated ? { recreated: recreated === "yes" } : {},
     containers
   };
@@ -27787,13 +27988,13 @@ async function checkDns(domain, opts = {}) {
 
 // src/login-hint.ts
 import { accessSync, constants, existsSync } from "node:fs";
-import { delimiter, dirname as dirname2, join as join2 } from "node:path";
+import { delimiter, dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 function onPath(name) {
   for (const dir of (process.env.PATH || "").split(delimiter)) {
     if (!dir) continue;
     try {
-      accessSync(join2(dir, name), constants.X_OK);
+      accessSync(join3(dir, name), constants.X_OK);
       return true;
     } catch {
     }
@@ -27812,7 +28013,7 @@ function pluginBin() {
   ];
   for (const root of roots) {
     if (!root) continue;
-    const candidate = join2(root, "bin", "cloudez-login");
+    const candidate = join3(root, "bin", "cloudez-login");
     if (existsSync(candidate)) return candidate;
   }
   return null;
@@ -27973,116 +28174,6 @@ ${publicKey.trim()}`;
     });
   }
   return { domain: before.site.domain, username, added: true, authorized_key_count: applied.length };
-}
-
-// src/local.ts
-var import_yaml = __toESM(require_dist2(), 1);
-import { createHash as createHash2 } from "node:crypto";
-import { readdir, readFile as readFile2, stat } from "node:fs/promises";
-import { join as join3 } from "node:path";
-var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
-function extrairPortas(doc) {
-  const portas = [];
-  const services = doc?.services;
-  if (!services || typeof services !== "object") return portas;
-  for (const [service, corpo] of Object.entries(services)) {
-    const lista = corpo?.ports;
-    if (!Array.isArray(lista)) continue;
-    for (const item of lista) {
-      if (item && typeof item === "object") {
-        const o = item;
-        const porta2 = { service };
-        if (o.published !== void 0) porta2.published = String(o.published);
-        if (o.target !== void 0) porta2.target = String(o.target);
-        if (typeof o.host_ip === "string") porta2.host_ip = o.host_ip;
-        portas.push(porta2);
-        continue;
-      }
-      const bruto = String(item);
-      const partes = bruto.split(":");
-      const porta = { service };
-      if (partes.length === 1) {
-        porta.target = partes[0];
-      } else {
-        porta.target = partes[partes.length - 1];
-        porta.published = partes[partes.length - 2];
-        if (partes.length >= 3) porta.host_ip = partes.slice(0, partes.length - 2).join(":");
-      }
-      portas.push(porta);
-    }
-  }
-  return portas;
-}
-async function findCompose(directory = ".") {
-  const encontrados = [];
-  for (const nome of COMPOSE_FILES) {
-    try {
-      if ((await stat(join3(directory, nome))).isFile()) encontrados.push(nome);
-    } catch {
-    }
-  }
-  if (encontrados.length === 0) {
-    try {
-      if (!(await stat(directory)).isDirectory()) throw new Error("nao e diretorio");
-    } catch {
-      throw new ToolError("dir_not_found", `Diret\xF3rio '${directory}' n\xE3o existe.`, {
-        hint: "Informe o diret\xF3rio que ser\xE1 publicado, ou nenhum para usar o atual."
-      });
-    }
-    return { directory, compose: false };
-  }
-  const [file, ...ignored] = encontrados;
-  const result = { directory, compose: true, file };
-  if (ignored.length > 0) result.ignored = ignored;
-  try {
-    result.ports = extrairPortas((0, import_yaml.parse)(await readFile2(join3(directory, file), "utf8")));
-  } catch (err) {
-    result.parse_error = err instanceof Error ? err.message : String(err);
-  }
-  return result;
-}
-function fingerprint(material) {
-  const blob = Buffer.from(material, "base64");
-  return "SHA256:" + createHash2("sha256").update(blob).digest("base64").replace(/=+$/, "");
-}
-async function listLocalSshKeys() {
-  const directory = process.env.CLOUDEZ_SSH_DIR || join3(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
-  let entradas;
-  try {
-    entradas = await readdir(directory);
-  } catch {
-    throw new ToolError("no_ssh_dir", `N\xE3o h\xE1 diret\xF3rio ${directory} nesta m\xE1quina.`, {
-      hint: "Pe\xE7a ao usu\xE1rio para gerar um par de chaves com: ssh-keygen -t ed25519"
-    });
-  }
-  const keys = [];
-  for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
-    const caminho = join3(directory, nome);
-    let conteudo;
-    try {
-      conteudo = await readFile2(caminho, "utf8");
-    } catch {
-      continue;
-    }
-    const [linha] = conteudo.split("\n");
-    const partes = (linha ?? "").trim().split(/\s+/);
-    const [type, material, ...resto] = partes;
-    if (!type || !material || !/^(ssh|ecdsa|sk)-/.test(type)) continue;
-    const comment = resto.join(" ");
-    keys.push({
-      path: caminho,
-      type,
-      key: `${type} ${material}`,
-      ...comment ? { comment } : {},
-      fingerprint: fingerprint(material)
-    });
-  }
-  if (keys.length === 0) {
-    throw new ToolError("no_public_key", `Nenhuma chave p\xFAblica SSH em ${directory}.`, {
-      hint: "Pe\xE7a ao usu\xE1rio para gerar um par com: ssh-keygen -t ed25519 \u2014 e n\xE3o gere por ele: o par tem que nascer na m\xE1quina de quem vai us\xE1-lo."
-    });
-  }
-  return { directory, keys };
 }
 
 // src/health.ts
@@ -28317,7 +28408,7 @@ server.registerTool(
   "cloudez_compose_build",
   {
     title: "Construir a imagem da release sincronizada",
-    description: "Constr\xF3i a imagem com `docker compose build` a partir do diret\xF3rio da release, ANTES da troca do symlink. Chame em site cuja aplica\xE7\xE3o roda em container, depois do cloudez-sync e antes do cloudez_finalize_deploy. Enquanto o build roda o site segue no ar na vers\xE3o anterior, e um build que falha n\xE3o deixa nada pela metade \u2014 nenhum arquivo foi ativado ainda. Sem este passo o cloudez_compose_up reconstr\xF3i sozinho, o que tamb\xE9m funciona, mas com o site num estado misto durante todo o build. Falha aqui \xE9 quase sempre do projeto (Dockerfile, depend\xEAncia).",
+    description: "Constr\xF3i a imagem com `docker compose build` a partir do diret\xF3rio da release, ANTES da troca do symlink. Chame em site cuja aplica\xE7\xE3o roda em container, depois do cloudez-sync e antes do cloudez_finalize_deploy. Enquanto o build roda o site segue no ar na vers\xE3o anterior, e um build que falha n\xE3o deixa nada pela metade \u2014 nenhum arquivo foi ativado ainda. Sem este passo Havendo docker-compose.cloudez.yml no diret\xF3rio, ele \xE9 mesclado por cima do arquivo base com `-f`, nesta ordem \u2014 e o `*.override.*` do reposit\xF3rio, que o Compose carregaria sozinho, fica de fora. O retorno diz em `compose.files` quais arquivos entraram. o cloudez_compose_up reconstr\xF3i sozinho, o que tamb\xE9m funciona, mas com o site num estado misto durante todo o build. Falha aqui \xE9 quase sempre do projeto (Dockerfile, depend\xEAncia).",
     inputSchema: object({
       deploy_id: string2().describe("deploy_id de um deploy j\xE1 sincronizado (status uploaded)")
     }),
@@ -28335,7 +28426,7 @@ server.registerTool(
   "cloudez_compose_up",
   {
     title: "Subir o container da release ativa",
-    description: "Sobe o container da release ativa com `docker compose up -d` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy. Se o cloudez_compose_build j\xE1 rodou, sobe a imagem pronta; se n\xE3o, reconstr\xF3i com `--build` (mais lento, e o site fica em estado misto durante o build). Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
+    description: "Sobe o container da release ativa com `docker compose up -d` no servidor. Chame S\xD3 em site cuja aplica\xE7\xE3o roda em container, e SEMPRE depois do cloudez_finalize_deploy. Se o Usa os MESMOS arquivos do build (base + docker-compose.cloudez.yml, quando existe), e devolve em `compose.files` quais foram; `compose.override_ignored` avisa que um `*.override.*` do reposit\xF3rio deixou de ser mesclado. cloudez_compose_build j\xE1 rodou, sobe a imagem pronta; se n\xE3o, reconstr\xF3i com `--build` (mais lento, e o site fica em estado misto durante o build). Sem este passo o deploy termina 'succeeded' mas o site responde 502 ou serve a release anterior. Confira o `state` de cada container no retorno: 'restarting'/'exited' \xE9 deploy fracassado com JSON de sucesso. Verifique o site batendo no dom\xEDnio depois.",
     inputSchema: object({
       deploy_id: string2().describe("deploy_id de uma release j\xE1 finalizada (status succeeded)")
     }),
@@ -28397,7 +28488,7 @@ server.registerTool(
   "cloudez_find_compose",
   {
     title: "Arquivo de Compose do projeto",
-    description: "Diz se um diret\xF3rio tem arquivo de Compose e QUAL deles o `docker compose` usaria. Chame para descobrir se a aplica\xE7\xE3o roda em container \u2014 \xE9 o que decide o que publicar: contexto de build para container, sa\xEDda de build para aplica\xE7\xE3o tradicional. Procura os quatro nomes aceitos na ordem do pr\xF3prio Compose, ent\xE3o o `file` devolvido \xE9 o que de fato sobe; os demais v\xEAm em `ignored`. Devolve tamb\xE9m as PORTAS publicadas no host (`ports`), lidas do arquivo: \xE9 o `published` delas que a custom_port do site precisa espelhar, e uma diverg\xEAncia entre os dois d\xE1 502 num deploy que rodou inteiro sem erro. Lista vazia significa que o arquivo n\xE3o publica porta nenhuma; `parse_error` significa que o YAML n\xE3o p\xF4de ser lido \u2014 n\xE3o confunda os dois.",
+    description: "Diz se um diret\xF3rio tem arquivo de Compose e QUAL deles o `docker compose` usaria. Chame para descobrir se a aplica\xE7\xE3o roda em container \u2014 \xE9 o que decide o que publicar: contexto de build para container, sa\xEDda de build para aplica\xE7\xE3o tradicional. Procura os quatro nomes aceitos na ordem do pr\xF3prio Compose, ent\xE3o o `file` devolvido \xE9 o que de fato sobe; os demais v\xEAm em `ignored`. Devolve tamb\xE9m as PORTAS publicadas no host (`ports`), lidas do arquivo: \xE9 o `published` delas que a custom_port do site precisa espelhar, e uma diverg\xEAncia entre os dois d\xE1 502 num deploy que rodou inteiro sem erro. Lista vazia significa que o arquivo n\xE3o publica porta nenhuma; `parse_error` significa que o YAML n\xE3o p\xF4de ser lido \u2014 n\xE3o confunda os dois. `cloudez_file` \xE9 a sobreposi\xE7\xE3o de produ\xE7\xE3o, quando o projeto tem uma: o deploy a mescla no servidor com `-f`, e \xE9 nela que moram as diferen\xE7as entre a m\xE1quina do usu\xE1rio e o servidor. Havendo `cloudez_file`, as `ports` acima s\xE3o as do arquivo BASE e podem n\xE3o ser as que produ\xE7\xE3o publica \u2014 leia a sobreposi\xE7\xE3o antes de afirmar qualquer coisa sobre a porta. `cloudez_ambiguous` \xE9 erro a corrigir: com duas grafias presentes o deploy falha.",
     inputSchema: object({
       directory: string2().optional().describe("Diret\xF3rio a inspecionar. Sem ele, o diret\xF3rio atual do projeto.")
     }),
