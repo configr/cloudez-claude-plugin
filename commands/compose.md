@@ -249,13 +249,26 @@ dev-ismos perigosos moram justamente nas listas:
 | falta `restart: unless-stopped` | sim, é acréscimo | `restart: unless-stopped` |
 | `build: {target: dev}` | **não** | `build: {target: !reset null}` |
 | `ports: ["3000:3000"]` | **não**, acumula | `ports: !override` com o mapeamento certo |
-| `volumes: [".:/app"]` | **não**, acumula | `!reset` ou `!override` — ver abaixo |
+| `volumes: [".:/app"]` | **não** (ver abaixo) | `!reset` ou `!override` |
 | serviço só de dev (Adminer, Mailhog) | **não**, não há como remover | `profiles: ["dev"]` no serviço |
 | `- ./storage:/app/storage` | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
 
 Acrescentar `127.0.0.1:3000:3000` a um `3000:3000` que já existe deixa os **dois**
 publicados: conflito de porta, e a aplicação exposta por fora do nginx do mesmo
 jeito. `!override` troca a lista inteira, `!reset` apaga o campo.
+
+As duas listas não se comportam igual, e a diferença importa na hora de escrever:
+
+- **`ports` acumula de verdade.** Todo mapeamento novo se soma aos que já
+  existem, e não há como remover um sem `!override`;
+- **`volumes` mescla por ALVO dentro do container.** Declarar `./dados:/app/x`
+  substitui um `dados:/app/x` do arquivo base, porque o alvo é o mesmo. O que
+  sobrevive é o que tem alvo *diferente* — e é exatamente o caso do `- .:/app`,
+  que continua montado a menos que você o remova com `!reset` ou `!override`.
+
+Na prática a conduta é a mesma para as duas: seja explícito. Contar com a
+substituição por alvo funciona até alguém acrescentar uma linha com outro alvo ao
+arquivo base, e aí ela vaza para produção sem ninguém perceber.
 
 Em `volumes`, escolha com cuidado: `!reset null` só serve quando não há nada a
 preservar. Havendo volume nomeado — e o passo 2 exige que haja, para o dado que
