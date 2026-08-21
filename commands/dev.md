@@ -1,7 +1,7 @@
 ---
-description: Sobe o site localmente em container e abre no navegador do Claude Code
+description: Sobe o site localmente — pelo dev server do projeto, ou em container — e abre no navegador do Claude Code
 argument-hint: "[diretório]"
-allowed-tools: mcp__cloudez__cloudez_find_compose, mcp__Claude_Browser__preview_start, mcp__Claude_Browser__preview_logs, mcp__Claude_Browser__preview_list, mcp__Claude_Browser__preview_stop, Read, Write, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_find_compose, Glob, Grep, mcp__Claude_Browser__preview_start, mcp__Claude_Browser__preview_logs, mcp__Claude_Browser__preview_list, mcp__Claude_Browser__preview_stop, Read, Write, AskUserQuestion
 ---
 
 Subir a aplicação na máquina do usuário e abrir no painel de navegador, para ele
@@ -15,12 +15,11 @@ servidor ou o estado de deploy. Se o usuário quiser publicar, o comando é o
 
 ## O que sobe é a configuração de DESENVOLVIMENTO
 
-Um `docker compose up` sem argumento lê só o arquivo base. A sobreposição de
-produção (`docker-compose.cloudez.yml`) **não entra** — ninguém passa `-f` aqui,
-e é assim que ela foi desenhada.
+Nunca a de produção. Num Compose, um `docker compose up` sem argumento lê só o
+arquivo base — a sobreposição (`docker-compose.cloudez.yml`) não entra, porque
+ninguém passa `-f` aqui.
 
-Isso importa em duas direções, e as duas merecem ser ditas ao usuário quando o
-projeto tiver sobreposição:
+Isso importa em duas direções, e as duas merecem ser ditas ao usuário:
 
 - o que ele vê aqui **não** é o que vai ao ar. Bind mount do fonte, porta em
   `0.0.0.0`, `command` de dev — tudo o que a sobreposição remove continua valendo
@@ -28,17 +27,64 @@ projeto tiver sobreposição:
 - e por isso mesmo o que funciona aqui pode falhar lá. Este comando não substitui
   o passo de verificação do `/cloudez:deploy`.
 
-## 1. Achar o Compose e a porta
+**No caminho do dev server (abaixo) o aviso é mais forte ainda**, porque ali nem o
+Dockerfile é executado: o que roda é o Node da máquina do usuário, com as
+dependências dela. Passar aqui diz menos sobre produção do que passar no
+container.
+
+## 1. Decidir o que subir
+
+Duas leituras, e elas decidem o caminho:
 
 ```
 cloudez_find_compose(directory: "<diretório>")
 ```
 
-**`compose: false` — pare.** Não há o que subir. Ofereça o `/cloudez:compose`.
+**`compose: false` — pare.** Este plugin publica aplicação em container: sem
+Compose não há o que este comando prepare para o deploy. Ofereça o
+`/cloudez:compose`.
 
-A porta é o que decide se o navegador vai encontrar alguma coisa. O retorno traz
-`ports`, e o que interessa é o **`published`** — a porta do host, não a do
-container:
+Depois, **leia o `package.json`** do diretório.
+
+| O que você encontra | O caminho |
+|---|---|
+| `scripts.dev` no `package.json` | **dev server** — `npm run dev`. É a exceção, e a seção seguinte explica |
+| sem `scripts.dev` | **container** — `docker compose up --build` |
+
+### A exceção: projeto Node roda pelo dev server
+
+Num projeto Node — Next, Vite, Remix —, subir o container para desenvolver é o
+pior dos dois mundos: `--build` refaz a imagem a cada alteração, e o que se quer
+localmente é recarregar em um segundo. O `npm run dev` dá hot reload; o container
+dá um `npm ci` completo por mudança de uma linha.
+
+**Isto vale só aqui.** O deploy não muda em nada: no servidor continua sendo o
+Dockerfile e o Compose, com a sobreposição por cima. A exceção é do ambiente de
+desenvolvimento, não do projeto.
+
+Três coisas a conferir antes de propor:
+
+**As dependências estão instaladas?** Sem `node_modules`, o dev server morre na
+primeira linha. Se faltar, diga ao usuário para rodar `npm ci` antes — não instale
+por conta própria, é a máquina dele e o comando pode levar minutos.
+
+**A aplicação depende de outros serviços?** Se o Compose tiver mais de um serviço
+— banco, redis, fila —, o `npm run dev` sobe só a aplicação e os outros ficam de
+fora. O arranjo certo é híbrido: os serviços de apoio pelo Compose
+(`docker compose up -d <serviço>`) e a aplicação pelo npm. Diga isso ao usuário e
+proponha os dois.
+
+**Em que porta o dev server escuta?** Ela **não** é o `published` do Compose —
+aquela é a porta do container, e aqui não há container. Leia o script: `next dev`
+sem argumento é 3000, `vite` é 5173. Se o script não fixar a porta, prefira fixá-la
+no comando (`next dev -p 3000`, `vite --port 5173`), para o que está no
+`launch.json` não poder divergir do que a aplicação abre. E **declare a
+suposição** quando tiver feito uma.
+
+### A porta, no caminho do container
+
+O retorno do `find_compose` traz `ports`, e o que interessa é o **`published`** —
+a porta do host, não a do container:
 
 | O que você vê | O que fazer |
 |---|---|
@@ -60,8 +106,26 @@ diretório da sessão — o alvo do comando não entra nessa conta.
 
 São dois casos, então.
 
-**A sessão está aberta no projeto** — o comum. O arquivo é do projeto, o compose
-é encontrado pelo diretório atual, e a entrada é a mais simples:
+**A sessão está aberta no projeto** — o comum. O arquivo é do projeto, e a
+entrada depende do caminho decidido no passo 1.
+
+Dev server:
+
+```json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cloudez-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    }
+  ]
+}
+```
+
+Container:
 
 ```json
 {
@@ -81,8 +145,12 @@ Diga ao usuário que este arquivo costuma ser versionado: quem trabalha no mesmo
 repositório ganha o comando de graça.
 
 **O diretório é outro** — quando o argumento aponta para fora da sessão. O arquivo
-tem de ficar no diretório da sessão assim mesmo, e quem aponta para o projeto são
-as flags do próprio Compose:
+tem de ficar no diretório da sessão assim mesmo, e quem aponta para o projeto é a
+própria ferramenta:
+
+```json
+"runtimeArgs": ["--prefix", "<diretório>", "run", "dev"]
+```
 
 ```json
 "runtimeArgs": [
@@ -100,8 +168,17 @@ sentido.
 
 ### O que não varia
 
-O `port` é o `published` do passo 1, **sempre** — não o da aplicação dentro do
-container, e nunca um número presumido.
+O `port` é o do passo 1, **sempre**, e nunca um número presumido: o `published` do
+Compose no caminho do container, o do dev server no outro. Errar aqui dá página em
+branco — o painel abre num endereço onde não há nada.
+
+No caminho do dev server não há `-C` nem `-p`, mas o problema do diretório é o
+mesmo — e a solução também. Projeto fora da sessão usa `--prefix`, que roda o
+script com o diretório de trabalho na pasta apontada (verificado):
+
+```json
+"runtimeArgs": ["--prefix", "<diretório>", "run", "dev"]
+```
 
 O `--build` é deliberado: sem ele o `up` reaproveita a imagem da última vez, e o
 usuário olharia para o código anterior achando que está vendo o novo. É o mesmo
@@ -125,9 +202,11 @@ apontando para este projeto, use a que existe em vez de criar uma segunda.
 preview_start(name: "cloudez-local")
 ```
 
-Ele sobe o container e abre o painel. O primeiro `up` de um projeto leva o tempo
-do build da imagem, que num projeto Node é minuto, não segundo — **avise antes**,
-senão o silêncio parece travamento.
+Ele sobe o que o passo 2 declarou e abre o painel.
+
+O dev server responde em segundos. **O container não**: o primeiro `up` leva o
+tempo do build da imagem, que num projeto Node é minuto — **avise antes**, senão o
+silêncio parece travamento.
 
 Se o retorno trouxer `reused: true`, o servidor já estava de pé: não houve build,
 e o que está na tela pode ser de antes da última alteração. Diga isso.
@@ -145,6 +224,8 @@ preview_logs(serverId: "<do retorno>", level: "error")
 | falha no build | O mesmo que falharia no deploy: Dockerfile, dependência, contexto. Corrija e suba de novo |
 | `port is already allocated` | Outra coisa já ocupa a porta do host — inclusive um `up` anterior deste mesmo projeto. `preview_list` mostra o que está de pé |
 | sobe, mas a página não carrega | A aplicação escuta em `127.0.0.1` DENTRO do container, e o mapeamento não alcança. Precisa ser `0.0.0.0` — a mesma restrição do passo 2 do `/cloudez:compose` |
+| `Cannot find module` ou `command not found: next` | Caminho do dev server sem `npm ci`. As dependências não estão instaladas |
+| a página abre mas falha ao buscar dados | Caminho do dev server num projeto com serviços de apoio: o banco não subiu junto. Suba-o pelo Compose |
 
 Para derrubar: `preview_stop(serverId)`.
 
