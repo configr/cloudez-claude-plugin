@@ -111,7 +111,10 @@ habilitar, desabilitar e atualizar. Atualizações chegam com
 
 Com o plugin ativo:
 
-- `/cloudez:login` — verifica se há token da Cloudez salvo e conduz o login;
+- `/cloudez:login` — verifica se há token da Cloudez salvo e, se não houver,
+  conduz o usuário até ele: pergunta se já tem conta, aponta a página certa do
+  painel dele (ou o cadastro, se for o caso) e captura o token sem que ele passe
+  pela conversa;
 - `/cloudez:setup <domain> <environment>` — cria o `.cloudez.yaml` do projeto, se
   ainda não existir. Os dois argumentos são obrigatórios: o domínio identifica o
   site, o environment dá nome ao bloco gerado. Faltando algum, o comando pergunta.
@@ -224,7 +227,14 @@ pbpaste | bin/cloudez-login --stdin   # token do clipboard, sem prompt e sem TTY
 bin/cloudez-login                     # pergunta o token. Exige terminal
 ```
 
-**Token é a única forma de autenticar.** Gere no painel da Cloudez.
+**Token é a única forma de autenticar.** Gere no painel da Cloudez, em
+`https://<domínio-do-painel>/account?tab=token`.
+
+O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
+`cloud.configr.com` é o da Configr, não é "o" painel. Quem ainda não tem conta
+cria em <https://cloud.configr.com/register> e define a senha por um e-mail que
+chega depois do cadastro. O `/cloudez:login` conduz os dois caminhos, e é ele que
+pergunta o domínio em vez de presumir um.
 
 O `cloudez-login` só **coleta e grava**. Quem responde se você está autenticado é
 a tool `cloudez_auth_status` do MCP, porque é o MCP que usa o token contra a API —
