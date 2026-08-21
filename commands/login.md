@@ -46,6 +46,7 @@ Então diga, com o domínio dele já aplicado:
 ```
 Abra: https://<host>/account?tab=token
 Gere o token e copie (Ctrl+C / Cmd+C).
+Me avise quando tiver copiado o token.
 ```
 
 ### Se não tem conta
@@ -64,7 +65,18 @@ já tinha conta:
 ```
 Abra: https://cloud.configr.com/account?tab=token
 Gere o token e copie (Ctrl+C / Cmd+C).
+Me avise quando tiver copiado o token.
 ```
+
+### Como fechar a mensagem
+
+O "me avise quando tiver copiado" acima pressupõe que **você** vai capturar o
+token — o caso do `clipboard_command`, que é o comum. Confira o retorno do
+`cloudez_auth_status` **antes** de escrever a mensagem: sem esse campo, quem
+executa é o usuário, e a última linha vira o comando do passo 2.2 em vez do aviso.
+
+Errar isso custa uma ida e volta boba: ele copia, avisa, e só então descobre que
+ainda falta rodar alguma coisa.
 
 **Não peça e-mail nem telefone.** O cadastro é preenchido por ele, no site da
 Configr. Pedir aqui traria dado pessoal para o transcript sem nenhum uso: não há
@@ -78,13 +90,20 @@ seu contexto em nenhum dos caminhos.**
 
 Use os campos da resposta do `cloudez_auth_status`, nesta ordem:
 
-**1. Se vier `clipboard_command`** — é o caminho melhor, e você mesmo pode
-executar. Quando ele confirmar que copiou, rode o `clipboard_command` (algo como
-`pbpaste | /caminho/bin/cloudez-login --stdin`).
+**1. Se vier `clipboard_command`** — é o caminho melhor, e **quem executa é você**.
 
-Espere a confirmação. Rodar `pbpaste` antes é ler o clipboard dele sem motivo — e
-se houver outra coisa lá, esse conteúdo vai para a API da Cloudez como candidato
-a token.
+Peça só uma coisa ao usuário: que copie o token e avise. Nada além disso.
+
+**Não mostre o comando a ele.** Exibir o `pbpaste | ... --stdin` faz parecer que
+ele é que deve rodá-lo, e aí ou ele executa sem precisar, ou fica esperando para
+ver quem vai primeiro. A instrução tem de terminar em "me avise quando tiver
+copiado o token" e mais nada — o pipe é assunto seu.
+
+**Espere a confirmação** antes de rodar. Rodar `pbpaste` antes é ler o clipboard
+dele sem motivo — e se houver outra coisa lá, esse conteúdo vai para a API da
+Cloudez como candidato a token.
+
+Confirmado, rode o `clipboard_command` como ele veio, sem reescrever o caminho.
 
 **2. Se não vier `clipboard_command`, ou o passo 1 falhar** — repasse o
 `claude_code_command` e peça para ele **enviar como mensagem**:
