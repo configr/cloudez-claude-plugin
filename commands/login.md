@@ -54,17 +54,12 @@ Gere o token e copie (Ctrl+C / Cmd+C).
 e é o padrão de quem está começando — não o repita para quem já tem conta em outra
 revenda.
 
-Diga o que vai acontecer, para ele não travar esperando algo que não vem por aqui:
+O cadastro se resolve inteiro no site, senha inclusive — não há etapa em que o
+plugin participe, e não há o que esperar aqui. Passe o segundo endereço junto com
+o primeiro, para ele não voltar só para perguntar qual é o próximo passo.
 
-1. ele preenche o cadastro no site;
-2. chega um **e-mail para definir a senha** — o plugin não participa dessa etapa;
-3. definida a senha, ele entra no painel.
-
-**Espere ele confirmar que definiu a senha.** Não siga por conta própria: entre o
-cadastro e a senha há uma ida ao e-mail, e o tempo disso é dele.
-
-Confirmado, o painel é `cloud.configr.com` e o caminho é o mesmo de quem já tinha
-conta:
+O painel dele é `cloud.configr.com`, e daí em diante o caminho é o mesmo de quem
+já tinha conta:
 
 ```
 Abra: https://cloud.configr.com/account?tab=token

@@ -232,9 +232,8 @@ bin/cloudez-login                     # pergunta o token. Exige terminal
 
 O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
 `cloud.configr.com` é o da Configr, não é "o" painel. Quem ainda não tem conta
-cria em <https://cloud.configr.com/register> e define a senha por um e-mail que
-chega depois do cadastro. O `/cloudez:login` conduz os dois caminhos, e é ele que
-pergunta o domínio em vez de presumir um.
+cria em <https://cloud.configr.com/register>. O `/cloudez:login` conduz os dois
+caminhos, e é ele que pergunta o domínio em vez de presumir um.
 
 O `cloudez-login` só **coleta e grava**. Quem responde se você está autenticado é
 a tool `cloudez_auth_status` do MCP, porque é o MCP que usa o token contra a API —
