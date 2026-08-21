@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "cloudez",
   "description": "Desenvolve e faz deploy de sites na Cloudez a partir do Claude Code: sincronização via tar sobre ssh, ativação atômica da release e rollback.",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "author": {
     "name": "Arthur Furlan",
     "email": "arthur.furlan@gmail.com"
