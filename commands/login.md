@@ -84,6 +84,11 @@ Me avise quando tiver copiado o token.
 O cadastro se resolve inteiro no site, senha inclusive — não há etapa em que o
 plugin participe, e não há o que esperar aqui.
 
+**Não peça e-mail nem telefone.** O cadastro é preenchido por ele, no painel —
+seja o da revenda, seja o da Configr. Pedir aqui traria dado pessoal para o
+transcript sem nenhum uso: não há tool que crie conta, e criar conta em nome de
+outra pessoa não é coisa que este comando faça.
+
 ### Como fechar a mensagem
 
 O "me avise quando tiver copiado" acima pressupõe que **você** vai capturar o
@@ -93,11 +98,6 @@ executa é o usuário, e a última linha vira o comando do passo 2.2 em vez do a
 
 Errar isso custa uma ida e volta boba: ele copia, avisa, e só então descobre que
 ainda falta rodar alguma coisa.
-
-**Não peça e-mail nem telefone.** O cadastro é preenchido por ele, no site da
-Configr. Pedir aqui traria dado pessoal para o transcript sem nenhum uso: não há
-tool que crie conta, e criar conta em nome de outra pessoa não é coisa que este
-comando faça.
 
 # 2. Capturar o token
 
