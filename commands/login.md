@@ -51,22 +51,38 @@ Me avise quando tiver copiado o token.
 
 ### Se não tem conta
 
-**Mande criar em https://cloud.configr.com/register.** Este endereço é da Configr,
-e é o padrão de quem está começando — não o repita para quem já tem conta em outra
-revenda.
+**Pergunte se ele chegou por alguma revenda** — e deixe claro que "não" e "não
+sei" são respostas válidas. Não insista: quem não sabe, não sabe, e o padrão
+resolve.
 
-O cadastro se resolve inteiro no site, senha inclusive — não há etapa em que o
-plugin participe, e não há o que esperar aqui. Passe o segundo endereço junto com
-o primeiro, para ele não voltar só para perguntar qual é o próximo passo.
+Isso não é formalidade. A Cloudez é white-label, e mandar para a Configr quem foi
+atendido por uma revenda cria a conta **na empresa errada**: os sites nasceriam
+fora de quem o trouxe, e o token de um painel não vale no outro. É o mesmo erro
+que o comando evita ao não presumir domínio para quem já tem conta — só que aqui
+ele cai sobre quem tem menos condição de perceber.
 
-O painel dele é `cloud.configr.com`, e daí em diante o caminho é o mesmo de quem
-já tinha conta:
+| A resposta | O painel |
+|---|---|
+| veio por uma revenda | **peça o domínio dela**, como no ramo de quem já tem conta |
+| não veio, ou não sabe | `cloud.configr.com` — a Configr é o padrão |
+
+O caminho dentro do painel é o mesmo em qualquer revenda: o software é o mesmo, e
+tanto `/register` quanto `/account?tab=token` existem nos dois que foram
+conferidos. Se o `/register` do domínio dele não responder, não invente outro —
+diga para procurar a revenda, que pode não abrir cadastro self-service.
+
+Com o `<host>` decidido, mande os **dois endereços de uma vez**, para ele não
+voltar só para perguntar qual é o próximo passo:
 
 ```
-Abra: https://cloud.configr.com/account?tab=token
+Crie a conta: https://<host>/register
+Depois abra:  https://<host>/account?tab=token
 Gere o token e copie (Ctrl+C / Cmd+C).
 Me avise quando tiver copiado o token.
 ```
+
+O cadastro se resolve inteiro no site, senha inclusive — não há etapa em que o
+plugin participe, e não há o que esperar aqui.
 
 ### Como fechar a mensagem
 
