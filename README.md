@@ -130,9 +130,10 @@ Com o plugin ativo:
   **Se já existe um Compose no projeto, ele não é reescrito**: o arquivo é o de
   desenvolvimento, é o que o usuário roda todo dia, e as diferenças de produção
   vão para um `docker-compose.cloudez.yml` que só o servidor lê. Localmente
-  continua sendo `docker compose up`, sem argumento. Em paralelo, todo deploy em
-  container liga os diretórios de dado a `claude/shared/`, no modelo do
-  Capistrano — sem isso a poda de releases apagaria o que o container escreveu;
+  continua sendo `docker compose up`, sem argumento. Dado que precisa sobreviver
+  vai em **volume nomeado**, que a poda de releases não alcança e cuja permissão o
+  Docker resolve sozinho; quem preferir o dado visível no host usa bind relativo,
+  e aí o deploy o liga a `claude/shared/` no modelo do Capistrano;
 - `/cloudez:deploy [environment] [diretório]` — o deploy. Confirma o site na
   Cloudez antes de qualquer coisa, então **exige autenticação**. Também é
   acionado quando você pedir em linguagem natural ("sobe o site", "publica em
@@ -344,9 +345,9 @@ depende dele precisa de `depends_on: !reset null` — sem isso o Compose recusa 
 projeto inteiro. Engines disponíveis variam por empresa: confira com
 `cloudez_list_database_types`.
 
-**No container** — o dado vai para `shared/` como qualquer outro, e o projeto passa
-a ser responsável pelo backup: dumps lógicos em `<root>/shared/backup/<engine>/`,
-com 7 diários e 4 semanais.
+**No container** — o dado vai em volume nomeado, e o projeto passa a ser
+responsável pelo backup: dumps lógicos em `<root>/shared/backup/<engine>/`, com 7
+diários e 4 semanais.
 
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
@@ -687,6 +688,27 @@ que a suíte usa para isolar.
 precisaria do destino para ser lido — que é o dado que ele contém. Além disso o
 sync deixaria de funcionar sem token, já que resolver o destino de novo passa
 pela API.
+
+### Onde o dado persistente mora
+
+**Volume nomeado é o padrão**, em produção e em desenvolvimento — o mesmo arquivo
+nos dois lugares. Ele não está em `releases/`, então a poda não o alcança, e o
+Docker inicializa dono e modo a partir da imagem, o que resolve a permissão sem
+`user:` nem `chown`.
+
+O custo é o nome: `<projeto>_<volume>`, com o projeto derivado do domínio. Mudou o
+projeto, o volume antigo é orfanado e a aplicação sobe com um vazio, sem erro —
+foi o que a migração do Compose v1 para v2 provocaria. E o dado não está na árvore
+do site, então backup precisa ser dump lógico e não `tar` de diretório.
+
+**Bind relativo continua suportado**, como caminho alternativo para quem quer o
+dado visível no host. Nesse caso o deploy o liga a `<root>/shared/<nome>` por
+symlink refeito a cada deploy, com semeadura a partir da release anterior — e a
+permissão volta a ser responsabilidade do projeto (`user:` na sobreposição).
+
+**Trocar de um para o outro não migra dado.** São lugares diferentes, e nenhum lê
+o outro: a aplicação sobe apontando para o novo, vazio, sem erro em lugar nenhum.
+A cópia é manual, com o container parado, antes do deploy que muda o arquivo.
 
 ### O manifesto da release, no servidor
 

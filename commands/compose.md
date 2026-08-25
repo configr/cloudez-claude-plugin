@@ -147,35 +147,65 @@ segundo dá **502** e parece problema de rede.
 Muitos frameworks escutam em `localhost` por padrão em desenvolvimento. Confira,
 e ajuste no comando de start ou por variável de ambiente.
 
-### Dado que precisa sobreviver vai para `shared/`
+### Dado que precisa sobreviver vai em VOLUME NOMEADO
 
 O deploy publica em `releases/<id>/` e aponta o symlink `current` para lá. **O
 diretório de cada release é apagado** — a retenção mantém as cinco últimas. O
 deploy que apaga não tem nada de errado, e é por isso que o dado perdido é tão
 caro de diagnosticar: ele some cinco deploys depois de ter sido escrito.
 
-`shared/` é irmão de `releases/`, então a poda nunca o alcança:
+Volume nomeado não mora ali:
 
-```
-claude/
-├── releases/20260820T…/     ← apagado na poda
-│   └── storage → ../../shared/storage
-├── current → releases/20260820T…/
-└── shared/
-    └── storage/             ← o dado mora aqui
+```yaml
+services:
+  db:
+    volumes:
+      - dados:/var/lib/postgresql/data
+volumes:
+  dados:
 ```
 
-Na prática, **bind relativo**:
+E vale **igual em desenvolvimento e em produção** — nada de sobreposição para
+volume. É o mesmo arquivo, o mesmo comportamento, e uma coisa a menos que pode
+divergir entre os dois lugares.
+
+Duas razões para ser o padrão, e as duas foram medidas:
+
+**A permissão se resolve sozinha.** O Docker inicializa o volume a partir do
+caminho dentro da IMAGEM, herdando dono e modo de lá. Uma aplicação que roda como
+`USER nextjs` escreve sem mais nada. Com bind, quem manda é a permissão do
+diretório no host, e o sintoma é 500 na primeira gravação — com o deploy verde.
+
+**E não há nada a semear.** Sem cópia, sem primeira vez, sem o risco de copiar um
+datadir enquanto o banco escreve.
+
+#### O que isso custa, para você poder dizer ao usuário
+
+**O nome do volume carrega o nome do projeto**: `<projeto>_<volume>`, e o projeto
+vem do domínio. Mudou o projeto — migração do Compose v1 para v2, troca de
+domínio —, o volume antigo é ORFANADO e a aplicação sobe com um vazio, sem erro
+nenhum. Medido: `meusite-com-br_dados` e `meusitecombr_dados` coexistem sem se
+enxergar.
+
+**E o dado sai da árvore do site.** Ele vive em `/var/lib/docker/volumes/`, então
+um `tar` de `~/<domínio>/` não o contém. Backup precisa ser dump lógico, não cópia
+de diretório.
+
+#### A alternativa: bind relativo, ligado a `shared/`
+
+Quando o usuário quiser o dado **visível no host** — para copiar com `tar`,
+inspecionar à mão, ou não depender do nome do projeto —, o caminho é o bind
+relativo:
 
 ```yaml
 volumes:
   - ./storage:/app/storage      # o deploy liga isto a shared/storage
 ```
 
-O deploy lê a configuração **efetiva** (base + sobreposição, já mesclada), e todo
-bind relativo que sobreviver vira um diretório em `shared/`, com o caminho dentro
-da release trocado por um symlink — refeito a cada deploy. É o modelo do
-Capistrano.
+O deploy lê a configuração **efetiva** (base + sobreposição, já mescladas) e todo
+bind relativo que sobreviver vira um diretório em `<root>/shared/`, com o caminho
+dentro da release trocado por um symlink refeito a cada deploy — o modelo do
+Capistrano. `shared/` é irmão de `releases/`, então a poda não o alcança.
 
 Duas coisas nunca entram, e pelo mesmo motivo — são a aplicação, não o dado:
 
@@ -184,22 +214,18 @@ Duas coisas nunca entram, e pelo mesmo motivo — são a aplicação, não o dad
   raiz, e `- ./api:/app` com contexto `./api` é a mesma situação uma pasta abaixo.
   O que está *sob* o contexto continua entrando: `./api/uploads` é dado.
 
-Vale para todo site em container, com sobreposição ou sem — o bind relativo
-aponta para dentro da release de qualquer jeito.
+Escolhendo este caminho, **a permissão volta a ser problema seu** — é a seção
+seguinte, e ela só vale aqui.
 
-Na primeira vez o `shared/` é **semeado**, e a fonte importa. Num site que já
-rodava, o dado de produção está na release **anterior** — é lá que o container no
-ar vem escrevendo —, e é de lá que ele vem. Num site novo não há anterior, e a
-fonte é o que a release traz, para um projeto que versiona `storage/` com
-estrutura dentro não quebrar.
+Na primeira vez o `shared/` é semeado a partir da release anterior, quando há dado
+nela. Diga ao usuário quando o retorno trouxer `compose.shared_migrated`: aquele
+deploy **moveu o dado de produção** de lugar.
 
-Dali em diante quem manda é o `shared/`, e o que a release trouxer é descartado.
-Tem de ser assim: se a release pudesse sobrescrever, todo deploy apagaria
-produção.
-
-Diga isso ao usuário quando o retorno trouxer `compose.shared_migrated`: aquele
-deploy **moveu o dado de produção** para um lugar novo. É a operação mais
-consequente que o deploy faz sem ninguém ter pedido.
+**Trocar de um caminho para o outro NÃO migra dado.** Volume nomeado e `shared/`
+são lugares diferentes, e nenhum dos dois lê o outro: a aplicação sobe apontando
+para o novo, que está vazio, sem erro em lugar nenhum. Quem já publicou precisa
+copiar o conteúdo com o container parado ANTES do deploy que muda o arquivo — e
+isso é ação do usuário, no servidor.
 
 E **não monte o código-fonte no container** (`- .:/app`). Além de apagar o que a
 imagem construiu, é o caso que o deploy recusa a compartilhar — se ele fosse para
@@ -210,6 +236,9 @@ sempre está lá — de propósito, porque localmente é exatamente o que se que
 apague do arquivo do usuário: remova na sobreposição (passo 3).
 
 ### O container precisa CONSEGUIR escrever em `shared/`
+
+**Só vale no caminho do bind.** Com volume nomeado o Docker herda dono e modo da
+imagem, e nada disto se aplica — é a principal razão de ele ser o padrão.
 
 Esta é a que mais custa a aparecer, porque o deploy fica verde inteiro.
 
@@ -313,10 +342,12 @@ conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega 
 rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
 certo, é aqui.
 
-#### Opção 2 — no container, com o dado em `shared/`
+#### Opção 2 — no container
 
-É o caminho que o passo 2 já descreve: bind relativo, que o deploy liga a
-`shared/`. Nada muda no Compose além do que já está escrito ali.
+O dado vai em **volume nomeado**, como manda o passo 2 — e aqui a razão pesa mais
+que em qualquer outro caso: o Postgres roda como o usuário `postgres` da imagem, e
+com bind a permissão do diretório no host é que decide. Volume nomeado herda a
+dona certa e o banco sobe.
 
 O que muda é a obrigação: **banco no container exige backup**, e ele não vem de
 graça como na opção 1. Os dumps vão para
@@ -328,6 +359,10 @@ graça como na opção 1. Os dumps vão para
 com retenção de **7 diários e 4 semanais** — `shared/` é irmão de `releases/`, então
 a poda de release não os alcança, e sem retenção eles enchem o disco do servidor
 pelo mesmo motivo que criou o `KEEP_RELEASES`.
+
+Repare que o DUMP vai para `shared/` mesmo com o banco em volume nomeado: são
+coisas diferentes. O volume é onde o banco vive; `shared/backup/` é onde ficam as
+cópias, e ali elas são visíveis no host e entram num `tar` do diretório do site.
 
 **O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
 container em pé. Copiar o datadir de um banco em uso produz cópia inconsistente —
@@ -391,7 +426,8 @@ dev-ismos perigosos moram justamente nas listas:
 | `volumes: [".:/app"]` | **não** (ver abaixo) | `!reset` ou `!override` |
 | serviço só de dev (Adminer, Mailhog) | **não**, não há como remover | `profiles: ["dev"]` no serviço |
 | serviço de banco, com a opção 1 | **não** | `profiles: ["dev"]` no banco **e** `depends_on: !reset null` em quem depende dele |
-| `- ./storage:/app/storage` | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
+| `- dados:/app/dados` (volume nomeado) | nada a fazer | deixe: ele não está na release |
+| `- ./storage:/app/storage` (bind, caminho alternativo) | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
 | `USER` não-root no Dockerfile | não se aplica | `user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"` — ver passo 2 |
 
 Acrescentar `127.0.0.1:3000:3000` a um `3000:3000` que já existe deixa os **dois**
