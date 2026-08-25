@@ -378,9 +378,14 @@ Repare que o DUMP vai para `shared/` mesmo com o banco em volume nomeado: são
 coisas diferentes. O volume é onde o banco vive; `shared/backup/` é onde ficam as
 cópias, e ali elas são visíveis no host e entram num `tar` do diretório do site.
 
-**O dump é lógico, nunca cópia de arquivo:** `pg_dumpall`/`mysqldump` contra o
-container em pé. No Postgres é `pg_dumpall` de propósito — leva os ROLES junto, e
-um dump só das tabelas restaura num banco onde os usuários não existem.
+**O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
+container em pé.
+
+No Postgres é `pg_dump` do banco da aplicação (o `POSTGRES_DB` da imagem). **Duas
+coisas ficam de fora, e quem for restaurar precisa saber:** os ROLES — o dump supõe
+que o usuário já exista na base de destino — e qualquer outro banco que exista no
+mesmo container. Para o arranjo padrão, um serviço com um banco criado pela própria
+imagem, os dois são o mesmo banco e não falta nada.
 
 Três coisas que o script recusa a fazer, e que valem ser ditas se alguém perguntar
 por que ele é mais que uma linha de `crontab`:

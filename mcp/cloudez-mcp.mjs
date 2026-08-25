@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.10 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.11 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -28264,6 +28264,11 @@ gzip -t "$TMP" 2>/dev/null || falhar "o arquivo gerado n\xE3o \xE9 um gzip \xEDn
 # O piso \xE9 sobre o conte\xFAdo DESCOMPRIMIDO, e a diferen\xE7a n\xE3o \xE9 detalhe: o gzip de
 # um dump vazio \u2014 ou de uma mensagem de erro repetida \u2014 cabe em poucas dezenas de
 # bytes, e um piso medido no .gz o aprovaria. O que interessa \xE9 o tamanho do SQL.
+#
+# 512 tem folga curta de prop\xF3sito: MEDIDO, o menor dump leg\xEDtimo \xE9 o \`pg_dump\` de
+# um banco sem tabela nenhuma, com 643 bytes s\xF3 de cabe\xE7alho e SET. Subir o piso
+# passaria a recusar o backup de um banco rec\xE9m-criado, que \xE9 exatamente quando
+# ningu\xE9m est\xE1 olhando.
 bruto=$(gzip -dc "$TMP" | wc -c | tr -d ' ')
 [ "$bruto" -ge 512 ] || falhar "o dump tem $bruto bytes de SQL: pequeno demais para ser um banco"
 tam=$(wc -c < "$TMP" | tr -d ' ')
@@ -28295,7 +28300,7 @@ echo "BACKUP_OK $ALVO $tam"
 }
 function comandoDeDump(engine) {
   if (engine === "postgresql") {
-    return `$DC $FILES -p "$PROJECT" exec -T "$SERVICE" sh -c 'exec pg_dumpall -U "\${POSTGRES_USER:-postgres}"'`;
+    return `$DC $FILES -p "$PROJECT" exec -T "$SERVICE" sh -c 'exec pg_dump -U "\${POSTGRES_USER:-postgres}" -d "\${POSTGRES_DB:-\${POSTGRES_USER:-postgres}}"'`;
   }
   return `$DC $FILES -p "$PROJECT" exec -T "$SERVICE" sh -c 'D=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && D=mariadb-dump; export MYSQL_PWD="\${MYSQL_ROOT_PASSWORD:-}"; exec "$D" -u root --all-databases --single-transaction --routines --events'`;
 }

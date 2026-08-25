@@ -351,7 +351,7 @@ disseram, que o cliente do banco existe naquela imagem e que o container respond
 a `exec`. Sem ela, o primeiro sinal de que nada disso é verdade seria uma
 restauração que não acontece.
 
-Os dumps são **lógicos** (`pg_dumpall`/`mysqldump` contra o container em pé), vão
+Os dumps são **lógicos** (`pg_dump`/`mysqldump` contra o container em pé), vão
 para `<root>/shared/backup/<engine>/` e ficam 7 diários e 4 semanais. O dump vai
 para `shared/` mesmo com o banco em volume nomeado — o volume é onde o banco vive,
 e `shared/backup/` é onde as cópias ficam visíveis no host.
