@@ -331,24 +331,78 @@ inconsistente. Se o arquivo do usuário já tiver um `- ./pgdata:/var/lib/...`,
 troque por volume nomeado na sobreposição e **avise que aquilo é uma mudança de
 lugar do dado** — o banco não migra sozinho.
 
-#### O que isso obriga: backup é seu
+#### O que isso obriga: backup é seu — e ele se configura em duas chamadas
 
-É o preço desta opção, e ele é real. Os dumps vão para
+É o preço desta opção, e ele é real. Não deixe o usuário com a instrução
+escrita e nada rodando: **um banco no container sem cron de backup é a opção
+padrão pela metade.**
+
+**1. Instalar e provar que funciona**
 
 ```
-<root>/shared/backup/<engine>/
+cloudez_install_backup(domain, root, engine, service)
 ```
 
-com retenção de **7 diários e 4 semanais** — `shared/` é irmão de `releases/`,
-então a poda de release não os alcança, e sem retenção eles enchem o disco do
-servidor pelo mesmo motivo que criou o `KEEP_RELEASES`.
+Grava `<root>/.cloudez/backup-db.sh` no servidor **e o roda uma vez**. A execução
+não é zelo: é o que separa "backup configurado" de "backup que funciona", e a
+diferença só apareceria no dia da restauração. Ela prova que o serviço se chama o
+que disseram, que o cliente do banco existe naquela imagem e que o container
+responde a `exec`.
+
+Se o retorno vier com `verificado: false`, **não agende**. O `log` diz o quê, e
+quase sempre é uma destas três: o serviço não se chama `db`, o container não está
+no ar, ou o engine não é o que se supôs.
+
+**2. Agendar**
+
+```
+cloudez_create_cron(domain, name, command, minute, hour)
+```
+
+com o `cron_command` e o `minute` que a tool anterior devolveu. O minuto é
+derivado do domínio, e não sorteado: sem isso todo site do servidor dumpa às 03:00
+em ponto. A hora padrão é 3.
+
+`cloudez_create_cron` **não é idempotente** — chamar duas vezes cria dois
+agendamentos, e o servidor passa a dumpar duas vezes. Se estiver reinstalando,
+confira no painel antes.
+
+#### O que o script faz, para você saber o que prometer
+
+Os dumps vão para `<root>/shared/backup/<engine>/`, em `diario/` e `semanal/`,
+com retenção de **7 diários e 4 semanais**. `shared/` é irmão de `releases/`,
+então a poda de release não os alcança, e sem retenção eles encheriam o disco pelo
+mesmo motivo que criou o `KEEP_RELEASES`.
 
 Repare que o DUMP vai para `shared/` mesmo com o banco em volume nomeado: são
 coisas diferentes. O volume é onde o banco vive; `shared/backup/` é onde ficam as
 cópias, e ali elas são visíveis no host e entram num `tar` do diretório do site.
 
-**O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
-container em pé.
+**O dump é lógico, nunca cópia de arquivo:** `pg_dumpall`/`mysqldump` contra o
+container em pé. No Postgres é `pg_dumpall` de propósito — leva os ROLES junto, e
+um dump só das tabelas restaura num banco onde os usuários não existem.
+
+Três coisas que o script recusa a fazer, e que valem ser ditas se alguém perguntar
+por que ele é mais que uma linha de `crontab`:
+
+- **não roda a poda antes de o dump novo estar no lugar.** Ao contrário, uma
+  semana de falhas apagaria os backups bons um por dia sem escrever nenhum novo;
+- **não aceita um dump vazio.** O `gzip` de um erro é um arquivo válido e
+  minúsculo; sem um piso sobre o SQL descomprimido, ele entraria na rotação e
+  empurraria um backup bom para fora;
+- **não confunde o status do `gzip` com o do dump.** Num pipeline o shell só olha
+  o último comando, e o dump pode morrer com o `gzip` feliz.
+
+#### Quando alguém perguntar se o backup está rodando
+
+`<root>/shared/backup/<engine>/` tem `ULTIMO_OK` e `ULTIMA_FALHA` — dois arquivos
+com data, feitos para serem lidos sem interpretar log. Havendo `ULTIMA_FALHA`, o
+`last.log` tem o erro da última execução, e o `history.log` tem uma linha por
+execução.
+
+Isso existe porque cron que falha em silêncio é o modo de falha padrão desse tipo
+de rotina: o `MAILTO` do crontab pode não estar configurado, e aí ninguém fica
+sabendo até precisar restaurar.
 
 ### E ofereça a alternativa gerenciada pela Cloudez — perguntando, não decidindo
 

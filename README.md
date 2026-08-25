@@ -339,10 +339,30 @@ resto, subindo igual na máquina de quem desenvolve e no servidor, sem depender 
 recurso provisionado na conta. O volume nomeado importa porque o Postgres roda
 como o usuário `postgres` da imagem, e volume nomeado herda essa dona.
 
-O preço é o backup, que passa a ser do projeto: dumps **lógicos** em
-`<root>/shared/backup/<engine>/`, com 7 diários e 4 semanais. O dump vai para
-`shared/` mesmo com o banco em volume nomeado — o volume é onde o banco vive, e
-`shared/backup/` é onde as cópias ficam visíveis no host.
+O preço é o backup, que passa a ser do projeto — e o plugin o configura, em vez
+de deixar a instrução escrita e nada rodando. São duas chamadas:
+`cloudez_install_backup` grava `<root>/.cloudez/backup-db.sh` no servidor **e o
+roda uma vez**, e `cloudez_create_cron` agenda pelo painel da Cloudez (e não por
+`crontab -e` no ssh, que ficaria invisível para quem administra o site e sumiria
+numa migração de servidor).
+
+A execução de verificação é o ponto: ela prova que o serviço se chama o que
+disseram, que o cliente do banco existe naquela imagem e que o container responde
+a `exec`. Sem ela, o primeiro sinal de que nada disso é verdade seria uma
+restauração que não acontece.
+
+Os dumps são **lógicos** (`pg_dumpall`/`mysqldump` contra o container em pé), vão
+para `<root>/shared/backup/<engine>/` e ficam 7 diários e 4 semanais. O dump vai
+para `shared/` mesmo com o banco em volume nomeado — o volume é onde o banco vive,
+e `shared/backup/` é onde as cópias ficam visíveis no host.
+
+O script recusa três coisas de propósito, e cada uma é um jeito conhecido de um
+backup existir sem servir: **podar antes de o dump novo estar no lugar** (uma
+semana de falhas apagaria os bons um por dia), **aceitar um dump vazio** (o gzip
+de um erro é um arquivo válido e minúsculo) e **confundir o status do gzip com o
+do dump** (num pipeline o shell só olha o último comando). Quem quiser saber se
+está rodando lê `ULTIMO_OK` e `ULTIMA_FALHA` no mesmo diretório — cron que falha
+em silêncio é o modo de falha padrão dessa rotina.
 
 **Datadir nunca vai para `shared/` por bind.** O bind relativo é para arquivo. Para
 banco ele junta a permissão dependente do host com uma semeadura que copia arquivo

@@ -26983,8 +26983,11 @@ var StdioServerTransport = class {
   }
 };
 
-// src/auth.ts
-import { readFile } from "node:fs/promises";
+// src/backup.ts
+import { createHash as createHash3 } from "node:crypto";
+
+// src/databases.ts
+import { randomBytes } from "node:crypto";
 
 // src/config.ts
 function apiUrl() {
@@ -26992,6 +26995,15 @@ function apiUrl() {
 }
 function validatePath() {
   return process.env.CLOUDEZ_API_VALIDATE_PATH || "/auth/token/validate/";
+}
+function databaseTypePath() {
+  return process.env.CLOUDEZ_API_DATABASE_TYPE_PATH || "/v3/database-type/";
+}
+function databasePath() {
+  return process.env.CLOUDEZ_API_DATABASE_PATH || "/v3/database/";
+}
+function websiteCronPath() {
+  return process.env.CLOUDEZ_API_WEBSITE_CRON_PATH || "/v3/website-cron/";
 }
 function sitePath(domain) {
   const template = process.env.CLOUDEZ_API_SITE_PATH || "/v3/website/?domain={domain}";
@@ -27016,6 +27028,9 @@ function tokenFile() {
   const home = process.env.HOME || process.env.USERPROFILE || "";
   return `${home}/.cloudez/token`;
 }
+
+// src/auth.ts
+import { readFile } from "node:fs/promises";
 
 // src/errors.ts
 var ToolError = class extends Error {
@@ -27103,140 +27118,6 @@ async function requireToken() {
   return token;
 }
 
-// src/deploys.ts
-import { randomUUID } from "node:crypto";
-
-// src/local.ts
-var import_yaml = __toESM(require_dist2(), 1);
-import { createHash } from "node:crypto";
-import { readdir, readFile as readFile2, stat } from "node:fs/promises";
-import { join } from "node:path";
-var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
-var CLOUDEZ_OVERLAY_FILES = [
-  "docker-compose.cloudez.yml",
-  "docker-compose.cloudez.yaml",
-  "compose.cloudez.yml",
-  "compose.cloudez.yaml"
-];
-var COMPOSE_OVERRIDE_FILES = [
-  "compose.override.yaml",
-  "compose.override.yml",
-  "docker-compose.override.yaml",
-  "docker-compose.override.yml"
-];
-function extrairPortas(doc) {
-  const portas = [];
-  const services = doc?.services;
-  if (!services || typeof services !== "object") return portas;
-  for (const [service, corpo] of Object.entries(services)) {
-    const lista = corpo?.ports;
-    if (!Array.isArray(lista)) continue;
-    for (const item of lista) {
-      if (item && typeof item === "object") {
-        const o = item;
-        const porta2 = { service };
-        if (o.published !== void 0) porta2.published = String(o.published);
-        if (o.target !== void 0) porta2.target = String(o.target);
-        if (typeof o.host_ip === "string") porta2.host_ip = o.host_ip;
-        portas.push(porta2);
-        continue;
-      }
-      const bruto = String(item);
-      const partes = bruto.split(":");
-      const porta = { service };
-      if (partes.length === 1) {
-        porta.target = partes[0];
-      } else {
-        porta.target = partes[partes.length - 1];
-        porta.published = partes[partes.length - 2];
-        if (partes.length >= 3) porta.host_ip = partes.slice(0, partes.length - 2).join(":");
-      }
-      portas.push(porta);
-    }
-  }
-  return portas;
-}
-async function findCompose(directory = ".") {
-  const encontrados = [];
-  for (const nome of COMPOSE_FILES) {
-    try {
-      if ((await stat(join(directory, nome))).isFile()) encontrados.push(nome);
-    } catch {
-    }
-  }
-  if (encontrados.length === 0) {
-    try {
-      if (!(await stat(directory)).isDirectory()) throw new Error("nao e diretorio");
-    } catch {
-      throw new ToolError("dir_not_found", `Diret\xF3rio '${directory}' n\xE3o existe.`, {
-        hint: "Informe o diret\xF3rio que ser\xE1 publicado, ou nenhum para usar o atual."
-      });
-    }
-    return { directory, compose: false };
-  }
-  const [file, ...ignored] = encontrados;
-  const result = { directory, compose: true, file };
-  if (ignored.length > 0) result.ignored = ignored;
-  const overlays = [];
-  for (const nome of CLOUDEZ_OVERLAY_FILES) {
-    try {
-      if ((await stat(join(directory, nome))).isFile()) overlays.push(nome);
-    } catch {
-    }
-  }
-  if (overlays.length === 1) result.cloudez_file = overlays[0];
-  else if (overlays.length > 1) result.cloudez_ambiguous = overlays;
-  try {
-    result.ports = extrairPortas((0, import_yaml.parse)(await readFile2(join(directory, file), "utf8")));
-  } catch (err) {
-    result.parse_error = err instanceof Error ? err.message : String(err);
-  }
-  return result;
-}
-function fingerprint(material) {
-  const blob = Buffer.from(material, "base64");
-  return "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
-}
-async function listLocalSshKeys() {
-  const directory = process.env.CLOUDEZ_SSH_DIR || join(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
-  let entradas;
-  try {
-    entradas = await readdir(directory);
-  } catch {
-    throw new ToolError("no_ssh_dir", `N\xE3o h\xE1 diret\xF3rio ${directory} nesta m\xE1quina.`, {
-      hint: "Pe\xE7a ao usu\xE1rio para gerar um par de chaves com: ssh-keygen -t ed25519"
-    });
-  }
-  const keys = [];
-  for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
-    const caminho = join(directory, nome);
-    let conteudo;
-    try {
-      conteudo = await readFile2(caminho, "utf8");
-    } catch {
-      continue;
-    }
-    const [linha] = conteudo.split("\n");
-    const partes = (linha ?? "").trim().split(/\s+/);
-    const [type, material, ...resto] = partes;
-    if (!type || !material || !/^(ssh|ecdsa|sk)-/.test(type)) continue;
-    const comment = resto.join(" ");
-    keys.push({
-      path: caminho,
-      type,
-      key: `${type} ${material}`,
-      ...comment ? { comment } : {},
-      fingerprint: fingerprint(material)
-    });
-  }
-  if (keys.length === 0) {
-    throw new ToolError("no_public_key", `Nenhuma chave p\xFAblica SSH em ${directory}.`, {
-      hint: "Pe\xE7a ao usu\xE1rio para gerar um par com: ssh-keygen -t ed25519 \u2014 e n\xE3o gere por ele: o par tem que nascer na m\xE1quina de quem vai us\xE1-lo."
-    });
-  }
-  return { directory, keys };
-}
-
 // src/api.ts
 function classify(status, body) {
   if (status === 401) {
@@ -27293,6 +27174,7 @@ async function request(method, path, body) {
   return await response.json();
 }
 var apiGet = (path) => request("GET", path);
+var apiPost = (path, body) => request("POST", path, body);
 var apiPatch = (path, body) => request("PATCH", path, body);
 
 // src/sites.ts
@@ -27496,6 +27378,226 @@ async function listSites(query) {
     result.truncated = `A busca parou em ${MAX_SITE_PAGES} p\xE1ginas e h\xE1 mais resultados. N\xC3O conclua que um dom\xEDnio ausente daqui n\xE3o existe na conta \u2014 use cloudez_get_site com o dom\xEDnio exato para verificar.`;
   }
   return result;
+}
+
+// src/databases.ts
+var ENGINES = ["mysql", "postgresql"];
+async function listDatabaseTypes() {
+  const raw = await apiGet(databaseTypePath());
+  const lista = Array.isArray(raw) ? raw : raw?.results ?? [];
+  return lista.map((t) => t).filter((t) => typeof t?.slug === "string").map((t) => ({ id: Number(t.id), slug: String(t.slug), ...t.name ? { name: String(t.name) } : {} }));
+}
+async function createDatabase(args) {
+  const engine = String(args.engine || "").toLowerCase();
+  if (!ENGINES.includes(engine)) {
+    throw new ToolError("invalid_argument", `Engine '${args.engine}' n\xE3o \xE9 suportado.`, {
+      hint: `Os aceitos s\xE3o: ${ENGINES.join(", ")}.`
+    });
+  }
+  validarNome(args.database_name);
+  const username = args.username ?? derivarUsuario(args.database_name);
+  validarUsuario(username);
+  const found = await getSite(args.domain);
+  if (found.match !== "exact") {
+    throw new ToolError("site_not_found", `Nenhum site com o dom\xEDnio exato '${args.domain}' nesta conta.`, {
+      hint: "O banco \xE9 criado na cloud DO SITE. Sem o site n\xE3o h\xE1 como saber em qual cloud provisionar."
+    });
+  }
+  const cloud = Number(found.raw?.cloud?.id);
+  const website = Number(found.raw?.id);
+  if (!Number.isFinite(cloud) || !Number.isFinite(website)) {
+    throw new ToolError("upstream_unavailable", "O site n\xE3o trouxe cloud ou id utiliz\xE1veis.", {
+      hint: "Sem os dois n\xE3o d\xE1 para provisionar nem vincular. Confira o retorno de cloudez_get_site."
+    });
+  }
+  const tipos = await listDatabaseTypes();
+  if (tipos.length > 0 && !tipos.some((t) => t.slug === engine)) {
+    throw new ToolError("invalid_argument", `A conta n\xE3o tem '${engine}' habilitado.`, {
+      hint: `Dispon\xEDveis: ${tipos.map((t) => t.slug).join(", ") || "nenhum"}.`
+    });
+  }
+  const password = gerarSenha();
+  const criado = await apiPost(databasePath(), {
+    cloud,
+    type: engine,
+    values: [{ slug: "database_name", value: args.database_name }],
+    users: [{ username, password, host: "127.0.0.1" }],
+    websites: [website]
+  });
+  const vinculado = Array.isArray(criado?.websites) && criado.websites.length > 0;
+  return {
+    ...Number.isFinite(Number(criado?.id)) ? { id: Number(criado.id) } : {},
+    engine,
+    database_name: args.database_name,
+    username,
+    password,
+    ...criado?.host ? { host: String(criado.host) } : {},
+    ...Number.isFinite(Number(criado?.port)) ? { port: Number(criado.port) } : {},
+    cloud,
+    website,
+    // O vínculo é o que faz a aplicação enxergar o banco. A API aceitou a criação
+    // sem devolvê-lo, e afirmar que está vinculado seria afirmar o que não se viu.
+    ...vinculado ? {} : { warning: "A API n\xE3o confirmou o v\xEDnculo com o site no retorno da cria\xE7\xE3o. Confira no painel antes de apontar a aplica\xE7\xE3o para este banco." }
+  };
+}
+function validarNome(nome) {
+  if (typeof nome !== "string" || nome.length === 0 || nome.length > 62 || !/^[A-Za-z0-9_]+$/.test(nome)) {
+    throw new ToolError("invalid_argument", `Nome de banco inv\xE1lido: '${String(nome)}'.`, {
+      hint: "S\xF3 letras, n\xFAmeros e sublinhado, com no m\xE1ximo 62 caracteres. O nome tamb\xE9m precisa ser \xFAnico na cloud."
+    });
+  }
+}
+function validarUsuario(user) {
+  if (user.length === 0 || user.length > 15 || !/^[A-Za-z0-9_]+$/.test(user)) {
+    throw new ToolError("invalid_argument", `Nome de usu\xE1rio inv\xE1lido: '${user}'.`, {
+      hint: "S\xF3 letras, n\xFAmeros e sublinhado, com no m\xE1ximo 15 caracteres."
+    });
+  }
+  if (user.startsWith("pg_")) {
+    throw new ToolError("invalid_argument", `Nome de usu\xE1rio inv\xE1lido: '${user}'.`, {
+      hint: "O prefixo 'pg_' \xE9 reservado pelo PostgreSQL."
+    });
+  }
+}
+function derivarUsuario(nome) {
+  return String(nome).slice(0, 15);
+}
+function gerarSenha() {
+  return randomBytes(24).toString("base64url");
+}
+
+// src/deploys.ts
+import { randomUUID } from "node:crypto";
+
+// src/local.ts
+var import_yaml = __toESM(require_dist2(), 1);
+import { createHash } from "node:crypto";
+import { readdir, readFile as readFile2, stat } from "node:fs/promises";
+import { join } from "node:path";
+var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+var CLOUDEZ_OVERLAY_FILES = [
+  "docker-compose.cloudez.yml",
+  "docker-compose.cloudez.yaml",
+  "compose.cloudez.yml",
+  "compose.cloudez.yaml"
+];
+var COMPOSE_OVERRIDE_FILES = [
+  "compose.override.yaml",
+  "compose.override.yml",
+  "docker-compose.override.yaml",
+  "docker-compose.override.yml"
+];
+function extrairPortas(doc) {
+  const portas = [];
+  const services = doc?.services;
+  if (!services || typeof services !== "object") return portas;
+  for (const [service, corpo] of Object.entries(services)) {
+    const lista = corpo?.ports;
+    if (!Array.isArray(lista)) continue;
+    for (const item of lista) {
+      if (item && typeof item === "object") {
+        const o = item;
+        const porta2 = { service };
+        if (o.published !== void 0) porta2.published = String(o.published);
+        if (o.target !== void 0) porta2.target = String(o.target);
+        if (typeof o.host_ip === "string") porta2.host_ip = o.host_ip;
+        portas.push(porta2);
+        continue;
+      }
+      const bruto = String(item);
+      const partes = bruto.split(":");
+      const porta = { service };
+      if (partes.length === 1) {
+        porta.target = partes[0];
+      } else {
+        porta.target = partes[partes.length - 1];
+        porta.published = partes[partes.length - 2];
+        if (partes.length >= 3) porta.host_ip = partes.slice(0, partes.length - 2).join(":");
+      }
+      portas.push(porta);
+    }
+  }
+  return portas;
+}
+async function findCompose(directory = ".") {
+  const encontrados = [];
+  for (const nome of COMPOSE_FILES) {
+    try {
+      if ((await stat(join(directory, nome))).isFile()) encontrados.push(nome);
+    } catch {
+    }
+  }
+  if (encontrados.length === 0) {
+    try {
+      if (!(await stat(directory)).isDirectory()) throw new Error("nao e diretorio");
+    } catch {
+      throw new ToolError("dir_not_found", `Diret\xF3rio '${directory}' n\xE3o existe.`, {
+        hint: "Informe o diret\xF3rio que ser\xE1 publicado, ou nenhum para usar o atual."
+      });
+    }
+    return { directory, compose: false };
+  }
+  const [file, ...ignored] = encontrados;
+  const result = { directory, compose: true, file };
+  if (ignored.length > 0) result.ignored = ignored;
+  const overlays = [];
+  for (const nome of CLOUDEZ_OVERLAY_FILES) {
+    try {
+      if ((await stat(join(directory, nome))).isFile()) overlays.push(nome);
+    } catch {
+    }
+  }
+  if (overlays.length === 1) result.cloudez_file = overlays[0];
+  else if (overlays.length > 1) result.cloudez_ambiguous = overlays;
+  try {
+    result.ports = extrairPortas((0, import_yaml.parse)(await readFile2(join(directory, file), "utf8")));
+  } catch (err) {
+    result.parse_error = err instanceof Error ? err.message : String(err);
+  }
+  return result;
+}
+function fingerprint(material) {
+  const blob = Buffer.from(material, "base64");
+  return "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
+}
+async function listLocalSshKeys() {
+  const directory = process.env.CLOUDEZ_SSH_DIR || join(process.env.HOME || process.env.USERPROFILE || "", ".ssh");
+  let entradas;
+  try {
+    entradas = await readdir(directory);
+  } catch {
+    throw new ToolError("no_ssh_dir", `N\xE3o h\xE1 diret\xF3rio ${directory} nesta m\xE1quina.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par de chaves com: ssh-keygen -t ed25519"
+    });
+  }
+  const keys = [];
+  for (const nome of entradas.filter((n) => n.endsWith(".pub")).sort()) {
+    const caminho = join(directory, nome);
+    let conteudo;
+    try {
+      conteudo = await readFile2(caminho, "utf8");
+    } catch {
+      continue;
+    }
+    const [linha] = conteudo.split("\n");
+    const partes = (linha ?? "").trim().split(/\s+/);
+    const [type, material, ...resto] = partes;
+    if (!type || !material || !/^(ssh|ecdsa|sk)-/.test(type)) continue;
+    const comment = resto.join(" ");
+    keys.push({
+      path: caminho,
+      type,
+      key: `${type} ${material}`,
+      ...comment ? { comment } : {},
+      fingerprint: fingerprint(material)
+    });
+  }
+  if (keys.length === 0) {
+    throw new ToolError("no_public_key", `Nenhuma chave p\xFAblica SSH em ${directory}.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para gerar um par com: ssh-keygen -t ed25519 \u2014 e n\xE3o gere por ele: o par tem que nascer na m\xE1quina de quem vai us\xE1-lo."
+    });
+  }
+  return { directory, keys };
 }
 
 // src/ssh-target.ts
@@ -28066,6 +28168,301 @@ ${res.stderr}`;
   return saveState(state);
 }
 
+// src/backup.ts
+var DIARIOS = 7;
+var SEMANAIS = 4;
+var SCRIPT = ".cloudez/backup-db.sh";
+function absoluto(home, root) {
+  const limpo = root.replace(/^~\//, "").replace(/\/+$/, "");
+  if (limpo.startsWith("/")) return limpo;
+  return `${home.replace(/\/+$/, "")}/${limpo}`;
+}
+function minutoEstavel(domain) {
+  return createHash3("sha256").update(domain).digest()[0] % 60;
+}
+function scriptDeBackup({ root, engine, service, project }) {
+  const overlays = CLOUDEZ_OVERLAY_FILES.join(" ");
+  return `#!/bin/sh
+# Backup do banco \u2014 GERADO pelo plugin da Cloudez (cloudez_install_backup).
+# N\xE3o edite \xE0 m\xE3o: reinstalar o agendamento sobrescreve este arquivo.
+set -eu
+
+ROOT='${root}'
+ENGINE='${engine}'
+SERVICE='${service}'
+PROJECT='${project}'
+DIARIOS=${DIARIOS}
+SEMANAIS=${SEMANAIS}
+
+DEST="$ROOT/shared/backup/$ENGINE"
+mkdir -p "$DEST/diario" "$DEST/semanal"
+
+# O log guarda a \xDALTIMA execu\xE7\xE3o, n\xE3o todas: um di\xE1rio que roda por um ano
+# encheria o disco com o pr\xF3prio relato. O resumo de uma linha vai no history.log,
+# que \xE9 aparado a cada vez.
+exec >"$DEST/last.log" 2>&1
+
+agora() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+registrar() {
+  echo "$(agora) $1" >> "$DEST/history.log"
+  tail -n 200 "$DEST/history.log" > "$DEST/.history.tmp" 2>/dev/null &&
+    mv "$DEST/.history.tmp" "$DEST/history.log"
+}
+
+# Cron que falha em sil\xEAncio \xE9 o modo de falha que este script existe para n\xE3o
+# ter. O MAILTO do crontab pode n\xE3o estar configurado; o marcador em disco est\xE1
+# sempre l\xE1, e \xE9 o que o cloudez_health_check tem como ler.
+falhar() {
+  echo "FALHA: $1"
+  registrar "FALHA $1"
+  # O parcial n\xE3o pode ficar. Um dump que morre na metade deixa um arquivo do
+  # tamanho do que j\xE1 tinha sa\xEDdo, e um cron quebrado acumularia um por dia at\xE9
+  # encher o disco \u2014 falha de backup virando falha de servidor.
+  rm -f "$DEST"/.parcial-*.sql.gz
+  { agora; echo "$1"; } > "$DEST/ULTIMA_FALHA"
+  exit 1
+}
+
+cd "$ROOT/current" 2>/dev/null || falhar "n\xE3o h\xE1 release publicada em $ROOT/current"
+
+# O MESMO par de arquivos que o deploy usa. Com outro, o dump sairia de outro
+# projeto \u2014 outro banco, ou nenhum.
+base=
+for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  [ -f "$f" ] && { base=$f; break; }
+done
+[ -n "$base" ] || falhar "nenhum arquivo de compose em $ROOT/current"
+FILES="-f $base"
+for f in ${overlays}; do
+  [ -f "$f" ] && FILES="$FILES -f $f"
+done
+
+if docker compose version >/dev/null 2>&1; then DC='docker compose'
+elif command -v docker-compose >/dev/null 2>&1; then DC='docker-compose'
+else falhar "docker compose n\xE3o encontrado no PATH do cron"; fi
+
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+TMP="$DEST/.parcial-$STAMP.sql.gz"
+ALVO="$DEST/diario/$STAMP.sql.gz"
+
+# O status do DUMP, e n\xE3o o do gzip.
+#
+# \`set -e\` num pipeline olha s\xF3 o \xDALTIMO comando. Um dump que morre com o gzip
+# feliz produz um .gz v\xE1lido e VAZIO \u2014 que entraria na rota\xE7\xE3o e empurraria um
+# backup bom para fora. \xC9 exatamente o desastre que este script existe para
+# evitar, ent\xE3o o status atravessa o pipe pelo descritor 4.
+set +e
+ec=$( { { ${comandoDeDump(engine)} ; echo $? >&4 ; } | gzip -c > "$TMP" ; } 4>&1 )
+set -e
+[ "\${ec:-1}" = 0 ] || falhar "o dump saiu com status \${ec:-?} \u2014 o erro est\xE1 acima"
+
+# Tr\xEAs perguntas diferentes: o dump terminou bem, o arquivo \xE9 um gzip \xEDntegro, e
+# o SQL l\xE1 dentro tem tamanho de banco. Um dump vazio passa nas duas primeiras.
+gzip -t "$TMP" 2>/dev/null || falhar "o arquivo gerado n\xE3o \xE9 um gzip \xEDntegro"
+
+# O piso \xE9 sobre o conte\xFAdo DESCOMPRIMIDO, e a diferen\xE7a n\xE3o \xE9 detalhe: o gzip de
+# um dump vazio \u2014 ou de uma mensagem de erro repetida \u2014 cabe em poucas dezenas de
+# bytes, e um piso medido no .gz o aprovaria. O que interessa \xE9 o tamanho do SQL.
+bruto=$(gzip -dc "$TMP" | wc -c | tr -d ' ')
+[ "$bruto" -ge 512 ] || falhar "o dump tem $bruto bytes de SQL: pequeno demais para ser um banco"
+tam=$(wc -c < "$TMP" | tr -d ' ')
+
+mv "$TMP" "$ALVO"
+
+# Domingo. \`ln\` e n\xE3o \`cp\`: \xE9 o mesmo arquivo em dois lugares, e a c\xF3pia semanal
+# n\xE3o custa disco enquanto o di\xE1rio correspondente existir.
+if [ "$(date -u +%u)" = 7 ]; then
+  ln "$ALVO" "$DEST/semanal/$STAMP.sql.gz" 2>/dev/null ||
+    cp "$ALVO" "$DEST/semanal/$STAMP.sql.gz"
+fi
+
+# A poda vem DEPOIS de o dump novo estar no lugar, e nunca antes: rodando primeiro,
+# uma semana de dumps que falham deixaria o site sem backup nenhum \u2014 apagando os
+# bons um por dia, sem nunca escrever um novo.
+podar() {
+  ls -1t "$1"/*.sql.gz 2>/dev/null | tail -n +"$2" | while read -r velho; do rm -f "$velho"; done
+}
+podar "$DEST/diario" $((DIARIOS + 1))
+podar "$DEST/semanal" $((SEMANAIS + 1))
+
+rm -f "$DEST/ULTIMA_FALHA"
+rm -f "$DEST"/.parcial-*.sql.gz
+agora > "$DEST/ULTIMO_OK"
+registrar "OK $STAMP $tam"
+echo "BACKUP_OK $ALVO $tam"
+`;
+}
+function comandoDeDump(engine) {
+  if (engine === "postgresql") {
+    return `$DC $FILES -p "$PROJECT" exec -T "$SERVICE" sh -c 'exec pg_dumpall -U "\${POSTGRES_USER:-postgres}"'`;
+  }
+  return `$DC $FILES -p "$PROJECT" exec -T "$SERVICE" sh -c 'D=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && D=mariadb-dump; export MYSQL_PWD="\${MYSQL_ROOT_PASSWORD:-}"; exec "$D" -u root --all-databases --single-transaction --routines --events'`;
+}
+async function installBackup(args) {
+  const engine = String(args.engine || "").toLowerCase();
+  if (!ENGINES.includes(engine)) {
+    throw new ToolError("invalid_argument", `Engine '${args.engine}' n\xE3o \xE9 suportado.`, {
+      hint: `Os aceitos s\xE3o: ${ENGINES.join(", ")}.`
+    });
+  }
+  const service = String(args.service || "db");
+  if (!/^[A-Za-z0-9._-]+$/.test(service)) {
+    throw new ToolError("invalid_argument", `Nome de servi\xE7o inv\xE1lido: '${service}'.`, {
+      hint: "\xC9 o nome do servi\xE7o no docker-compose.yml \u2014 letras, n\xFAmeros, ponto, h\xEDfen e sublinhado."
+    });
+  }
+  const ssh = await resolveSshTarget(args.domain);
+  const home = await lerHome(ssh);
+  const root = absoluto(home, args.root);
+  const project = projectName(args.domain);
+  const script = scriptDeBackup({ root, engine, service, project });
+  const caminho = `${root}/${SCRIPT}`;
+  const gravar = `set -e
+mkdir -p '${root}/.cloudez'
+cat > '${caminho}' <<'CEZ_FIM_DO_SCRIPT'
+` + script + `CEZ_FIM_DO_SCRIPT
+chmod 700 '${caminho}'
+echo INSTALADO
+`;
+  const res = await sshRun(ssh, gravar);
+  if (res.code !== 0 || !res.stdout.includes("INSTALADO")) {
+    throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel gravar o script de backup no servidor.", {
+      hint: (res.stderr || res.stdout || "").slice(0, 400) || `O ssh saiu com c\xF3digo ${res.code}.`
+    });
+  }
+  const destino = `${root}/shared/backup/${engine}`;
+  const prova = await sshRun(ssh, `'${caminho}' || true
+cat '${destino}/last.log' 2>/dev/null || true
+`);
+  const log = `${prova.stdout}
+${prova.stderr}`.trim();
+  const ok = /BACKUP_OK\s+(\S+)\s+(\d+)/.exec(log);
+  const cronCommand = `${caminho} >/dev/null 2>&1`;
+  const minute = minutoEstavel(args.domain);
+  return {
+    script: caminho,
+    engine,
+    service,
+    project,
+    destino,
+    verificado: Boolean(ok),
+    ...ok ? { dump: ok[1], bytes: Number(ok[2]) } : {},
+    log: log.slice(0, 4e3),
+    cron_command: cronCommand,
+    minute
+  };
+}
+async function lerHome(ssh) {
+  const res = await sshRun(ssh, `printf '%s\\n' "$HOME"`);
+  const home = res.stdout.trim().split("\n").pop()?.trim() ?? "";
+  if (res.code !== 0 || !home.startsWith("/")) {
+    throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel descobrir o diret\xF3rio do usu\xE1rio no servidor.", {
+      hint: "O cron precisa de caminho absoluto \u2014 ele n\xE3o expande `~` nem tem $HOME garantido."
+    });
+  }
+  return home;
+}
+
+// src/crons.ts
+var CAMPOS = [
+  { chave: "minute", nome: "minuto", min: 0, max: 59 },
+  { chave: "hour", nome: "hora", min: 0, max: 23 },
+  { chave: "day_month", nome: "dia do m\xEAs", min: 1, max: 31 },
+  { chave: "month", nome: "m\xEAs", min: 1, max: 12 },
+  // 0 e 7 são domingo, os dois.
+  { chave: "day_week", nome: "dia da semana", min: 0, max: 7 }
+];
+async function createCron(args) {
+  if (!args.name || !String(args.name).trim()) {
+    throw new ToolError("invalid_argument", "O cron precisa de um nome.", {
+      hint: "\xC9 o que identifica o agendamento no painel. Um cron sem nome \xE9 um cron que ningu\xE9m sabe desligar."
+    });
+  }
+  if (!args.command || !String(args.command).trim()) {
+    throw new ToolError("invalid_argument", "O cron precisa de um comando.");
+  }
+  if (/[\n\r]/.test(args.command) || /[\n\r]/.test(args.name)) {
+    throw new ToolError("invalid_argument", "Nome e comando n\xE3o podem conter quebra de linha.", {
+      hint: "Para v\xE1rias etapas, ponha-as num script e agende o script."
+    });
+  }
+  const tempo = {};
+  for (const campo of CAMPOS) {
+    const valor = String(args[campo.chave] ?? "*");
+    validarCampoTempo(valor, campo);
+    tempo[campo.chave] = valor;
+  }
+  const found = await getSite(args.domain);
+  if (found.match !== "exact") {
+    throw new ToolError("site_not_found", `Nenhum site com o dom\xEDnio exato '${args.domain}' nesta conta.`, {
+      hint: "O cron pertence a um site: sem o site n\xE3o h\xE1 a quem vincul\xE1-lo."
+    });
+  }
+  const website = Number(found.raw?.id);
+  if (!Number.isFinite(website)) {
+    throw new ToolError("upstream_unavailable", "O site n\xE3o trouxe um id utiliz\xE1vel.", {
+      hint: "Sem ele n\xE3o d\xE1 para criar o cron. Confira o retorno de cloudez_get_site."
+    });
+  }
+  const criado = await apiPost(websiteCronPath(), {
+    website,
+    name: args.name,
+    command: args.command,
+    ...tempo
+  });
+  return {
+    ...Number.isFinite(Number(criado?.id)) ? { id: Number(criado.id) } : {},
+    website,
+    name: args.name,
+    command: args.command,
+    schedule: CAMPOS.map((c) => tempo[c.chave]).join(" "),
+    // A API pode devolver 201 com um corpo que não repete o que foi enviado. Dizer
+    // o que se viu, em vez de afirmar que está tudo certo, é a mesma conduta do
+    // `warning` de vínculo em databases.ts.
+    raw_ok: Number.isFinite(Number(criado?.id))
+  };
+}
+function validarCampoTempo(valor, campo) {
+  const recusa = (motivo, hint) => {
+    throw new ToolError("invalid_argument", `Campo '${campo.chave}' inv\xE1lido ('${valor}'): ${motivo}`, { hint });
+  };
+  if (valor.trim() === "") recusa("est\xE1 vazio", `Use '*' para 'todos', ou um valor entre ${campo.min} e ${campo.max}.`);
+  if (/^@/.test(valor)) {
+    recusa("atalhos n\xE3o s\xE3o aceitos", "Escreva os cinco campos. '@daily' vira '0 0 * * *'.");
+  }
+  if (/[A-Za-z]/.test(valor)) {
+    recusa(
+      "nome de m\xEAs ou de dia n\xE3o \xE9 aceito",
+      "Use n\xFAmero: domingo \xE9 0 (ou 7), segunda \xE9 1; janeiro \xE9 1. 'MON' e 'JAN' s\xE3o recusados pela Cloudez."
+    );
+  }
+  for (const item of valor.split(",")) {
+    const m = /^(\*|\d{1,2}(?:-\d{1,2})?)(?:\/(\d{1,2}))?$/.exec(item);
+    if (!m) {
+      recusa(
+        `'${item}' n\xE3o \xE9 valor, range, lista nem step`,
+        "As formas aceitas s\xE3o: '5', '1-5', '1,5,10', '*/5' e '1-10/2'."
+      );
+      return;
+    }
+    const [, base, passo] = m;
+    if (passo !== void 0 && Number(passo) < 1) {
+      recusa(`o passo de '${item}' \xE9 zero`, "O passo \xE9 de quanto em quanto, e precisa ser pelo menos 1.");
+    }
+    if (base === "*") continue;
+    const partes = base.split("-").map(Number);
+    for (const n of partes) {
+      if (n < campo.min || n > campo.max) {
+        recusa(`${n} est\xE1 fora do ${campo.nome}`, `O intervalo aceito \xE9 de ${campo.min} a ${campo.max}.`);
+      }
+    }
+    if (partes.length === 2 && partes[0] > partes[1]) {
+      recusa(`o range '${base}' come\xE7a depois de terminar`, "Num range o primeiro n\xFAmero \xE9 o menor.");
+    }
+  }
+}
+
 // src/dns.ts
 import { promises as dns } from "node:dns";
 var HEADER_VERIFICACAO = "cez-verify";
@@ -28337,7 +28734,7 @@ ${publicKey.trim()}`;
 }
 
 // src/health.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 var EXCERPT_LIMIT = 500;
 var dorme = (ms) => new Promise((r) => setTimeout(r, ms));
 async function tentativa(url2, timeout) {
@@ -28372,7 +28769,7 @@ async function healthCheck(domain, opts = {}) {
           status_code: status,
           latency_ms: Date.now() - inicio,
           attempts: usadas,
-          body_sha256: createHash3("sha256").update(corpo).digest("hex"),
+          body_sha256: createHash4("sha256").update(corpo).digest("hex"),
           body_excerpt: corpo.slice(0, EXCERPT_LIMIT)
         };
         break;
@@ -28645,6 +29042,42 @@ server.registerTool(
   }
 );
 server.registerTool(
+  "cloudez_list_database_types",
+  {
+    title: "Engines de banco habilitados na conta",
+    description: "Lista os tipos de banco que a conta pode criar. A lista \xE9 POR EMPRESA: uma revenda pode habilitar s\xF3 um dos engines, ent\xE3o N\xC3O presuma que mysql e postgresql existem. Chame antes de oferecer as op\xE7\xF5es ao usu\xE1rio \u2014 oferecer um engine indispon\xEDvel vira um erro na cria\xE7\xE3o, depois de ele j\xE1 ter escolhido.",
+    inputSchema: object({}),
+    annotations: { readOnlyHint: true }
+  },
+  async () => {
+    try {
+      return okResult({ types: await listDatabaseTypes() });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_create_database",
+  {
+    title: "Cria um banco de dados gerenciado pela Cloudez",
+    description: "Cria uma inst\xE2ncia de banco na conta e a VINCULA ao site do dom\xEDnio informado. **Provisiona recurso na conta do usu\xE1rio, que pode ser cobrado: confirme com ele antes de chamar, dizendo engine e nome do banco.** N\xE3o \xE9 idempotente \u2014 o nome \xE9 \xFAnico por cloud, ent\xE3o chamar duas vezes com o mesmo nome falha na segunda. A cloud e o v\xEDnculo saem do pr\xF3prio site: voc\xEA passa o `domain`, e n\xE3o o id de nada. A senha \xE9 GERADA pela tool e devolvida no retorno \u2014 nunca a receba do usu\xE1rio pela conversa. Ela vem em texto no retorno, ent\xE3o ela fica no transcript da sess\xE3o: diga isso a ele, e prefira coloc\xE1-la direto onde a aplica\xE7\xE3o vai l\xEA-la em vez de repeti-la na resposta. Nunca escreva a senha num arquivo versionado \u2014 o docker-compose.cloudez.yml \xE9 commitado. Se vier `warning`, a API n\xE3o confirmou o v\xEDnculo com o site: confira no painel antes de apontar a aplica\xE7\xE3o para o banco.",
+    inputSchema: object({
+      domain: string2().describe("FQDN do site que vai usar o banco. Dele saem a cloud e o v\xEDnculo."),
+      engine: string2().describe("Engine: 'mysql' ou 'postgresql'. Confira antes com cloudez_list_database_types."),
+      database_name: string2().describe("Nome do banco: letras, n\xFAmeros e sublinhado, at\xE9 62 caracteres, \xFAnico na cloud."),
+      username: string2().optional().describe("Usu\xE1rio do banco, at\xE9 15 caracteres. Sem ele, derivado do nome do banco.")
+    })
+  },
+  async ({ domain, engine, database_name, username }) => {
+    try {
+      return okResult({ ...await createDatabase({ domain, engine, database_name, username }) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
   "cloudez_find_compose",
   {
     title: "Arquivo de Compose do projeto",
@@ -28721,6 +29154,52 @@ server.registerTool(
   async ({ domain }) => {
     try {
       return okResult({ ...await checkDns(domain) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_install_backup",
+  {
+    title: "Instalar o backup do banco no servidor",
+    description: `Grava \`<root>/.cloudez/backup-db.sh\` no servidor e o executa UMA VEZ para provar que funciona. O script tira dump l\xF3gico (pg_dumpall/mysqldump) do container que est\xE1 no ar e guarda em <root>/shared/backup/<engine>/, com reten\xE7\xE3o de ${DIARIOS} di\xE1rios e ${SEMANAIS} semanais. Use com banco NO CONTAINER \u2014 com banco gerenciado pela Cloudez o backup \xE9 dela. Depois desta tool, agende com cloudez_create_cron usando o \`cron_command\` e o \`minute\` do retorno. Se \`verificado\` vier false, o \`log\` diz por qu\xEA e N\xC3O adianta agendar.`,
+    inputSchema: object({
+      domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
+      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
+      engine: _enum(["mysql", "postgresql"]).describe("Engine do banco que roda no container"),
+      service: string2().optional().describe("Nome do servi\xE7o de banco no docker-compose.yml. Padr\xE3o: 'db'.")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ domain, root, engine, service }) => {
+    try {
+      return okResult({ ...await installBackup({ domain, root, engine, service }) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_create_cron",
+  {
+    title: "Criar um cron no site",
+    description: "Cria um agendamento no site, pelo painel da Cloudez (e n\xE3o por `crontab -e` no ssh, que ficaria invis\xEDvel para quem administra o site e sumiria numa migra\xE7\xE3o de servidor). Os cinco campos de tempo aceitam valor ('5'), range ('1-5'), lista ('1,5,10') e step ('*/5', '1-10/2'); N\xC3O aceitam nomes ('MON', 'JAN') nem atalhos ('@daily'). Omitidos, valem '*'. N\xC3O \xE9 idempotente: chamar duas vezes cria dois crons.",
+    inputSchema: object({
+      domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
+      name: string2().describe("Nome do agendamento, como aparece no painel"),
+      command: string2().describe("Comando a executar. Caminho ABSOLUTO \u2014 cron n\xE3o expande '~'."),
+      minute: string2().optional().describe("0-59"),
+      hour: string2().optional().describe("0-23"),
+      day_month: string2().optional().describe("1-31"),
+      month: string2().optional().describe("1-12"),
+      day_week: string2().optional().describe("0-7, com 0 e 7 valendo domingo")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+  },
+  async (args) => {
+    try {
+      return okResult({ ...await createCron(args) });
     } catch (err) {
       return errorResult(err);
     }
