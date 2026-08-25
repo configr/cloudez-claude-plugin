@@ -331,6 +331,26 @@ com o arquivo já restaurado; que a recusa seja fatal, com que código de erro e
 que se imprime é decisão do `cloudez-login` — mecanismo na biblioteca, política
 em quem tem interface com gente.
 
+## Banco de dados
+
+Quando a aplicação precisa de banco, o `/cloudez:compose` oferece **duas opções** e
+não escolhe sozinho:
+
+**Gerenciado pela Cloudez** — `cloudez_create_database(domain, engine,
+database_name)` provisiona a instância e a vincula ao site. A cloud e o vínculo
+saem do domínio; a senha é gerada pela tool e nunca recebida pela conversa. Em
+produção o serviço de banco do Compose não sobe (`profiles: ["dev"]`), e quem
+depende dele precisa de `depends_on: !reset null` — sem isso o Compose recusa o
+projeto inteiro. Engines disponíveis variam por empresa: confira com
+`cloudez_list_database_types`.
+
+**No container** — o dado vai para `shared/` como qualquer outro, e o projeto passa
+a ser responsável pelo backup: dumps lógicos em `<root>/shared/backup/<engine>/`,
+com 7 diários e 4 semanais.
+
+Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
+quem desenvolve. O que muda é só produção.
+
 ## Guard-rail de escrita em aplicação viva
 
 O plugin instala um hook `PreToolUse` (`hooks/hooks.json`) que **bloqueia escrita

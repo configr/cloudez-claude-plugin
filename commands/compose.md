@@ -82,7 +82,7 @@ O que procurar, e por quê:
 | Como sobe | `scripts.start`, `Procfile`, `main`, `if __name__`, `CMD` de um Dockerfile existente |
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
-| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`) |
+| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 2 tem DUAS opções a oferecer — não escolha por ele |
 | Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 2 |
 | Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
@@ -261,6 +261,91 @@ Ele também não é alcançado pela poda, que só apaga `releases/<id>`. O que o
 direta, e imunidade à renomeação do projeto do Compose. É uma troca, não um
 upgrade — e o preço dela é exatamente esta seção.
 
+### A aplicação precisa de banco? São DUAS opções, e quem escolhe é o usuário
+
+Não decida sozinho. As duas têm custo, e o custo cai sobre ele:
+
+| | Onde o banco roda em produção | O que ele ganha | O que ele paga |
+|---|---|---|---|
+| **Gerenciado pela Cloudez** | Instância da Cloudez, fora do Compose | Backup, atualização e disco são da Cloudez | É recurso provisionado na conta, e pode ser cobrado |
+| **No container** | Container seu, com o dado em `shared/` | Nada a mais na conta | O backup passa a ser responsabilidade do projeto |
+
+Confira antes o que a conta tem: `cloudez_list_database_types` lista os engines
+habilitados, e a lista é **por empresa** — uma revenda pode ter só um dos dois.
+Oferecer `postgresql` a quem não o tem vira erro depois de o usuário já ter
+escolhido.
+
+**Nos dois casos o desenvolvimento é igual:** o banco sobe pelo Compose, na
+máquina dele. O que muda é só produção.
+
+#### Opção 1 — gerenciado pela Cloudez
+
+`cloudez_create_database(domain, engine, database_name)`. A cloud e o vínculo com
+o site saem do domínio; você não passa id de nada.
+
+**Confirme antes de chamar.** Provisiona recurso na conta, não é idempotente (o
+nome é único por cloud) e pode ser cobrado. Diga o engine e o nome, e espere o
+aceite.
+
+Em produção, o serviço de banco **não sobe**, e a sobreposição faz duas coisas:
+
+```yaml
+services:
+  app:
+    # A aplicação passa a apontar para a instância da Cloudez.
+    depends_on: !reset null
+  db:
+    profiles: ["dev"]
+```
+
+O `depends_on: !reset null` **não é opcional**. Sem ele o Compose recusa o projeto
+inteiro com `service "app" depends on undefined service "db": invalid compose
+project` — verificado. Um serviço com perfil inativo não existe para quem depende
+dele, e o erro derruba tudo, não só o banco.
+
+**A senha volta no retorno da tool.** Ela não pode ir para o
+`docker-compose.cloudez.yml`, que é versionado. Ponha-a onde a aplicação a leia
+sem passar pelo git, e **diga ao usuário que ela ficou no transcript desta
+sessão** — é um lugar que ele não consegue limpar.
+
+E confira o alcance: o `host` do usuário do banco decide de onde ele pode
+conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega pela
+rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
+certo, é aqui.
+
+#### Opção 2 — no container, com o dado em `shared/`
+
+É o caminho que o passo 2 já descreve: bind relativo, que o deploy liga a
+`shared/`. Nada muda no Compose além do que já está escrito ali.
+
+O que muda é a obrigação: **banco no container exige backup**, e ele não vem de
+graça como na opção 1. Os dumps vão para
+
+```
+<root>/shared/backup/<engine>/
+```
+
+com retenção de **7 diários e 4 semanais** — `shared/` é irmão de `releases/`, então
+a poda de release não os alcança, e sem retenção eles enchem o disco do servidor
+pelo mesmo motivo que criou o `KEEP_RELEASES`.
+
+**O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
+container em pé. Copiar o datadir de um banco em uso produz cópia inconsistente —
+e é por isso que a semeadura do `shared/` nunca pode partir de um datadir vivo.
+
+E acrescente, para todo serviço de banco:
+
+```yaml
+services:
+  db:
+    stop_grace_period: 60s
+```
+
+O padrão do Docker são 10 segundos entre o `SIGTERM` e o `SIGKILL`. Um Postgres
+com checkpoint grande não termina nisso, leva `SIGKILL` e sobe recuperando pelo
+WAL a cada deploy — funciona, mas é desligamento sujo virando rotina, e
+recuperação por WAL é rede de segurança, não procedimento.
+
 ### Sem `container_name`
 
 O `cloudez_compose_up` roda o Compose com `-p <domínio>`, para dois sites no
@@ -305,6 +390,7 @@ dev-ismos perigosos moram justamente nas listas:
 | `ports: ["3000:3000"]` | **não**, acumula | `ports: !override` com o mapeamento certo |
 | `volumes: [".:/app"]` | **não** (ver abaixo) | `!reset` ou `!override` |
 | serviço só de dev (Adminer, Mailhog) | **não**, não há como remover | `profiles: ["dev"]` no serviço |
+| serviço de banco, com a opção 1 | **não** | `profiles: ["dev"]` no banco **e** `depends_on: !reset null` em quem depende dele |
 | `- ./storage:/app/storage` | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
 | `USER` não-root no Dockerfile | não se aplica | `user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"` — ver passo 2 |
 
