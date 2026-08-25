@@ -82,7 +82,7 @@ O que procurar, e por quê:
 | Como sobe | `scripts.start`, `Procfile`, `main`, `if __name__`, `CMD` de um Dockerfile existente |
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
-| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 2 tem DUAS opções a oferecer — não escolha por ele |
+| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 2 propõe o container com volume nomeado e OFERECE a instância gerenciada |
 | Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 2 |
 | Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
@@ -179,11 +179,9 @@ diretório no host, e o sintoma é 500 na primeira gravação — com o deploy v
 **E não há nada a semear.** Sem cópia, sem primeira vez, sem o risco de copiar um
 datadir enquanto o banco escreve.
 
-**Banco é a exceção, e ela não se decide aqui.** Um serviço de banco tem uma
-terceira saída que esta seção não enxerga: **não haver volume nenhum**, porque a
-instância é da Cloudez. Isso é escolha do usuário, está mais abaixo, e vem ANTES
-desta regra — aplicar "dado que sobrevive vai em volume nomeado" a um `db:` sem
-perguntar já é ter decidido por ele.
+**Banco segue esta regra, e com força.** Volume nomeado é o padrão também para o
+datadir — a seção de banco, mais abaixo, só acrescenta o que ele obriga (backup) e
+a alternativa gerenciada que se OFERECE depois de ter proposto esta.
 
 #### O que isso custa, para você poder dizer ao usuário
 
@@ -198,6 +196,9 @@ um `tar` de `~/<domínio>/` não o contém. Backup precisa ser dump lógico, nã
 de diretório.
 
 #### A alternativa: bind relativo, ligado a `shared/`
+
+Vale para **arquivo**: upload, mídia, storage. Datadir de banco não entra aqui,
+pela razão que a seção de banco explica.
 
 Quando o usuário quiser o dado **visível no host** — para copiar com `tar`,
 inspecionar à mão, ou não depender do nome do projeto —, o caminho é o bind
@@ -296,14 +297,69 @@ Ele também não é alcançado pela poda, que só apaga `releases/<id>`. O que o
 direta, e imunidade à renomeação do projeto do Compose. É uma troca, não um
 upgrade — e o preço dela é exatamente esta seção.
 
-### A aplicação precisa de banco? São DUAS opções, e quem escolhe é o usuário
+### A aplicação precisa de banco? O padrão é NO CONTAINER, com volume nomeado
 
-Não decida sozinho. As duas têm custo, e o custo cai sobre ele:
+**Recomende esta.** O banco fica no mesmo `docker-compose.yml` que o resto, sobe
+igual na máquina do usuário e no servidor, e não depende de recurso nenhum
+provisionado na conta:
 
-| | Onde o banco roda em produção | O que ele ganha | O que ele paga |
-|---|---|---|---|
-| **Gerenciado pela Cloudez** | Instância da Cloudez, fora do Compose | Backup, atualização e disco são da Cloudez | É recurso provisionado na conta, e pode ser cobrado |
-| **No container** | Container seu, com o dado em `shared/` | Nada a mais na conta | O backup passa a ser responsabilidade do projeto |
+```yaml
+services:
+  db:
+    image: postgres:16
+    volumes:
+      - dados:/var/lib/postgresql/data
+    stop_grace_period: 60s
+volumes:
+  dados:
+```
+
+O volume nomeado não é detalhe aqui: o Postgres roda como o usuário `postgres` da
+imagem, e volume nomeado herda essa dona. É o que faz o banco subir sem mais nada.
+
+**O `stop_grace_period: 60s` não é enfeite.** O padrão do Docker são 10 segundos
+entre o `SIGTERM` e o `SIGKILL`. Um Postgres com checkpoint grande não termina
+nisso, leva `SIGKILL`, e sobe recuperando pelo WAL a cada deploy — funciona, mas é
+desligamento sujo virando rotina, e recuperação por WAL é rede de segurança, não
+procedimento.
+
+**Datadir de banco NUNCA vai para `shared/`.** O bind relativo do passo 2 é para
+arquivo — upload, mídia, storage. Para banco ele junta os dois piores lados: a
+permissão passa a depender do diretório no host, e a semeadura do `shared/` copia
+arquivo de um datadir que pode estar sendo escrito, produzindo cópia
+inconsistente. Se o arquivo do usuário já tiver um `- ./pgdata:/var/lib/...`,
+troque por volume nomeado na sobreposição e **avise que aquilo é uma mudança de
+lugar do dado** — o banco não migra sozinho.
+
+#### O que isso obriga: backup é seu
+
+É o preço desta opção, e ele é real. Os dumps vão para
+
+```
+<root>/shared/backup/<engine>/
+```
+
+com retenção de **7 diários e 4 semanais** — `shared/` é irmão de `releases/`,
+então a poda de release não os alcança, e sem retenção eles enchem o disco do
+servidor pelo mesmo motivo que criou o `KEEP_RELEASES`.
+
+Repare que o DUMP vai para `shared/` mesmo com o banco em volume nomeado: são
+coisas diferentes. O volume é onde o banco vive; `shared/backup/` é onde ficam as
+cópias, e ali elas são visíveis no host e entram num `tar` do diretório do site.
+
+**O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
+container em pé.
+
+### E ofereça a alternativa gerenciada pela Cloudez — perguntando, não decidindo
+
+A Cloudez provisiona a instância no servidor dela e a vincula ao site. É uma
+**otimização**, não o caminho padrão: quem escolhe é o usuário, e a pergunta vale
+a pena porque o que ela resolve é justamente a obrigação de cima.
+
+| | O que ele ganha | O que ele paga |
+|---|---|---|
+| **No container** (padrão) | Nada a mais na conta, e o banco vive no mesmo arquivo | O backup é responsabilidade do projeto |
+| **Gerenciado pela Cloudez** | Backup, atualização e disco são da Cloudez | É recurso provisionado na conta, e pode ser cobrado |
 
 Confira antes o que a conta tem: `cloudez_list_database_types` lista os engines
 habilitados, e a lista é **por empresa** — uma revenda pode ter só um dos dois.
@@ -313,7 +369,7 @@ escolhido.
 **Nos dois casos o desenvolvimento é igual:** o banco sobe pelo Compose, na
 máquina dele. O que muda é só produção.
 
-#### Opção 1 — gerenciado pela Cloudez
+#### Se ele aceitar
 
 `cloudez_create_database(domain, engine, database_name)`. A cloud e o vínculo com
 o site saem do domínio; você não passa id de nada.
@@ -322,7 +378,7 @@ o site saem do domínio; você não passa id de nada.
 nome é único por cloud) e pode ser cobrado. Diga o engine e o nome, e espere o
 aceite.
 
-Em produção, o serviço de banco **não sobe**, e a sobreposição faz duas coisas:
+Em produção o serviço de banco **não sobe**, e a sobreposição faz duas coisas:
 
 ```yaml
 services:
@@ -347,45 +403,6 @@ E confira o alcance: o `host` do usuário do banco decide de onde ele pode
 conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega pela
 rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
 certo, é aqui.
-
-#### Opção 2 — no container
-
-O dado vai em **volume nomeado**, como manda o passo 2 — e aqui a razão pesa mais
-que em qualquer outro caso: o Postgres roda como o usuário `postgres` da imagem, e
-com bind a permissão do diretório no host é que decide. Volume nomeado herda a
-dona certa e o banco sobe.
-
-O que muda é a obrigação: **banco no container exige backup**, e ele não vem de
-graça como na opção 1. Os dumps vão para
-
-```
-<root>/shared/backup/<engine>/
-```
-
-com retenção de **7 diários e 4 semanais** — `shared/` é irmão de `releases/`, então
-a poda de release não os alcança, e sem retenção eles enchem o disco do servidor
-pelo mesmo motivo que criou o `KEEP_RELEASES`.
-
-Repare que o DUMP vai para `shared/` mesmo com o banco em volume nomeado: são
-coisas diferentes. O volume é onde o banco vive; `shared/backup/` é onde ficam as
-cópias, e ali elas são visíveis no host e entram num `tar` do diretório do site.
-
-**O dump é lógico, nunca cópia de arquivo:** `pg_dump`/`mysqldump` contra o
-container em pé. Copiar o datadir de um banco em uso produz cópia inconsistente —
-e é por isso que a semeadura do `shared/` nunca pode partir de um datadir vivo.
-
-E acrescente, para todo serviço de banco:
-
-```yaml
-services:
-  db:
-    stop_grace_period: 60s
-```
-
-O padrão do Docker são 10 segundos entre o `SIGTERM` e o `SIGKILL`. Um Postgres
-com checkpoint grande não termina nisso, leva `SIGKILL` e sobe recuperando pelo
-WAL a cada deploy — funciona, mas é desligamento sujo virando rotina, e
-recuperação por WAL é rede de segurança, não procedimento.
 
 ### Sem `container_name`
 

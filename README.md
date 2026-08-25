@@ -334,20 +334,29 @@ em quem tem interface com gente.
 
 ## Banco de dados
 
-Quando a aplicação precisa de banco, o `/cloudez:compose` oferece **duas opções** e
-não escolhe sozinho:
+O padrão é **no container, com volume nomeado** — o banco no mesmo arquivo que o
+resto, subindo igual na máquina de quem desenvolve e no servidor, sem depender de
+recurso provisionado na conta. O volume nomeado importa porque o Postgres roda
+como o usuário `postgres` da imagem, e volume nomeado herda essa dona.
 
-**Gerenciado pela Cloudez** — `cloudez_create_database(domain, engine,
-database_name)` provisiona a instância e a vincula ao site. A cloud e o vínculo
-saem do domínio; a senha é gerada pela tool e nunca recebida pela conversa. Em
-produção o serviço de banco do Compose não sobe (`profiles: ["dev"]`), e quem
-depende dele precisa de `depends_on: !reset null` — sem isso o Compose recusa o
-projeto inteiro. Engines disponíveis variam por empresa: confira com
-`cloudez_list_database_types`.
+O preço é o backup, que passa a ser do projeto: dumps **lógicos** em
+`<root>/shared/backup/<engine>/`, com 7 diários e 4 semanais. O dump vai para
+`shared/` mesmo com o banco em volume nomeado — o volume é onde o banco vive, e
+`shared/backup/` é onde as cópias ficam visíveis no host.
 
-**No container** — o dado vai em volume nomeado, e o projeto passa a ser
-responsável pelo backup: dumps lógicos em `<root>/shared/backup/<engine>/`, com 7
-diários e 4 semanais.
+**Datadir nunca vai para `shared/` por bind.** O bind relativo é para arquivo. Para
+banco ele junta a permissão dependente do host com uma semeadura que copia arquivo
+de um datadir possivelmente em uso — cópia inconsistente, na melhor hipótese.
+
+Depois de propor isso, o `/cloudez:compose` **oferece** a alternativa gerenciada,
+como otimização e não como padrão: `cloudez_create_database(domain, engine,
+database_name)` provisiona a instância na cloud do site e a vincula a ele. A cloud
+e o vínculo saem do domínio; a senha é gerada pela tool e nunca recebida pela
+conversa. O que ela resolve é justamente o backup; o que ela custa é recurso na
+conta, que pode ser cobrado. Em produção o serviço de banco do Compose não sobe
+(`profiles: ["dev"]`), e quem depende dele precisa de `depends_on: !reset null` —
+sem isso o Compose recusa o projeto inteiro. Engines disponíveis variam por
+empresa: confira com `cloudez_list_database_types`.
 
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
