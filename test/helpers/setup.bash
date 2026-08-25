@@ -22,6 +22,11 @@ make_project() {
   # a suite de ler — ou pior, sobrescrever — o token real de quem roda ela.
   CLOUDEZ_TOKEN_FILE="$TEST_TMP/token"
   export CLOUDEZ_TOKEN_FILE
+
+  # Mesma razao, para o guard-rail de escrita: sem isto os testes gravariam
+  # pedido e aprovacao no ~/.cloudez real de quem roda a suite.
+  CLOUDEZ_GUARD_DIR="$TEST_TMP/guard"
+  export CLOUDEZ_GUARD_DIR
   printf 'tok_teste\n' > "$CLOUDEZ_TOKEN_FILE"
 
   # CLOUDEZ_TOKEN venceria o arquivo e furaria os testes de autenticacao na
@@ -112,7 +117,7 @@ com_pty() {
     for _i in $(seq 1 200); do
       # Sai tambem se o processo ja falhou: um caminho que nunca chega a
       # perguntar nao tem prompt para esperar, e pagaria o teto inteiro.
-      grep -q 'Token: \|"error"' "$terminal" 2>/dev/null && break
+      grep -q 'Token: \|aprovo. para liberar\|"error"' "$terminal" 2>/dev/null && break
       sleep 0.05
     done
     # Terminador so quando falta: ver o item 3 do cabecalho.

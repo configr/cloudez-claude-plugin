@@ -24,10 +24,11 @@ const rastreados = new Set(
   execFileSync("git", ["-C", raiz, "ls-files"], { encoding: "utf8" }).split("\n").filter(Boolean),
 )
 
-// Só os arquivos que o plugin de fato carrega em tempo de execução. Os `mcp/*.mjs`
+// Só os arquivos que o plugin de fato carrega em tempo de execução — inclusive
+// os `hooks/`, que o harness executa fora de qualquer comando. Os `mcp/*.mjs`
 // são bundles sem import relativo — se um dia tiverem, entram aqui também.
 const alvos = [...rastreados].filter(
-  (f) => (f.startsWith("bin/") || f.startsWith("mcp/")) && (f.endsWith(".mjs") || f === "bin/cloudez-sync"),
+  (f) => (f.startsWith("bin/") || f.startsWith("mcp/") || f.startsWith("hooks/")) && (f.endsWith(".mjs") || f === "bin/cloudez-sync"),
 )
 
 const problemas = []

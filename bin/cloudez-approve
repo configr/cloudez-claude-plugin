@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+// Uso: cloudez-approve
+//
+// Libera UMA escrita remota que o hook `hooks/guard-write.mjs` bloqueou.
+//
+// ## Exige terminal de propósito
+//
+// Esta é a peça que faz a barreira valer alguma coisa. Rodado pela tool Bash de
+// um agente não há terminal de controle — `/dev/tty` responde "Device not
+// configured" — e o comando falha. É isso, e só isso, que distingue "um humano
+// decidiu" de "o modelo decidiu por si".
+//
+// O mesmo mecanismo já sustenta o prompt do `cloudez-login`. Aqui ele protege o
+// que é mais difícil de desfazer: escrita em aplicação viva.
+//
+// ## Aprova o comando que foi bloqueado, não um que se digite
+//
+// O hook grava o comando barrado em `~/.cloudez/pending-write.json`, e este
+// programa o EXIBE para confirmação. Pedir que o usuário redigitasse abriria a
+// porta para ele aprovar uma coisa e o agente rodar outra.
+//
+// A aprovação vale para o comando exato (hash do texto inteiro), uma única vez —
+// o hook a apaga ao usar — e expira em minutos.
+
+import { mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { ReadStream } from "node:tty"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { createInterface } from "node:readline"
+
+import { die, ok } from "./_out.mjs"
+
+const TTL_MIN = 10
+/** Ver a nota em `hooks/guard-write.mjs`: isola a suíte do `~/.cloudez` real. */
+const DIR = process.env.CLOUDEZ_GUARD_DIR || join(homedir(), ".cloudez")
+const PENDENTE = join(DIR, "pending-write.json")
+const APROVADO = join(DIR, "approved-write.json")
+
+const terminal = abrirTerminal()
+if (!terminal) {
+  die("no_tty", "cloudez-approve exige um terminal interativo.", {
+    hint:
+      "Rode este comando no SEU terminal. Um agente não pode se autoaprovar — é justamente " +
+      "isso que a aprovação significa.",
+  })
+}
+
+let p
+try {
+  p = JSON.parse(readFileSync(PENDENTE, "utf8"))
+} catch {
+  die("nothing_pending", "Não há escrita bloqueada aguardando aprovação.", {
+    hint: "O hook grava o pedido quando bloqueia. Se o bloqueio foi há muito tempo, peça ao agente para tentar de novo.",
+  })
+}
+
+const idadeMin = (Date.now() - Number(p.at || 0)) / 60000
+if (idadeMin >= TTL_MIN) {
+  die("pending_expired", `O pedido bloqueado é de ${Math.round(idadeMin)} minutos atrás e expirou.`, {
+    hint: "Peça ao agente para tentar o comando de novo, e aprove em seguida.",
+  })
+}
+
+process.stderr.write(
+  "\n  Aprovação de escrita remota\n" +
+    "  ───────────────────────────\n\n" +
+    `  Host(s): ${(p.hosts || []).join(", ")}\n\n` +
+    "  Comando:\n" +
+    `    ${String(p.command).replace(/\n/g, "\n    ")}\n\n` +
+    "  Isto ESCREVE numa aplicação que está no ar. Vale uma vez só,\n" +
+    `  para este comando exato, por ${TTL_MIN} minutos.\n\n`,
+)
+
+const resposta = await perguntar(terminal, "  Digite 'aprovo' para liberar: ")
+
+if (resposta.trim().toLowerCase() !== "aprovo") {
+  die("not_approved", "Aprovação cancelada — nada foi liberado.")
+}
+
+mkdirSync(DIR, { recursive: true, mode: 0o700 })
+writeFileSync(APROVADO, JSON.stringify({ hash: p.hash, at: Date.now() }, null, 2), { mode: 0o600 })
+try {
+  unlinkSync(PENDENTE)
+} catch {}
+
+ok({ status: "approved", hosts: p.hosts || [], expires_in_minutes: TTL_MIN, single_use: true })
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Abre o terminal de CONTROLE, ou devolve `null`.
+ *
+ * `openSync` e não `createReadStream`: o stream é preguiçoso, não abre nada de
+ * forma síncrona, e o `try/catch` em volta dele não vê erro nenhum. A primeira
+ * versão deste arquivo fazia isso, e o resultado foi o pior possível — o
+ * `cloudez-approve` rodado SEM terminal exibiu o prompt de aprovação em vez de
+ * recusar, derrubando a única propriedade que a barreira tem.
+ *
+ * `statSync` também não serve: `/dev/tty` costuma EXISTIR mesmo sem terminal de
+ * controle; o que falha é abri-lo ("Device not configured"). É o mesmo teste que
+ * o `bin/cloudez-login` já usa.
+ *
+ * E não é `process.stdin.isTTY`, que um agente satisfaz redirecionando.
+ */
+function abrirTerminal() {
+  try {
+    return new ReadStream(openSync("/dev/tty", "r"))
+  } catch {
+    return null
+  }
+}
+
+function perguntar(entrada, prompt) {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: entrada, output: process.stderr, terminal: true })
+    rl.question(prompt, (r) => {
+      rl.close()
+      entrada.destroy()
+      resolve(r)
+    })
+  })
+}

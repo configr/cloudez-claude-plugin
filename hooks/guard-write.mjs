@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+// Barreira contra ESCRITA em aplicação viva.
+//
+// Rodado pelo harness como hook `PreToolUse`, ANTES de a tool executar. Recebe a
+// chamada em JSON pelo stdin e decide pelo código de saída: 0 deixa passar, 2
+// bloqueia e devolve o stderr ao modelo como motivo.
+//
+// ## Por que existe
+//
+// Duas vezes um agente escreveu dado de teste em aplicação de produção: um recado
+// assinado "Claude" num mural público gravado em Postgres, e um PNG num site de
+// uploads. Nenhuma foi desobediência a uma regra — foram falhas de CLASSIFICAÇÃO.
+// Nos dois casos a escrita parecia parte do que tinha sido pedido: provar que o
+// banco sobreviveu ao deploy, diagnosticar um 500.
+//
+// Instrução em `commands/` não corrige isso, porque depende do mesmo julgamento
+// que falhou. Este hook não pergunta o que a escrita significa: vê verbo de
+// escrita para host remoto e barra.
+//
+// ## Por que a aprovação exige terminal
+//
+// É a única parte que resiste ao próprio agente. Rodado pela tool Bash não há
+// terminal de controle, e o `cloudez-approve` recusa — o mesmo mecanismo que já
+// faz o `cloudez-login` interativo falhar com `no_tty`. Sem isso, "aprovado"
+// significaria "o modelo decidiu por si".
+//
+// ## O limite, dito de frente
+//
+// Fecha as vias enumeráveis: `curl` e `wget` pela tool Bash. Não fecha
+// `python -c "requests.post(...)"`, `nc`, ou a tool de outro MCP. Prometer
+// cobertura total seria repetir o erro de confiar num julgamento — agora no
+// julgamento sobre o que foi enumerado.
+
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
+import { escritaRemota, hash } from "./_guard.mjs"
+
+/** Minutos de validade. Curto porque a aprovação vale para UM comando. */
+export const TTL_MIN = 10
+
+/**
+ * Onde ficam o pedido e a aprovação.
+ *
+ * `CLOUDEZ_GUARD_DIR` existe pelo mesmo motivo do `CLOUDEZ_TOKEN_FILE`: sem um
+ * override, a suíte escreveria no `~/.cloudez` real de quem roda os testes. Um
+ * teste que esquecesse de isolar sujaria a máquina do desenvolvedor.
+ */
+const DIR = process.env.CLOUDEZ_GUARD_DIR || join(homedir(), ".cloudez")
+const PENDENTE = join(DIR, "pending-write.json")
+const APROVADO = join(DIR, "approved-write.json")
+
+const chamada = interpretar(await lerStdin())
+const comando = chamada?.tool_input?.command
+
+// Só a tool Bash. As demais não passam por aqui, e o cabeçalho registra isso
+// como limite conhecido em vez de deixar parecer cobertura.
+if (chamada?.tool_name !== "Bash" || typeof comando !== "string") process.exit(0)
+
+const alvos = escritaRemota(comando)
+if (alvos.length === 0) process.exit(0)
+
+const digest = hash(comando)
+
+if (aprovado(digest)) {
+  // Uso ÚNICO: some ao ser usada. Sem isso, um comando aprovado uma vez ficaria
+  // liberado pelo resto do TTL, e "por comando" viraria "por janela de tempo".
+  try {
+    unlinkSync(APROVADO)
+  } catch {}
+  process.exit(0)
+}
+
+registrarPendente(comando, digest, alvos)
+process.stderr.write(motivo(alvos))
+process.exit(2)
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function motivo(alvos) {
+  return (
+    `Bloqueado: isto ESCREVE numa aplicação remota (${alvos.join(", ")}).\n\n` +
+    "Escrever em aplicação viva para verificar que algo funciona já deixou um\n" +
+    "recado de teste num mural público e uma imagem num site de uploads. A\n" +
+    "verificação por leitura (GET/HEAD) continua liberada, e localhost também.\n\n" +
+    "Se a escrita for mesmo necessária, quem libera é o usuário, no terminal dele:\n\n" +
+    "    cloudez-approve\n\n" +
+    `A aprovação vale para este comando exato, uma vez só, por ${TTL_MIN} minutos.\n` +
+    "NÃO tente emitir você mesmo: o comando exige terminal e falha sem ele — é\n" +
+    "isso que faz a aprovação significar 'um humano decidiu'.\n"
+  )
+}
+
+function interpretar(txt) {
+  try {
+    return JSON.parse(txt)
+  } catch {
+    // Entrada que não entendo não é motivo para travar a sessão inteira.
+    return null
+  }
+}
+
+function aprovado(digest) {
+  let a
+  try {
+    a = JSON.parse(readFileSync(APROVADO, "utf8"))
+  } catch {
+    return false
+  }
+  if (a?.hash !== digest) return false
+  return (Date.now() - Number(a.at || 0)) / 60000 < TTL_MIN
+}
+
+/**
+ * Deixa o comando bloqueado em disco para o `cloudez-approve` exibi-lo.
+ *
+ * Sem isto o usuário teria de redigitar o comando — e comando redigitado é
+ * comando que ele pode aprovar diferente do que vai rodar.
+ */
+function registrarPendente(cmd, digest, alvos) {
+  try {
+    mkdirSync(DIR, { recursive: true, mode: 0o700 })
+    writeFileSync(PENDENTE, JSON.stringify({ command: cmd, hash: digest, hosts: alvos, at: Date.now() }, null, 2), {
+      mode: 0o600,
+    })
+  } catch {
+    // Não conseguir registrar não muda a decisão: o bloqueio vale assim mesmo.
+  }
+}
+
+function lerStdin() {
+  return new Promise((resolve) => {
+    let s = ""
+    process.stdin.setEncoding("utf8")
+    process.stdin.on("data", (d) => (s += d))
+    process.stdin.on("end", () => resolve(s))
+    process.stdin.on("error", () => resolve(""))
+  })
+}
