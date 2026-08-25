@@ -158,11 +158,11 @@ Volume nomeado não mora ali:
 
 ```yaml
 services:
-  db:
+  app:
     volumes:
-      - dados:/var/lib/postgresql/data
+      - uploads:/app/uploads
 volumes:
-  dados:
+  uploads:
 ```
 
 E vale **igual em desenvolvimento e em produção** — nada de sobreposição para
@@ -178,6 +178,12 @@ diretório no host, e o sintoma é 500 na primeira gravação — com o deploy v
 
 **E não há nada a semear.** Sem cópia, sem primeira vez, sem o risco de copiar um
 datadir enquanto o banco escreve.
+
+**Banco é a exceção, e ela não se decide aqui.** Um serviço de banco tem uma
+terceira saída que esta seção não enxerga: **não haver volume nenhum**, porque a
+instância é da Cloudez. Isso é escolha do usuário, está mais abaixo, e vem ANTES
+desta regra — aplicar "dado que sobrevive vai em volume nomeado" a um `db:` sem
+perguntar já é ter decidido por ele.
 
 #### O que isso custa, para você poder dizer ao usuário
 
