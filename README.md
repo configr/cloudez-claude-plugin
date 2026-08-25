@@ -331,6 +331,57 @@ com o arquivo já restaurado; que a recusa seja fatal, com que código de erro e
 que se imprime é decisão do `cloudez-login` — mecanismo na biblioteca, política
 em quem tem interface com gente.
 
+## Guard-rail de escrita em aplicação viva
+
+O plugin instala um hook `PreToolUse` (`hooks/hooks.json`) que **bloqueia escrita
+HTTP para host remoto** feita pela tool Bash: `curl`/`wget` com `-X POST|PUT|PATCH
+|DELETE`, `-d`, `-F`, `-T` e equivalentes. Leitura (`GET`, `HEAD`) passa, e
+`localhost` passa — o `/cloudez:dev` sobe a aplicação ali justamente para ser
+exercitada.
+
+Ele existe por dois incidentes, não por precaução teórica: um agente deixou um
+recado assinado "Claude" num mural público gravado em Postgres, e enviou um PNG de
+teste a um site de uploads. **Nenhum dos dois foi desobediência a uma regra
+escrita** — foram falhas de classificação, em que a escrita parecia parte do que
+tinha sido pedido. Instrução em `commands/` não corrige isso, porque depende do
+mesmo julgamento que falhou.
+
+Bloqueado, o agente recebe o motivo e o caminho. Quem libera é o usuário:
+
+```sh
+cloudez-approve      # no terminal DELE, não pela tool Bash
+```
+
+A análise é por **trecho** do comando, não pela linha inteira: só conta como
+escrita a flag que está no mesmo segmento do `curl`. Sem isso,
+`curl -s <url> | grep -F erro` era bloqueado — e `cut -d` e `xargs -d` também,
+porque a varredura global via o `-d` de outro programa do pipeline. Leitura
+seguida de filtro é metade do uso legítimo de `curl`.
+
+Os comandos do próprio plugin não passam por aqui: o `cloudez-sync` usa tar sobre
+ssh, o `cloudez-login` lê do clipboard, e as tools do MCP fazem HTTP dentro do
+processo Node — nenhum deles é `curl` pela tool Bash.
+
+A aprovação vale para **o comando exato** (hash do texto inteiro), **uma vez só**
+— o hook a apaga ao usar — e expira em 10 minutos. O comando exibe o que foi
+bloqueado, lido de `~/.cloudez/pending-write.json`, em vez de pedir que o usuário
+redigite: comando redigitado é comando que se aprova diferente do que vai rodar.
+
+**A peça que faz isso valer é o terminal.** O `cloudez-approve` abre `/dev/tty`
+com `openSync` e recusa com `no_tty` quando não há terminal de controle — que é o
+caso de qualquer coisa rodada pela tool Bash de um agente. É isso, e só isso, que
+distingue "um humano decidiu" de "o modelo decidiu por si". A primeira versão
+usava `createReadStream`, que é preguiçoso e não falha de forma síncrona: o
+approve rodado sem terminal exibia o prompt em vez de recusar.
+
+**O limite, dito de frente:** isto fecha as vias enumeráveis — `curl` e `wget` pela
+tool Bash. Não fecha `python -c "requests.post(...)"`, `nc`, nem tools de outros
+MCP. Prometer cobertura total seria repetir o erro de confiar num julgamento, só
+que agora no julgamento sobre o que foi enumerado.
+
+`CLOUDEZ_GUARD_DIR` sobrepõe o diretório de estado, e é o que a suíte usa para não
+escrever no `~/.cloudez` de quem roda os testes.
+
 ## Limitações conhecidas
 
 **~~O prompt do login não tem cobertura automatizada.~~ Fechada**, por

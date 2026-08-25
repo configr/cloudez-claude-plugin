@@ -64,6 +64,33 @@ aprovar_para() {
   [ "$status" -eq 0 ]
 }
 
+# REGRESSAO: a analise varria a linha INTEIRA, e qualquer flag terminada em d, F
+# ou T contava como intencao de escrita — mesmo vindo de outro programa do
+# pipeline. Leitura seguida de filtro comum era bloqueada, que e metade do uso
+# legitimo de curl.
+@test "guard: leitura com filtro no pipe passa" {
+  run guard '"curl -s https://site.com/x | grep -F erro"'
+  [ "$status" -eq 0 ]
+  run guard '"curl -s https://site.com/x | cut -d , -f2"'
+  [ "$status" -eq 0 ]
+  run guard '"curl -s https://site.com/x | xargs -d \n echo"'
+  [ "$status" -eq 0 ]
+}
+
+# Mas escrita em QUALQUER trecho do pipeline continua barrada.
+@test "guard: escrita num trecho posterior do pipe bloqueia" {
+  run guard '"curl -s https://a.com/ | curl -X POST https://b.com/"'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"b.com"* ]]
+}
+
+@test "guard: os comandos do proprio plugin passam" {
+  run guard '"cloudez-sync dpl_x ../site"'
+  [ "$status" -eq 0 ]
+  run guard '"pbpaste | /caminho/bin/cloudez-login --stdin"'
+  [ "$status" -eq 0 ]
+}
+
 @test "guard: comando sem curl nem wget passa" {
   run guard '"git push origin main"'
   [ "$status" -eq 0 ]

@@ -18,27 +18,55 @@ import { createHash } from "node:crypto"
  * status ou ler uma listagem é passo legítimo e frequente do deploy.
  */
 export function escritaRemota(cmd) {
-  if (typeof cmd !== "string" || !/\b(curl|wget)\b/.test(cmd)) return []
-
-  const escreve =
-    /(^|\s)-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(cmd) ||
-    /--request[=\s]+(POST|PUT|PATCH|DELETE)\b/i.test(cmd) ||
-    // Flags curtas agrupadas: `-sd`, `-fF`, `-T`. O `-d` sozinho já é POST.
-    /(^|\s)-[a-zA-Z]*[dFT](\s|=)/.test(cmd) ||
-    /--(data|data-raw|data-binary|data-urlencode|form|upload-file|post-data|post-file)\b/.test(cmd) ||
-    /--method[=\s]+(POST|PUT|PATCH|DELETE)\b/i.test(cmd)
-
-  if (!escreve) return []
+  if (typeof cmd !== "string") return []
 
   const remotos = []
-  for (const m of cmd.matchAll(/https?:\/\/([^\s/'"$)]+)/gi)) {
-    const host = m[1]
-      .replace(/^[^@]*@/, "") // usuário:senha@
-      .replace(/:\d+$/, "") // porta
-      .toLowerCase()
-    if (!local(host)) remotos.push(host)
+  for (const trecho of segmentos(cmd)) {
+    if (!/(^|\s)(curl|wget)(\s|$)/.test(trecho)) continue
+    if (!escreve(trecho)) continue
+    for (const host of hosts(trecho)) if (!local(host)) remotos.push(host)
   }
   return [...new Set(remotos)]
+}
+
+/**
+ * Quebra a linha nos operadores do shell.
+ *
+ * Sem isto, a análise varria o comando INTEIRO e qualquer flag terminada em d, F
+ * ou T contava como intenção de escrita — mesmo vindo de outro programa do
+ * pipeline. `curl -s <url> | grep -F erro` era bloqueado, e `cut -d` e `xargs -d`
+ * também: leitura seguida de filtro comum, que é metade do uso legítimo de curl.
+ *
+ * A quebra é textual e não entende aspas, então um `|` dentro de string vira
+ * fronteira. Isso só pode PARTIR um trecho, nunca juntar dois — e um trecho
+ * partido que ainda contenha `curl` e verbo de escrita continua sendo bloqueado.
+ */
+function segmentos(cmd) {
+  return cmd.split(/\|\||&&|[|;\n]/)
+}
+
+/** Verbo de escrita NESTE trecho. `-d` já é POST no curl, `-F` é upload. */
+function escreve(t) {
+  return (
+    /(^|\s)-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(t) ||
+    /--request[=\s]+(POST|PUT|PATCH|DELETE)\b/i.test(t) ||
+    /(^|\s)-[a-zA-Z]*[dFT](\s|=)/.test(t) ||
+    /--(data|data-raw|data-binary|data-urlencode|form|upload-file|post-data|post-file)\b/.test(t) ||
+    /--method[=\s]+(POST|PUT|PATCH|DELETE)\b/i.test(t)
+  )
+}
+
+function hosts(t) {
+  const out = []
+  for (const m of t.matchAll(/https?:\/\/([^\s/'"$)]+)/gi)) {
+    out.push(
+      m[1]
+        .replace(/^[^@]*@/, "") // usuário:senha@
+        .replace(/:\d+$/, "") // porta
+        .toLowerCase(),
+    )
+  }
+  return out
 }
 
 /**
