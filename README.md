@@ -155,6 +155,109 @@ Com o plugin ativo:
 Os executáveis de `bin/` entram no `PATH` da tool Bash enquanto o plugin está
 ativo.
 
+## Do zero ao ar: um deploy completo
+
+O caminho inteiro, na ordem. Cada passo é um comando — você conversa com ele, e
+ele conduz. O que está escrito aqui é o que esperar, não um roteiro a decorar.
+
+**Antes de começar, uma coisa precisa existir e não é criada por aqui: o site na
+Cloudez.** Crie-o no painel, com o tipo **Docker** (`container_docker`). O plugin
+publica aplicação em container e só; num site de tipo estático o deploy roda
+inteiro, sem erro nenhum, e a Cloudez continua servindo os arquivos como estavam —
+a falha mais confusa que este plugin consegue produzir. O `/cloudez:setup` para e
+avisa se encontrar o tipo errado.
+
+### 1. `/cloudez:login`
+
+Ele verifica se já existe token salvo. Não havendo, pergunta se você tem conta,
+aponta a página certa do painel — que é **o seu**, porque a Cloudez é white-label
+e cada revenda tem o próprio domínio — e captura o token.
+
+O token **não passa pela conversa**: você copia, e o comando o lê da área de
+transferência. Ele fica em `~/.cloudez/token`, com modo 600, e é validado contra a
+API antes de ser aceito.
+
+### 2. `/cloudez:setup <domínio> <environment>`
+
+```
+/cloudez:setup meusite.com.br producao
+```
+
+Cria o `.cloudez.yaml` do projeto. Antes de escrever qualquer coisa, ele confirma
+o domínio contra a API — um typo aceito aqui só apareceria no deploy, longe da
+causa.
+
+Além do arquivo, este passo confere **o que o site precisa ter configurado**, que
+é onde quase todo primeiro deploy tropeça:
+
+- **`app_root_path` = `claude/current`.** O deploy publica em
+  `~/<domínio>/www/claude/current`, e o servidor web precisa entregar esse
+  diretório. Apontando para outro lugar, o site continua servindo o que já estava
+  em `www` e o deploy parece não ter efeito;
+- **`custom_port` igual à porta que o Compose publica.** É para onde o nginx da
+  Cloudez encaminha. Não batendo, o deploy termina verde e o site responde 502;
+- **a chave SSH desta máquina autorizada na conta.** Sem isso o envio falha por
+  permissão negada — no meio do deploy, depois de o build já ter rodado. O comando
+  lista suas chaves locais e propõe autorizar.
+
+### 3. `/cloudez:compose`
+
+Escreve o Compose junto com você. Não é geração por template: ele lê o projeto,
+pergunta o que o projeto não responde e propõe.
+
+**Se já existe um Compose, ele não é reescrito.** Aquele arquivo é o de
+desenvolvimento, é o que você roda todo dia, e as diferenças de produção vão para
+um `docker-compose.cloudez.yml` que só o servidor lê — localmente continua sendo
+`docker compose up`, sem argumento.
+
+Precisando de banco, ele **pergunta** em vez de decidir: o padrão é no container,
+com volume nomeado, e a alternativa é uma instância gerenciada pela Cloudez.
+
+### 4. `/cloudez:dev` (opcional, mas é o passo barato)
+
+Sobe a aplicação na sua máquina — pelo dev server do projeto, quando é Node, ou em
+container — e abre no navegador. Descobrir aqui que falta uma variável de ambiente
+custa um minuto; descobrir no deploy custa um site fora do ar.
+
+### 5. `/cloudez:deploy`
+
+```
+/cloudez:deploy producao
+```
+
+O que ele faz, em ordem: **mede o site como ele está agora** (para haver com o que
+comparar depois), registra a release, envia os arquivos, constrói a imagem, troca
+o symlink `current` e sobe o container. A ativação é a troca de um link —
+atômica, e reversível.
+
+No fim ele verifica que o site responde e **compara com a medição do começo**. Se
+o site estava fora do ar antes do deploy, ele diz isso em vez de creditar a falha
+à sua mudança.
+
+Você também chega aqui em linguagem natural — "sobe o site", "publica em staging".
+
+### 6. Deu errado: `/cloudez:rollback`
+
+```
+/cloudez:rollback producao
+```
+
+Volta para a release anterior. Existe como comando separado de propósito: quem
+precisa dele não vai rolar um documento longo no pior momento possível. Não exige
+git nem working tree limpa — as releases já estão no servidor.
+
+### Depois do primeiro deploy
+
+- **Banco no container?** Configure o backup, que é sua responsabilidade nessa
+  opção: `cloudez_install_backup` grava o script no servidor **e o roda uma vez**
+  para provar que funciona, e `cloudez_create_cron` agenda;
+- **Credenciais?** `cloudez_set_env` as grava em `<root>/shared/.cloudez.env` no
+  servidor. É a única rota: a sobreposição é versionada, e o que está no
+  `.gitignore` não é transferido;
+- **O servidor guarda o histórico.** Cada deploy escreve um manifesto em
+  `<root>/.cloudez/deploys/`, com o commit e o hash do que subiu. Serve para
+  descobrir o que está no ar mesmo quando quem publicou foi outra pessoa.
+
 ## Estado atual
 
 - [x] Contrato das tools MCP (`docs/mcp-tool-contract.md`)
