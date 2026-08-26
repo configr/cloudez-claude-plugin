@@ -381,6 +381,33 @@ empresa: confira com `cloudez_list_database_types`.
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
 
+## Segredos, e por onde eles chegam ao servidor
+
+Não havia rota. O `docker-compose.cloudez.yml` é versionado, então a credencial
+não pode ir nele; e o que está no `.gitignore` o `cloudez-sync` não transfere,
+então um `.env` local nunca chega lá. Ou o segredo ia para o git, ou não existia
+em produção.
+
+`cloudez_set_env(domain, root, vars)` grava em `<root>/shared/.cloudez.env`, modo
+600, e o deploy o liga dentro de cada release — o mesmo modelo Capistrano do resto
+do `shared/`, então ele sobrevive à poda e uma release nova o encontra no lugar. A
+sobreposição declara `env_file: [.cloudez.env]` para a aplicação lê-las.
+
+Duas decisões que valem ser ditas:
+
+**Mescla por chave.** Gravar o `DATABASE_URL` não apaga um `SECRET_KEY` que já
+estava no arquivo — o arquivo é de todas as variáveis do site, não de uma. Quem
+quiser o contrário pede `replace`.
+
+**O retorno traz só os NOMES.** Um retorno com o valor colocaria a credencial no
+transcript a cada chamada, inclusive nas que só conferem o que está lá.
+
+E o deploy liga o arquivo **apenas se ele existir**: criar um vazio sempre daria a
+todo site um `shared/` e um arquivo que ninguém pediu. O custo dessa escolha é que
+declarar `env_file` antes de gravar as variáveis faz o Compose recusar o projeto —
+uma falha barulhenta, com mensagem própria, que é a categoria certa para uma ordem
+invertida entre dois passos.
+
 ## Guard-rail de escrita em aplicação viva
 
 O plugin instala um hook `PreToolUse` (`hooks/hooks.json`) que **bloqueia escrita

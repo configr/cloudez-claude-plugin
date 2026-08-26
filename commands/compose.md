@@ -453,10 +453,43 @@ inteiro com `service "app" depends on undefined service "db": invalid compose
 project` — verificado. Um serviço com perfil inativo não existe para quem depende
 dele, e o erro derruba tudo, não só o banco.
 
-**A senha volta no retorno da tool.** Ela não pode ir para o
-`docker-compose.cloudez.yml`, que é versionado. Ponha-a onde a aplicação a leia
-sem passar pelo git, e **diga ao usuário que ela ficou no transcript desta
-sessão** — é um lugar que ele não consegue limpar.
+#### E a credencial, que é onde isto costumava parar
+
+A senha volta no retorno da tool, e **não há onde guardá-la no repositório**: a
+sobreposição é versionada, e o que está no `.gitignore` o `cloudez-sync` não
+transfere. Um `.env` local nunca chega ao servidor.
+
+O caminho é o arquivo de ambiente do site:
+
+```
+cloudez_set_env(domain, root, vars)
+```
+
+Grava em `<root>/shared/.cloudez.env`, modo 600, e o deploy o liga dentro de cada
+release — o mesmo modelo do resto do `shared/`. Ele MESCLA por chave: gravar o
+`DATABASE_URL` não apaga um `SECRET_KEY` que já estava lá.
+
+Monte a string de conexão com o que o `create_database` devolveu (`host`, `port`,
+`username`, `password`, `database_name`) e grave-a como a aplicação a espera —
+`DATABASE_URL`, `DB_HOST`/`DB_PASS`, o que for o caso do framework.
+
+Para a aplicação enxergá-las, a sobreposição precisa declarar:
+
+```yaml
+services:
+  app:
+    env_file:
+      - .cloudez.env
+```
+
+**Nessa ordem: `set_env` primeiro, `env_file` depois.** O deploy só liga o arquivo
+se ele existir, e declarar o `env_file` antes de gravar as variáveis faz o Compose
+recusar o projeto inteiro com "env file not found". Falha barulhenta e de
+mensagem clara — mas falha.
+
+O `cloudez_set_env` devolve só os NOMES das variáveis, nunca os valores. E vale
+dizer ao usuário que **a senha ficou no transcript desta sessão**, que é um lugar
+que ele não consegue limpar.
 
 E confira o alcance: o `host` do usuário do banco decide de onde ele pode
 conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega pela
@@ -476,9 +509,15 @@ site que caiu sozinho de madrugada.
 
 ### Segredos não entram no arquivo
 
-O Compose vai para o repositório. Senha, token e chave saem por variável de
-ambiente ou pelo painel da Cloudez — e se o usuário oferecer um segredo na
-conversa, não escreva no arquivo.
+O Compose vai para o repositório, e o `.cloudez.yml` também. Senha, token e chave
+não entram em nenhum dos dois — e se o usuário oferecer um segredo na conversa,
+não escreva no arquivo.
+
+**Onde eles entram é `cloudez_set_env`**, que grava em `<root>/shared/.cloudez.env`
+no servidor (modo 600) e é ligado dentro de cada release pelo deploy. Não existe
+outra rota: um `.env` local está no `.gitignore`, e o que está no `.gitignore` o
+`cloudez-sync` não transfere. A sobreposição declara `env_file: [.cloudez.env]`
+para a aplicação lê-las — depois de o arquivo existir, nunca antes.
 
 ## 3. Onde a correção mora
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.12 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.13 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27475,6 +27475,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile as readFile2, stat } from "node:fs/promises";
 import { join } from "node:path";
 var COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+var CLOUDEZ_ENV_FILE = ".cloudez.env";
 var CLOUDEZ_OVERLAY_FILES = [
   "docker-compose.cloudez.yml",
   "docker-compose.cloudez.yaml",
@@ -27975,6 +27976,16 @@ echo "SHARED ${nome}"
   }
   return sh;
 }
+function linkEnvScript(root) {
+  const S = `'${root}/shared/${CLOUDEZ_ENV_FILE}'`;
+  const R = `'${CLOUDEZ_ENV_FILE}'`;
+  return `if [ -f ${S} ]; then
+  rm -f ${R}
+  ln -s ${S} ${R}
+  echo "ENV_LINKED ${CLOUDEZ_ENV_FILE}"
+fi
+`;
+}
 function matchLines(out, tag) {
   return out.split("\n").filter((l) => l.startsWith(`${tag} `)).map((l) => l.slice(tag.length + 1).trim());
 }
@@ -28125,7 +28136,7 @@ ${cfg.stderr}`.trim() || void 0)
   const plano = planSharedDirs(cfg.stdout, releaseId);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + linkSharedScript(
+  const up = composePrelude(`${root}/current`) + linkEnvScript(plano.absRoot) + linkSharedScript(
     plano.absRoot,
     plano.dirs,
     state.previous_release_id ? `${plano.absRoot}/releases/${state.previous_release_id}` : void 0
@@ -28148,10 +28159,12 @@ ${res.stderr}`;
   const shared = matchLines(res.stdout, "SHARED");
   const criados = matchLines(res.stdout, "SHARED_CREATED");
   const migrados = matchLines(res.stdout, "SEEDED_PREV");
+  const envLinked = matchLine(res.stdout, "ENV_LINKED");
   state.compose = {
     project,
     built,
     ...composeFiles(res.stdout),
+    ...envLinked ? { env_file: envLinked } : {},
     ...shared.length > 0 ? { shared } : {},
     // Separado dos demais porque é o único deploy em que aquele diretório nasceu.
     // Depois disto ele é dado do usuário, e um `shared_created` reaparecendo
@@ -28168,15 +28181,27 @@ ${res.stderr}`;
   return saveState(state);
 }
 
-// src/backup.ts
-var DIARIOS = 7;
-var SEMANAIS = 4;
-var SCRIPT = ".cloudez/backup-db.sh";
+// src/remote-path.ts
 function absoluto(home, root) {
   const limpo = root.replace(/^~\//, "").replace(/\/+$/, "");
   if (limpo.startsWith("/")) return limpo;
   return `${home.replace(/\/+$/, "")}/${limpo}`;
 }
+async function homeRemoto(ssh) {
+  const res = await sshRun(ssh, `printf '%s\\n' "$HOME"`);
+  const home = res.stdout.trim().split("\n").pop()?.trim() ?? "";
+  if (res.code !== 0 || !home.startsWith("/")) {
+    throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel descobrir o diret\xF3rio do usu\xE1rio no servidor.", {
+      hint: "Sem ele n\xE3o h\xE1 como montar o caminho absoluto do site a partir do `root` do .cloudez.yaml."
+    });
+  }
+  return home;
+}
+
+// src/backup.ts
+var DIARIOS = 7;
+var SEMANAIS = 4;
+var SCRIPT = ".cloudez/backup-db.sh";
 function minutoEstavel(domain) {
   return createHash3("sha256").update(domain).digest()[0] % 60;
 }
@@ -28318,7 +28343,7 @@ async function installBackup(args) {
     });
   }
   const ssh = await resolveSshTarget(args.domain);
-  const home = await lerHome(ssh);
+  const home = await homeRemoto(ssh);
   const root = absoluto(home, args.root);
   const project = projectName(args.domain);
   const script = scriptDeBackup({ root, engine, service, project });
@@ -28357,16 +28382,6 @@ ${prova.stderr}`.trim();
     cron_command: cronCommand,
     minute
   };
-}
-async function lerHome(ssh) {
-  const res = await sshRun(ssh, `printf '%s\\n' "$HOME"`);
-  const home = res.stdout.trim().split("\n").pop()?.trim() ?? "";
-  if (res.code !== 0 || !home.startsWith("/")) {
-    throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel descobrir o diret\xF3rio do usu\xE1rio no servidor.", {
-      hint: "O cron precisa de caminho absoluto \u2014 ele n\xE3o expande `~` nem tem $HOME garantido."
-    });
-  }
-  return home;
 }
 
 // src/crons.ts
@@ -28466,6 +28481,79 @@ function validarCampoTempo(valor, campo) {
       recusa(`o range '${base}' come\xE7a depois de terminar`, "Num range o primeiro n\xFAmero \xE9 o menor.");
     }
   }
+}
+
+// src/env.ts
+var CHAVE_OK = /^[A-Za-z_][A-Za-z0-9_]*$/;
+async function setEnv(args) {
+  const novas = args.vars ?? {};
+  const nomes = Object.keys(novas);
+  if (nomes.length === 0) {
+    throw new ToolError("invalid_argument", "Nenhuma vari\xE1vel foi passada.", {
+      hint: "Passe ao menos um par em `vars`, por exemplo { DATABASE_URL: '...' }."
+    });
+  }
+  for (const [k, v] of Object.entries(novas)) {
+    if (!CHAVE_OK.test(k)) {
+      throw new ToolError("invalid_argument", `Nome de vari\xE1vel inv\xE1lido: '${k}'.`, {
+        hint: "Precisa come\xE7ar com letra ou sublinhado, e conter s\xF3 letras, n\xFAmeros e sublinhado."
+      });
+    }
+    if (typeof v !== "string" || /[\n\r]/.test(v)) {
+      throw new ToolError("invalid_argument", `O valor de '${k}' n\xE3o pode conter quebra de linha.`, {
+        hint: "Para conte\xFAdo multilinha (uma chave privada, por exemplo), grave um arquivo em shared/ e aponte a vari\xE1vel para o caminho dele."
+      });
+    }
+  }
+  const ssh = await resolveSshTarget(args.domain);
+  const home = await homeRemoto(ssh);
+  const root = absoluto(home, args.root);
+  const caminho = `${root}/shared/${CLOUDEZ_ENV_FILE}`;
+  const anteriores = args.replace ? {} : await lerExistentes(ssh, caminho);
+  const finais = { ...anteriores, ...novas };
+  const added = nomes.filter((k) => !(k in anteriores));
+  const updated = nomes.filter((k) => k in anteriores);
+  const kept = Object.keys(anteriores).filter((k) => !(k in novas));
+  const corpo = Object.entries(finais).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
+  const gravar = `set -e
+mkdir -p '${root}/shared'
+umask 077
+cat > '${caminho}.tmp' <<'CEZ_FIM_DO_ENV'
+# Gerado pelo plugin da Cloudez. O deploy liga este arquivo dentro da release.
+${corpo}
+CEZ_FIM_DO_ENV
+chmod 600 '${caminho}.tmp'
+mv '${caminho}.tmp' '${caminho}'
+ls -l '${caminho}' | cut -c1-10 | sed 's/^/MODE /'
+`;
+  const res = await sshRun(ssh, gravar);
+  if (res.code !== 0) {
+    throw new ToolError("ssh_failed", "N\xE3o foi poss\xEDvel gravar o arquivo de ambiente no servidor.", {
+      hint: (res.stderr || res.stdout || "").slice(0, 400) || `O ssh saiu com c\xF3digo ${res.code}.`
+    });
+  }
+  const modo = /MODE\s+(\S+)/.exec(res.stdout)?.[1] ?? "desconhecido";
+  return {
+    file: caminho,
+    keys: Object.keys(finais).sort(),
+    added: added.sort(),
+    updated: updated.sort(),
+    kept: kept.sort(),
+    mode: modo
+  };
+}
+async function lerExistentes(ssh, caminho) {
+  const res = await sshRun(ssh, `cat '${caminho}' 2>/dev/null || true`);
+  const out = {};
+  for (const linha of res.stdout.split("\n")) {
+    const t = linha.trim();
+    if (!t || t.startsWith("#")) continue;
+    const i = t.indexOf("=");
+    if (i <= 0) continue;
+    const k = t.slice(0, i);
+    if (CHAVE_OK.test(k)) out[k] = t.slice(i + 1);
+  }
+  return out;
 }
 
 // src/dns.ts
@@ -29205,6 +29293,27 @@ server.registerTool(
   async (args) => {
     try {
       return okResult({ ...await createCron(args) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_set_env",
+  {
+    title: "Gravar vari\xE1veis de ambiente do site no servidor",
+    description: "Grava vari\xE1veis em `<root>/shared/.cloudez.env` (modo 600), que o deploy liga dentro de cada release. \xC9 o \xDANICO caminho por onde um segredo chega ao servidor: a sobreposi\xE7\xE3o de produ\xE7\xE3o \xE9 versionada, e o que est\xE1 no .gitignore o cloudez-sync n\xE3o transfere. Para a aplica\xE7\xE3o l\xEA-las, a sobreposi\xE7\xE3o precisa declarar `env_file: [.cloudez.env]` no servi\xE7o. MESCLA por chave: gravar DATABASE_URL n\xE3o apaga um SECRET_KEY que j\xE1 estava l\xE1 (use `replace` para descartar). O retorno traz s\xF3 os NOMES das vari\xE1veis, nunca os valores.",
+    inputSchema: object({
+      domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
+      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
+      vars: record(string2(), string2()).describe("Pares nome/valor. O valor n\xE3o pode conter quebra de linha."),
+      replace: boolean2().optional().describe("true descarta as vari\xE1veis que j\xE1 estavam no arquivo. Padr\xE3o: mesclar.")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ domain, root, vars, replace }) => {
+    try {
+      return okResult({ ...await setEnv({ domain, root, vars, replace }) });
     } catch (err) {
       return errorResult(err);
     }
