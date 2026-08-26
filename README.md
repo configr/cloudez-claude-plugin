@@ -147,10 +147,19 @@ Com o plugin ativo:
   reconstrói a imagem depois de trocar o symlink, sem o que o rollback não surte
   efeito nenhum.
 
-> **O procedimento do deploy mora num lugar só**, em `commands/deploy.md`. A
-> skill existe para dar a porta de entrada em linguagem natural, e nada mais —
-> duas descrições do mesmo deploy divergem, e a errada acaba sendo justamente a
-> que ninguém está lendo na hora.
+> **Cada comando tem uma skill, e nenhuma skill tem procedimento.** As seis
+> (`skills/login/`, `setup/`, `compose/`, `dev/`, `deploy/`, `rollback/`) existem
+> só para dar a porta de entrada em linguagem natural: elas encaminham para o
+> comando e mandam ler `commands/<nome>.md` em vez de reconstruir os passos.
+>
+> Duas descrições do mesmo procedimento divergem, e a errada acaba sendo
+> justamente a que ninguém está lendo na hora.
+>
+> **A de deploy não atende pedido de reversão**, e isso é deliberado: ela
+> encaminha para `/cloudez:deploy`, e o rollback autônomo é outro comando. O bloco
+> de rollback dentro do `deploy.md` existe só para a queda no meio de um deploy,
+> que acontece dentro daquele fluxo. Quem pede reversão costuma estar com o site
+> fora do ar — mandá-lo para o comando errado custa caro.
 
 Os executáveis de `bin/` entram no `PATH` da tool Bash enquanto o plugin está
 ativo.
@@ -177,6 +186,9 @@ O token **não passa pela conversa**: você copia, e o comando o lê da área de
 transferência. Ele fica em `~/.cloudez/token`, com modo 600, e é validado contra a
 API antes de ser aceito.
 
+Em linguagem natural: *"faz login na cloudez"*, *"meu token expirou"*, *"conecta
+minha conta"*.
+
 ### 2. `/cloudez:setup <domínio> <environment>`
 
 ```
@@ -200,11 +212,17 @@ Além do arquivo, este passo confere **o que o site precisa ter configurado**, q
   permissão negada — no meio do deploy, depois de o build já ter rodado. O comando
   lista suas chaves locais e propõe autorizar.
 
+Em linguagem natural: *"configura esse projeto pra cloudez"*, *"aponta pro
+meusite.com.br"*, *"cria um environment de staging"*.
+
 ### 3. `/cloudez:dev` (opcional, mas é o passo barato)
 
 Sobe a aplicação na sua máquina — pelo dev server do projeto, quando é Node, ou em
 container — e abre no navegador. Descobrir aqui que falta uma variável de ambiente
 custa um minuto; descobrir no deploy custa um site fora do ar.
+
+Em linguagem natural: *"roda aqui"*, *"abre no navegador"*, *"quero ver antes de
+publicar"*.
 
 ### 4. `/cloudez:deploy`
 
@@ -221,7 +239,8 @@ No fim ele verifica que o site responde e **compara com a medição do começo**
 o site estava fora do ar antes do deploy, ele diz isso em vez de creditar a falha
 à sua mudança.
 
-Você também chega aqui em linguagem natural — "sobe o site", "publica em staging".
+Em linguagem natural: *"sobe o site"*, *"publica em staging"*, *"manda pra
+produção"*.
 
 > **Projeto sem Compose?** O deploy **para** antes de publicar qualquer coisa e te
 > manda para o `/cloudez:compose` — sem Compose ele estaria publicando arquivos que
@@ -235,6 +254,9 @@ Você também chega aqui em linguagem natural — "sobe o site", "publica em sta
 > servidor lê. Precisando de banco, ele pergunta em vez de decidir — o padrão é no
 > container, com volume nomeado, e a alternativa é uma instância gerenciada pela
 > Cloudez.
+>
+> Em linguagem natural: *"cria o docker-compose"*, *"containeriza essa
+> aplicação"*, *"preciso de um postgres aqui"*.
 
 ### 5. Deu errado: `/cloudez:rollback`
 
@@ -245,6 +267,9 @@ Você também chega aqui em linguagem natural — "sobe o site", "publica em sta
 Volta para a release anterior. Existe como comando separado de propósito: quem
 precisa dele não vai rolar um documento longo no pior momento possível. Não exige
 git nem working tree limpa — as releases já estão no servidor.
+
+Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
+*"o site quebrou, reverte"*.
 
 ### Depois do primeiro deploy
 
