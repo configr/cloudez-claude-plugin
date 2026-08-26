@@ -200,26 +200,13 @@ Além do arquivo, este passo confere **o que o site precisa ter configurado**, q
   permissão negada — no meio do deploy, depois de o build já ter rodado. O comando
   lista suas chaves locais e propõe autorizar.
 
-### 3. `/cloudez:compose`
-
-Escreve o Compose junto com você. Não é geração por template: ele lê o projeto,
-pergunta o que o projeto não responde e propõe.
-
-**Se já existe um Compose, ele não é reescrito.** Aquele arquivo é o de
-desenvolvimento, é o que você roda todo dia, e as diferenças de produção vão para
-um `docker-compose.cloudez.yml` que só o servidor lê — localmente continua sendo
-`docker compose up`, sem argumento.
-
-Precisando de banco, ele **pergunta** em vez de decidir: o padrão é no container,
-com volume nomeado, e a alternativa é uma instância gerenciada pela Cloudez.
-
-### 4. `/cloudez:dev` (opcional, mas é o passo barato)
+### 3. `/cloudez:dev` (opcional, mas é o passo barato)
 
 Sobe a aplicação na sua máquina — pelo dev server do projeto, quando é Node, ou em
 container — e abre no navegador. Descobrir aqui que falta uma variável de ambiente
 custa um minuto; descobrir no deploy custa um site fora do ar.
 
-### 5. `/cloudez:deploy`
+### 4. `/cloudez:deploy`
 
 ```
 /cloudez:deploy producao
@@ -236,7 +223,20 @@ o site estava fora do ar antes do deploy, ele diz isso em vez de creditar a falh
 
 Você também chega aqui em linguagem natural — "sobe o site", "publica em staging".
 
-### 6. Deu errado: `/cloudez:rollback`
+> **Projeto sem Compose?** O deploy **para** antes de publicar qualquer coisa e te
+> manda para o `/cloudez:compose` — sem Compose ele estaria publicando arquivos que
+> ninguém executa. Você não precisa chamar aquele comando antes: chame quando o
+> deploy pedir, e rode o deploy de novo depois.
+>
+> O `/cloudez:compose` escreve o arquivo **junto com você**, lendo o projeto e
+> perguntando o que ele não responde. Se já existe um Compose, ele **não é
+> reescrito**: aquele arquivo é o de desenvolvimento, é o que você roda todo dia, e
+> as diferenças de produção vão para um `docker-compose.cloudez.yml` que só o
+> servidor lê. Precisando de banco, ele pergunta em vez de decidir — o padrão é no
+> container, com volume nomeado, e a alternativa é uma instância gerenciada pela
+> Cloudez.
+
+### 5. Deu errado: `/cloudez:rollback`
 
 ```
 /cloudez:rollback producao
