@@ -132,9 +132,10 @@ async function sincronizar(deployId, dir) {
   try {
     resultado = await transferir(dep, dir)
   } catch (e) {
-    // A recusa por nome intransportável acontece ANTES de o tar existir, então
-    // nada foi enviado e o deploy fica exatamente onde estava.
+    // As duas recusas acontecem ANTES de o tar existir, então nada foi enviado e o
+    // deploy fica exatamente onde estava.
     if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
+    if (e.code === "build_output_empty") die("build_output_empty", e.message)
     throw e
   }
   const { stats, logs, erro } = resultado

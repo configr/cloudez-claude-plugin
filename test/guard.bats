@@ -152,9 +152,40 @@ aprovar_para() {
   [ ! -f "$CLOUDEZ_GUARD_DIR/approved-write.json" ]
 }
 
-@test "guard: approve sem nada pendente recusa" {
-  run bash -c 'cloudez-approve < /dev/null 2>&1'
+# Com TERMINAL, de proposito. A versao anterior deste teste rodava
+# `< /dev/null` e afirmava so `status != 0` — o que a checagem de TTY ja satisfaz
+# sozinha. Ele passava sem nunca alcancar o caminho que diz cobrir, e o relatorio
+# de cobertura foi quem denunciou: as linhas do `nothing_pending` continuavam
+# marcadas como nunca executadas.
+@test "guard: approve com terminal e sem nada pendente diz que nao ha pedido" {
+  rm -f "$CLOUDEZ_GUARD_DIR/pending-write.json"
+  run com_pty $'\n' cloudez-approve
   [ "$status" -ne 0 ]
+  [ "$(campo_pty "$output" .error.code)" = "nothing_pending" ]
+  [ ! -f "$CLOUDEZ_GUARD_DIR/approved-write.json" ]
+}
+
+# A aprovacao vale por minutos. Sem esta recusa, um pedido esquecido no disco
+# ficaria aprovavel para sempre — e o usuario aprovaria, sem lembrar, um comando
+# que o agente montou numa conversa de ontem.
+@test "guard: pedido velho expira em vez de ser aprovavel" {
+  run guard '"curl -X POST https://site.com/api/uploads"'
+  [ "$status" -eq 2 ]
+
+  # Envelhece o pedido para alem do TTL, mexendo so no carimbo.
+  node -e '
+    const f = process.env.CLOUDEZ_GUARD_DIR + "/pending-write.json"
+    const fs = require("node:fs")
+    const p = JSON.parse(fs.readFileSync(f, "utf8"))
+    p.at = Date.now() - 99 * 60000
+    fs.writeFileSync(f, JSON.stringify(p))
+  '
+
+  run com_pty $'aprovo\n' cloudez-approve
+  [ "$status" -ne 0 ]
+  [ "$(campo_pty "$output" .error.code)" = "pending_expired" ]
+  # E o mais importante: nem digitando "aprovo" ele libera.
+  [ ! -f "$CLOUDEZ_GUARD_DIR/approved-write.json" ]
 }
 
 @test "guard: com terminal, aprova e libera uma vez" {

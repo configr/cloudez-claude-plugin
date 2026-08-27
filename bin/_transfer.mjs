@@ -57,6 +57,23 @@ export function transferir(dep, localDir) {
   // identificador não muda de semântica — e diretório que a aplicação precisa
   // costuma vir de `mkdir` dela ou do `shared/` do deploy.
   const { entries, ignore } = listarPayload(localDir)
+
+  // Nada publicável PARA aqui, e não vira um tar vazio.
+  //
+  // O `conferirDiretorio` de quem chama só olha se o diretório tem alguma coisa
+  // dentro — e um `dist/` cujo `.gitignore` exclui tudo tem: o próprio
+  // `.gitignore`. Sem esta recusa o deploy enviava um pacote sem arquivo nenhum,
+  // reportava `uploaded`, e a release ativada ficava vazia. Deploy verde, site no
+  // ar servindo nada — e a causa a três passos de distância.
+  //
+  // O `--hash-only` já recusava esse caso; o caminho do deploy não, e a diferença
+  // entre os dois é justamente onde o dano acontece.
+  if (entries.length === 0) {
+    const e = new Error(mensagemVazio(localDir, ignore))
+    e.code = "build_output_empty"
+    throw e
+  }
+
   const tarArgs = ["-czf", "-", "-C", localDir, "-T", "-"]
 
   const remoto = `tar xzf - -C ${aspasParaShellRemoto(dep.ssh.path)}`
@@ -152,4 +169,20 @@ function esperar(proc, nome) {
  */
 function aspasParaShellRemoto(s) {
   return `'${s.split("'").join(`'\\''`)}'`
+}
+
+/**
+ * Por que não sobrou nada, na forma que o `cloudez-sync` já usa.
+ *
+ * A distinção não é cosmética: "está vazio" manda refazer o build, e "um padrão
+ * excluiu tudo" manda corrigir o padrão. Errar aqui custa uma investigação no
+ * lugar errado.
+ */
+function mensagemVazio(dir, ignore) {
+  const fontes = ignore?.sources ?? []
+  const porque =
+    fontes.length > 0
+      ? `os padrões de ${fontes.join(" e ")} excluíram tudo`
+      : "só há `.git`, que o deploy sempre exclui"
+  return `Diretório '${dir}' não tem nenhum arquivo publicável: ${porque}.`
 }

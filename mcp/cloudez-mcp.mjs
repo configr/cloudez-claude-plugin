@@ -27405,7 +27405,7 @@ async function createDatabase(args) {
   }
   const cloud = Number(found.raw?.cloud?.id);
   const website = Number(found.raw?.id);
-  if (!Number.isFinite(cloud) || !Number.isFinite(website)) {
+  if (!idValido(cloud) || !idValido(website)) {
     throw new ToolError("upstream_unavailable", "O site n\xE3o trouxe cloud ou id utiliz\xE1veis.", {
       hint: "Sem os dois n\xE3o d\xE1 para provisionar nem vincular. Confira o retorno de cloudez_get_site."
     });
@@ -27426,19 +27426,23 @@ async function createDatabase(args) {
   });
   const vinculado = Array.isArray(criado?.websites) && criado.websites.length > 0;
   return {
-    ...Number.isFinite(Number(criado?.id)) ? { id: Number(criado.id) } : {},
+    ...idValido(criado?.id) ? { id: Number(criado.id) } : {},
     engine,
     database_name: args.database_name,
     username,
     password,
     ...criado?.host ? { host: String(criado.host) } : {},
-    ...Number.isFinite(Number(criado?.port)) ? { port: Number(criado.port) } : {},
+    ...idValido(criado?.port) ? { port: Number(criado.port) } : {},
     cloud,
     website,
     // O vínculo é o que faz a aplicação enxergar o banco. A API aceitou a criação
     // sem devolvê-lo, e afirmar que está vinculado seria afirmar o que não se viu.
     ...vinculado ? {} : { warning: "A API n\xE3o confirmou o v\xEDnculo com o site no retorno da cria\xE7\xE3o. Confira no painel antes de apontar a aplica\xE7\xE3o para este banco." }
   };
+}
+function idValido(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0;
 }
 function validarNome(nome) {
   if (typeof nome !== "string" || nome.length === 0 || nome.length > 62 || !/^[A-Za-z0-9_]+$/.test(nome)) {
@@ -28420,7 +28424,7 @@ async function createCron(args) {
     });
   }
   const website = Number(found.raw?.id);
-  if (!Number.isFinite(website)) {
+  if (!idValido2(website)) {
     throw new ToolError("upstream_unavailable", "O site n\xE3o trouxe um id utiliz\xE1vel.", {
       hint: "Sem ele n\xE3o d\xE1 para criar o cron. Confira o retorno de cloudez_get_site."
     });
@@ -28432,7 +28436,7 @@ async function createCron(args) {
     ...tempo
   });
   return {
-    ...Number.isFinite(Number(criado?.id)) ? { id: Number(criado.id) } : {},
+    ...idValido2(criado?.id) ? { id: Number(criado.id) } : {},
     website,
     name: args.name,
     command: args.command,
@@ -28440,8 +28444,12 @@ async function createCron(args) {
     // A API pode devolver 201 com um corpo que não repete o que foi enviado. Dizer
     // o que se viu, em vez de afirmar que está tudo certo, é a mesma conduta do
     // `warning` de vínculo em databases.ts.
-    raw_ok: Number.isFinite(Number(criado?.id))
+    raw_ok: idValido2(criado?.id)
   };
+}
+function idValido2(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0;
 }
 function validarCampoTempo(valor, campo) {
   const recusa = (motivo, hint) => {

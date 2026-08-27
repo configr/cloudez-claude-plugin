@@ -321,6 +321,40 @@ setup_keys() {
   [ "$(campo "$output" .error.code)" = "build_output_empty" ]
 }
 
+# A mensagem do diretorio vazio tem DUAS versoes, e a diferenca e o que o usuario
+# faz em seguida: sem `.gitignore`, o diretorio esta mesmo vazio; com, ele tem
+# arquivos e um padrao os excluiu — e o conserto e no padrao, nao no build.
+@test "sync com tudo ignorado diz QUAL arquivo excluiu" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/app.js dist/app.css
+  printf '*\n' > dist/.gitignore
+  run cloudez-sync "$d" dist
+  [ "$status" -eq 1 ]
+  [ "$(campo "$output" .error.code)" = "build_output_empty" ]
+  [[ "$(campo "$output" .error.message)" == *".gitignore"* ]]
+  # E o mais importante: NADA foi enviado.
+  ! grep -q "tar xzf" "$MOCK_LOG"
+}
+
+# O estado do deploy e local. Nao conseguir grava-lo depois de o envio ter dado
+# certo e um caso ruim: o servidor ja tem os arquivos, e o deploy nao sabe disso.
+# Falhar alto e a unica saida honesta — dizer `uploaded` sem ter registrado faria
+# o passo seguinte trabalhar sobre um estado que nao existe.
+@test "sync que nao consegue gravar o estado falha alto" {
+  d=$(deploy_state dpl_test)
+  mkdir -p dist && touch dist/index.html
+  # O estado e LIDO do `.cloudez/state` legado (que o deploy_state escreveu) e
+  # GRAVADO no CLOUDEZ_STATE_DIR. Apontar so a gravacao para um diretorio sem
+  # escrita separa as duas: o deploy e encontrado, o envio acontece, e o que falha
+  # e exatamente o registro.
+  local somenteLeitura="$BATS_TEST_TMPDIR/estado-travado"
+  mkdir -p "$somenteLeitura" && chmod 500 "$somenteLeitura"
+  run env CLOUDEZ_STATE_DIR="$somenteLeitura" cloudez-sync "$d" dist
+  chmod 700 "$somenteLeitura"
+  [ "$status" -ne 0 ]
+  [ "$(campo "$output" .error.code)" = "state_write_failed" ]
+}
+
 @test "sync bem-sucedido marca o deploy como uploaded" {
   d=$(deploy_state dpl_test)
   mkdir -p dist && touch dist/index.html
