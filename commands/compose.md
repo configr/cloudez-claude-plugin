@@ -101,7 +101,7 @@ O que procurar, e por quê:
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
 | Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 3 propõe o container com volume nomeado e OFERECE a instância gerenciada |
-| Manda e-mail | `nodemailer`, `sendmail`, `Mail::`, `send_mail`, `SMTP_`/`MAIL_`/`EMAIL_` no ambiente. Havendo envio, o passo 3 aponta para o MTA do servidor — sem conta externa e sem chave de API |
+| Manda e-mail | `nodemailer`, `sendmail`, `Mail::`, `send_mail`, `SMTP_`/`MAIL_`/`EMAIL_` no ambiente. Havendo envio, o passo 3 manda PERGUNTAR: o MTA do servidor não aceita conexão de container, e não há padrão que funcione |
 | Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 3 |
 | Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
@@ -515,53 +515,43 @@ conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega 
 rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
 certo, é aqui.
 
-### A aplicação manda e-mail? Use o MTA do próprio servidor
+### A aplicação manda e-mail? PERGUNTE — não há padrão que funcione hoje
 
-**Este é o padrão, e não se pergunta.** O servidor onde o Docker roda já tem um
-MTA configurado pela Cloudez. Apontar a aplicação para ele evita conta em serviço
-externo, chave de API para guardar, e um segredo a mais atravessando o deploy.
+O servidor tem um MTA, e ele **não é alcançável de dentro de um container**.
+Medido num servidor da Cloudez:
 
-O container não enxerga o `localhost` do host — o `localhost` dele é ele mesmo. O
-caminho é o gateway da rede do Docker, que o Compose sabe nomear:
-
-```yaml
-services:
-  app:
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      SMTP_HOST: host.docker.internal
-      SMTP_PORT: "25"
+```
+# ss -lntp | grep :25
+LISTEN 0  20  127.0.0.1:25  0.0.0.0:*  users:(("exim4",pid=1533,fd=4))
 ```
 
-`host-gateway` é resolvido pelo Docker para o endereço do host na rede do
-container — **verificado**: dentro do container, `host.docker.internal` resolve.
-Exige Docker 20.10 ou mais novo, que é o caso de qualquer servidor gerenciado hoje.
+`127.0.0.1` e nada mais. O `localhost` do container é ELE MESMO, não o host —
+então `extra_hosts: ["host.docker.internal:host-gateway"]` resolve o nome, chega
+ao endereço do host na bridge, e encontra uma porta onde ninguém escuta. Conexão
+recusada.
 
-Os nomes das variáveis são os que a APLICAÇÃO usa: `MAIL_HOST` no Laravel,
-`EMAIL_HOST` no Django, `SMTP_HOST` na maioria dos projetos Node. Descubra em vez
-de presumir — o padrão errado aqui não dá erro, só não manda e-mail.
+**Não escreva o bloco de SMTP apontando para o host.** Ele parece certo, passa em
+qualquer revisão de arquivo, e falha só quando alguém tenta recuperar uma senha.
 
-**Sem usuário e sem senha.** Relay local não pede autenticação, e é por isso que
-isto vai no arquivo versionado sem violar a regra dos segredos: não há segredo
-nenhum. Se a aplicação exigir os campos, deixe-os vazios em vez de inventar.
+#### O que fazer enquanto isso
 
-#### O que precisa ser conferido, e ainda não foi
+Pergunte ao usuário como a aplicação deve mandar e-mail, e diga o que você sabe:
+que o MTA do servidor existe mas não aceita conexão de container, e que a conta
+não expõe credencial de SMTP pela API — conferido em `cloudez_get_site`, que não
+traz campo nenhum de e-mail.
 
-O MTA precisa **escutar na interface da bridge**, e não só em `127.0.0.1`. Um
-Postfix com `inet_interfaces = loopback-only` — que é o padrão de muitas
-instalações — recusa a conexão vinda do container, e o sintoma é a aplicação
-subindo perfeitamente e não mandando e-mail nenhum.
+As saídas que sobram são dele, não suas:
 
-Isto não foi verificado num servidor da Cloudez. Se o e-mail não sair com tudo o
-mais certo, é o primeiro lugar a olhar; do host, `ss -lntp | grep :25` mostra em
-quais endereços ele escuta.
+- **um serviço externo** (SES, Resend, Postmark, o que ele já usar). As credenciais
+  vão pelo `cloudez_set_env`, nunca no arquivo versionado;
+- **pedir à Cloudez** que o MTA passe a escutar na bridge. É mudança no servidor,
+  fora do alcance deste plugin, e tem uma consequência que precisa ser dita: num
+  servidor com vários sites, todo container passaria a poder relayar por ele.
 
-**Em desenvolvimento isto não vale.** A máquina de quem desenvolve não tem MTA, e
-apontar para ela faria o envio falhar em silêncio ou, pior, mandar e-mail de teste
-para endereço de verdade. Num arquivo que já existe, o bloco acima vai na
-SOBREPOSIÇÃO; localmente o projeto segue com o que já usa — um mailhog, um
-`console`, ou nada.
+**Em desenvolvimento nada disso vale.** A máquina de quem desenvolve não tem MTA,
+e apontar para um serviço real faria e-mail de teste sair para endereço de
+verdade. Localmente o projeto segue com o que já usa — um mailhog, um `console`,
+ou nada.
 
 ### Sem `container_name`
 

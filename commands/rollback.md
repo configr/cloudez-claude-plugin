@@ -44,7 +44,7 @@ Mas continue não *deduzindo* produção: se o usuário não disse, pergunte.
 cloudez_get_site(domain: "<domain>")
 ```
 
-Confirme o `stack`: este plugin só publica `container_docker`. O passo 5 é
+Confirme o `stack`: este plugin só publica `claude` (e o anterior, `container_docker`). O passo 5 é
 obrigatório — sem ele o rollback troca o symlink e não surte efeito nenhum, porque
 quem responde é o container, que continua rodando a imagem antiga.
 

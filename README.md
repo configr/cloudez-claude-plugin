@@ -170,7 +170,7 @@ O caminho inteiro, na ordem. Cada passo é um comando — você conversa com ele
 ele conduz. O que está escrito aqui é o que esperar, não um roteiro a decorar.
 
 **Antes de começar, uma coisa precisa existir e não é criada por aqui: o site na
-Cloudez.** Crie-o no painel, com o tipo **Docker** (`container_docker`). O plugin
+Cloudez.** Crie-o no painel, com o tipo **Claude** (`claude`). O plugin
 publica aplicação em container e só; num site de tipo estático o deploy roda
 inteiro, sem erro nenhum, e a Cloudez continua servindo os arquivos como estavam —
 a falha mais confusa que este plugin consegue produzir. O `/cloudez:setup` para e
@@ -310,7 +310,7 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
 - [x] `ssh.host` e `ssh.user` vindos da API (`cloud.fqdn`, `user.username`)
 - [x] Slugs de `stack` e `current_release` confirmados contra a API real — e o
       contrato assumia errado: `stack` não é slug de `values`, é `type.slug`
-      (`html`, `container_docker`); `current_release` não existe na resposta do
+      (`html`, `claude`); `current_release` não existe na resposta do
       site (só o symlink `current` no servidor sabe). `mapSite` já lê `stack` de
       `type.slug` (com `values` como precedência); `current_release` continua fora
 - [x] Bloco `ssh` fora do `.cloudez.yaml` — vem do `cloudez_get_site` a cada deploy
@@ -520,29 +520,34 @@ empresa: confira com `cloudez_list_database_types`.
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
 
-## E-mail: o MTA do próprio servidor
+## E-mail: não há padrão, e o motivo está medido
 
-O servidor onde o Docker roda já tem MTA configurado pela Cloudez, e é para ele
-que o `/cloudez:compose` aponta a aplicação por padrão — sem conta em serviço
-externo, sem chave de API para guardar, e sem um segredo a mais atravessando o
-deploy.
+O servidor tem um MTA, e a intuição de apontar a aplicação para ele está certa —
+não fosse por um detalhe que só aparece medindo:
 
-O container não enxerga o `localhost` do host; o caminho é o gateway da rede do
-Docker, que o Compose nomeia com `extra_hosts: ["host.docker.internal:host-gateway"]`
-e a aplicação usa como `SMTP_HOST`, porta 25. **Verificado** que o nome resolve
-dentro do container; exige Docker 20.10+.
+```
+# ss -lntp | grep :25
+LISTEN 0  20  127.0.0.1:25  0.0.0.0:*  users:(("exim4",pid=1533,fd=4))
+```
 
-Relay local não pede autenticação, então isto vai no arquivo versionado sem
-violar a regra dos segredos — não há segredo nenhum.
+Loopback e nada mais. O `localhost` de um container é ele mesmo, não o host, então
+`extra_hosts: ["host.docker.internal:host-gateway"]` resolve o nome, alcança o
+endereço do host na bridge, e encontra uma porta onde ninguém escuta.
 
-**O que falta verificar:** se o MTA escuta na interface da bridge ou só em
-`127.0.0.1`. Um Postfix com `inet_interfaces = loopback-only` recusa a conexão do
-container, e o sintoma é a aplicação subindo perfeitamente e não mandando e-mail.
-Está registrado como pendência na doutrina, com o comando para conferir.
+Esta seção já descreveu esse arranjo COMO PADRÃO, com o mecanismo verificado em
+Docker e a escuta do MTA marcada como pendência. A pendência foi verificada, e
+derrubou o padrão. Ficou registrado assim de propósito: o bloco de SMTP apontando
+para o host parece certo, passa em qualquer revisão de arquivo, e falha só quando
+alguém tenta recuperar uma senha.
 
-E vale só em produção: a máquina de quem desenvolve não tem MTA, e apontar para
-ela faria o envio falhar em silêncio — ou mandar e-mail de teste para endereço de
-verdade. Por isso o bloco vai na sobreposição.
+O `/cloudez:compose` passa a **perguntar**, dizendo o que se sabe: que o MTA existe
+mas não aceita conexão de container, e que a conta não expõe credencial de SMTP
+pela API — conferido no `cloudez_get_site`, que não traz campo nenhum de e-mail.
+Escolhido um serviço externo, as credenciais vão pelo `cloudez_set_env`.
+
+Fazer o MTA escutar na bridge resolveria, e é decisão da Cloudez, não deste
+plugin: num servidor com vários sites, todo container passaria a poder relayar
+por ele.
 
 ## Segredos, e por onde eles chegam ao servidor
 

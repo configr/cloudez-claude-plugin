@@ -336,7 +336,7 @@ devolve os candidatos com o domínio de cada um, e o `/cloudez:setup` pergunta.
   "site": {
     "domain": "meusite.com.br",
     "name": "meusite",
-    "stack": "container_docker",
+    "stack": "claude",
     "app_root_path": "claude/current",
     "custom_port": "3000",
     "temporary_address": "meusite-com-br.srv-12.cloudez.io",

@@ -162,12 +162,22 @@ São **dois** valores, e o deploy depende dos dois. O `cloudez_get_site` do pass
 já devolveu ambos.
 
 **O tipo do site, antes de tudo.** Este plugin publica aplicação em container, e
-só. Se o `stack` não for `container_docker`, **pare aqui**: a Cloudez serviria os
-arquivos como estáticos, o container nunca subiria, e o deploy rodaria inteiro sem
-erro nenhum. Diga que o tipo do site precisa ser trocado para Docker no painel da
-Cloudez, e que o setup continua quando isso estiver feito. Não tente corrigir por
-conta própria — o tipo muda o que a Cloudez provisiona, e não é reversível por um
-comando nosso.
+só. O tipo a exigir é **`claude`** — é o tipo da Cloudez para isso, um invólucro
+do antigo `container_docker` com nome, slug e ícone próprios e o mesmo
+provisionamento por baixo.
+
+`container_docker` **também segue**, sem alarde: é o tipo anterior, e o que a
+Cloudez provisiona é o mesmo. Recusar um site criado antes de o tipo novo existir
+quebraria quem já publica sem impedir falha nenhuma.
+
+Qualquer outro `stack` — `html` é o caso real — **pare aqui.** A Cloudez serviria
+os arquivos como estáticos, o container nunca subiria, e o deploy rodaria inteiro
+sem erro nenhum. É a falha mais confusa que este plugin consegue produzir, e a
+razão desta checagem existir.
+
+Diga que o tipo do site precisa ser trocado para **Claude** no painel, e que o
+setup continua quando isso estiver feito. Não tente corrigir por conta própria — o
+tipo muda o que a Cloudez provisiona, e não é reversível por um comando nosso.
 
 **O `app_root_path`** é o diretório que o servidor web entrega, relativo a
 `~/<domain>/www`. O deploy publica em `<root>/current`, e com o `root` que o
@@ -284,7 +294,7 @@ autorizada — pelo painel, se ele preferir fazer à mão.
 
 ## 7. Como a aplicação roda
 
-O site já foi confirmado como `container_docker` no passo 5. Falta saber se o
+O site já foi confirmado como publicável (`claude`) no passo 5. Falta saber se o
 projeto tem o arquivo que faz o container existir — e qual porta ele publica:
 
 ```
@@ -295,7 +305,7 @@ Ela procura os quatro nomes que o Compose aceita, **na ordem que o próprio
 Compose usa** — `compose.yaml`, `compose.yml`, `docker-compose.yaml`,
 `docker-compose.yml` — e devolve o que seria efetivamente usado.
 
-O tipo do site já foi confirmado no passo 5 — se não fosse `container_docker`, o
+O tipo do site já foi confirmado no passo 5 — se não fosse publicável, o
 setup teria parado lá. Então sobram dois casos:
 
 | Projeto | O que dizer |

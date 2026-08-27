@@ -24,7 +24,7 @@ usuário os tiver mencionado.
 
 Toda a lógica vive em `commands/setup.md`: a confirmação do domínio contra a API
 antes de escrever qualquer coisa, o formato do arquivo, e a conferência do que o
-site precisa ter no painel — o tipo `container_docker`, o `app_root_path`, a
+site precisa ter no painel — o tipo `claude`, o `app_root_path`, a
 `custom_port` e a chave SSH desta máquina. Esse último bloco é o que evita a falha
 mais confusa do plugin, então não o pule. Se precisar consultar o procedimento,
 leia esse arquivo; não reconstrua os passos de memória, e não os duplique aqui.
