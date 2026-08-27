@@ -206,7 +206,7 @@ não presuma sucesso por a chamada ter retornado.
 ```
 cloudez_begin_deploy(
   domain: "<domain>",
-  root: "<root do bloco do environment no .cloudez.yaml>",
+  // `root` só quando o .cloudez.yaml do projeto o tiver — ver a nota abaixo.
   content_sha256: "<content_sha256 do passo 3>",
   ref: "<sha do passo 2, se houver>",
   environment: "<environment>"
@@ -224,7 +224,7 @@ retorno ao falar com o usuário; não o monte por conta própria.
 não invente um `ref`.
 
 A tool resolve o destino ssh sozinha, pelo `domain` (o mesmo `cloudez_get_site`
-do passo 1) — **não passe host, user nem port**. O `root` vem do `.cloudez.yaml`
+do passo 1) — **não passe host, user nem port**. O `root`, quando existir, vem do `.cloudez.yaml`
 (o bloco do environment): é a única fonte dele, e a tool não o busca na API de
 propósito.
 
@@ -242,6 +242,15 @@ antigo em vez de criar o novo.
 
 Guarde o `deploy_id` do retorno. O destino ssh já foi gravado no estado do
 deploy, e é de lá que o `cloudez-sync` o lê no passo 5.
+
+> **Não passe `root`.** O diretório do site no servidor é sempre
+> `~/<domain>/www/claude`, e as tools o derivam do domínio — ele saiu do
+> `.cloudez.yaml` porque a Cloudez RENOMEIA o diretório quando o domínio do site
+> muda, e um valor escrito passaria a apontar para o que deixou de existir.
+>
+> A exceção é config antiga: havendo `root:` no bloco do environment, **passe-o** —
+> ele vence o derivado, e ignorá-lo publicaria noutro lugar sem avisar. Não
+> reescreva o arquivo do usuário para tirá-lo.
 
 ## 5. Sincronizar
 
@@ -499,7 +508,8 @@ usuário e verifica o resultado. Aqui está inline porque um rollback disparado 
 meio de um deploy que falhou acontece dentro deste fluxo, e não há como invocar
 outro comando daqui. **Os dois textos precisam mudar juntos.**
 
-O `root` vem do bloco do environment no `.cloudez.yaml`, como no passo 4.
+O `root`, se o `.cloudez.yaml` o tiver, vem do bloco do environment, como no
+passo 4. Não tendo, omita: a tool o deriva do domínio.
 
 ```
 cloudez_rollback(domain: "<domain>", root: "<root>")                          # volta para a anterior
@@ -559,7 +569,7 @@ Também aqui o destino vem do `cloudez_get_site` — passos 1 a 2 antes.
 
 ## Nota de implementação
 
-O `root` vem **sempre** do `.cloudez.yaml`, nunca da API: duas fontes para o
+Havendo `root` no `.cloudez.yaml`, ele vem **sempre** de lá, nunca da API: duas fontes para o
 destino dos arquivos criariam a pergunta "qual vale?" para a decisão mais
 destrutiva daqui, e ela só apareceria quando as duas divergissem.
 

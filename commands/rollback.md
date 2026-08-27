@@ -15,7 +15,7 @@ Duas coisas, porém, não se pulam por pressa: **confirmar o alvo** e **verifica
 depois**. Um rollback para a release errada troca um site quebrado por outro, e
 um rollback não verificado é o pior estado possível para se declarar resolvido.
 
-O projeto precisa de um `.cloudez.yaml`. Sem ele não há `root`, e sem `root` não
+O projeto precisa de um `.cloudez.yaml`. Sem ele não há domínio, e sem domínio não
 há o que voltar — pare e diga isso.
 
 **Não exija working tree limpo, nem repositório git.** Nada aqui é publicado a
@@ -51,8 +51,17 @@ quem responde é o container, que continua rodando a imagem antiga.
 ## 3. Escolher o alvo, e confirmar
 
 ```
-cloudez_list_releases(domain: "<domain>", root: "<root do .cloudez.yaml>")
+cloudez_list_releases(domain: "<domain>")   # `root:` só se o .cloudez.yaml o tiver
 ```
+
+> **Não passe `root`.** O diretório do site no servidor é sempre
+> `~/<domain>/www/claude`, e as tools o derivam do domínio — ele saiu do
+> `.cloudez.yaml` porque a Cloudez RENOMEIA o diretório quando o domínio do site
+> muda, e um valor escrito passaria a apontar para o que deixou de existir.
+>
+> A exceção é config antiga: havendo `root:` no bloco do environment, **passe-o** —
+> ele vence o derivado, e ignorá-lo publicaria noutro lugar sem avisar. Não
+> reescreva o arquivo do usuário para tirá-lo.
 
 A lista vem da mais nova para a mais velha, com `current: true` na que está no
 ar. O servidor guarda as 5 mais recentes.

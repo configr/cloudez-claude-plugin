@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.17 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.18 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27179,6 +27179,10 @@ var apiPatch = (path, body) => request("PATCH", path, body);
 
 // src/sites.ts
 var EXPECTED_APP_ROOT_PATH = "claude/current";
+var APP_SUBDIR = EXPECTED_APP_ROOT_PATH.split("/")[0];
+function siteRoot(domain) {
+  return `~/${String(domain).toLowerCase()}/www/${APP_SUBDIR}`;
+}
 var DEFAULT_CUSTOM_PORT = "3000";
 function toList(payload) {
   if (Array.isArray(payload)) return payload;
@@ -28194,6 +28198,16 @@ ${res.stderr}`;
 }
 
 // src/remote-path.ts
+function rootDoSite(domain, root) {
+  const informado = root?.trim();
+  if (informado) return informado;
+  if (!String(domain || "").trim()) {
+    throw new ToolError("invalid_argument", "Sem dom\xEDnio n\xE3o h\xE1 como saber o diret\xF3rio do site.", {
+      hint: "Passe `domain`. O caminho no servidor \xE9 derivado dele: ~/<domain>/www/claude."
+    });
+  }
+  return siteRoot(domain);
+}
 function absoluto(home, root) {
   const limpo = root.replace(/^~\//, "").replace(/\/+$/, "");
   if (limpo.startsWith("/")) return limpo;
@@ -29031,7 +29045,9 @@ server.registerTool(
     description: "Registra a inten\xE7\xE3o de deploy e cria o diret\xF3rio de release no servidor. N\xC3O move bytes \u2014 devolve o deploy_id e o destino ssh para o transporte (cloudez-sync) escrever. Chame depois de o build passar, uma vez por deploy. O `root` vem SEMPRE do .cloudez.yaml do projeto (nunca da API); o destino ssh \xE9 resolvido aqui pelo dom\xEDnio. N\xE3o precisa de idempotency_key: o servidor gera uma. Passe `content_sha256` (de `cloudez-sync --hash-only`) SEMPRE, e `ref` tamb\xE9m quando o projeto estiver num reposit\xF3rio git. Sem nenhum dos dois a chamada \xE9 recusada.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
-      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
+      root: string2().optional().describe(
+        "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
+      ),
       ref: string2().optional().describe("Git SHA do que est\xE1 sendo enviado. Omita fora de um reposit\xF3rio git."),
       content_sha256: string2().optional().describe(
         "content_sha256 devolvido por `cloudez-sync --hash-only <diret\xF3rio>`. Identifica a release quando n\xE3o h\xE1 git, e fica registrado mesmo quando h\xE1."
@@ -29046,7 +29062,7 @@ server.registerTool(
   },
   async (args) => {
     try {
-      return okResult({ ...await beginDeploy(args) });
+      return okResult({ ...await beginDeploy({ ...args, root: rootDoSite(args.domain, args.root) }) });
     } catch (err) {
       return errorResult(err);
     }
@@ -29113,13 +29129,15 @@ server.registerTool(
     description: "Lista as releases que est\xE3o no servidor e qual \xE9 a ativa (`current: true`). Use para inspe\xE7\xE3o e para escolher o alvo de um rollback. O servidor ret\xE9m as mais recentes (o plugin mant\xE9m 5). O `root` vem do .cloudez.yaml; o destino ssh \xE9 resolvido pelo dom\xEDnio.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
-      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude")
+      root: string2().optional().describe(
+        "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
+      )
     }),
     annotations: { readOnlyHint: true, openWorldHint: true }
   },
   async ({ domain, root }) => {
     try {
-      return okResult({ ...await listReleases(domain, root) });
+      return okResult({ ...await listReleases(domain, rootDoSite(domain, root)) });
     } catch (err) {
       return errorResult(err);
     }
@@ -29132,7 +29150,9 @@ server.registerTool(
     description: "Volta o symlink `current` para uma release anterior. Sem `to_release_id`, volta para a imediatamente anterior. Use cloudez_list_releases antes para ver os alvos. Em site de container, o rollback s\xF3 troca o symlink: o container segue com a imagem do deploy anterior, ent\xE3o rode cloudez_compose_up depois para reconstru\xED-la a partir da release para onde voltou.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
-      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml"),
+      root: string2().optional().describe(
+        "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
+      ),
       to_release_id: string2().optional().describe("Release alvo. Omitido, volta para a imediatamente anterior.")
       // Sem idempotency_key, pela mesma razão do cloudez_set_app_root_path
       // (contrato §3.4): esta tool ATRIBUI um valor fixo — o symlink aponta para
@@ -29144,7 +29164,7 @@ server.registerTool(
   },
   async ({ domain, root, to_release_id }) => {
     try {
-      return okResult({ ...await rollback(domain, root, to_release_id) });
+      return okResult({ ...await rollback(domain, rootDoSite(domain, root), to_release_id) });
     } catch (err) {
       return errorResult(err);
     }
@@ -29275,7 +29295,9 @@ server.registerTool(
     description: `Grava \`<root>/.cloudez/backup-db.sh\` no servidor e o executa UMA VEZ para provar que funciona. O script tira dump l\xF3gico do container que est\xE1 no ar \u2014 \`pg_dump\` do banco da aplica\xE7\xE3o no PostgreSQL, \`mysqldump --all-databases\` no MySQL \u2014 e guarda em <root>/shared/backup/<engine>/, com reten\xE7\xE3o de ${DIARIOS} di\xE1rios e ${SEMANAIS} semanais. No PostgreSQL o dump N\xC3O leva os roles nem outros bancos do mesmo container: quem restaurar precisa de uma base onde o usu\xE1rio j\xE1 exista. Diga isso ao usu\xE1rio em vez de deix\xE1-lo descobrir na restaura\xE7\xE3o. Use com banco NO CONTAINER \u2014 com banco gerenciado pela Cloudez o backup \xE9 dela. Depois desta tool, agende com cloudez_create_cron usando o \`cron_command\` e o \`minute\` do retorno. Se \`verificado\` vier false, o \`log\` diz por qu\xEA e N\xC3O adianta agendar.`,
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
-      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
+      root: string2().optional().describe(
+        "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
+      ),
       engine: _enum(["mysql", "postgresql"]).describe("Engine do banco que roda no container"),
       service: string2().optional().describe("Nome do servi\xE7o de banco no docker-compose.yml. Padr\xE3o: 'db'.")
     }),
@@ -29283,7 +29305,7 @@ server.registerTool(
   },
   async ({ domain, root, engine, service }) => {
     try {
-      return okResult({ ...await installBackup({ domain, root, engine, service }) });
+      return okResult({ ...await installBackup({ domain, root: rootDoSite(domain, root), engine, service }) });
     } catch (err) {
       return errorResult(err);
     }
@@ -29321,7 +29343,9 @@ server.registerTool(
     description: "Grava vari\xE1veis em `<root>/shared/.cloudez.env` (modo 600), que o deploy liga dentro de cada release. \xC9 o \xDANICO caminho por onde um segredo chega ao servidor: a sobreposi\xE7\xE3o de produ\xE7\xE3o \xE9 versionada, e o que est\xE1 no .gitignore o cloudez-sync n\xE3o transfere. Para a aplica\xE7\xE3o l\xEA-las, a sobreposi\xE7\xE3o precisa declarar `env_file: [.cloudez.env]` no servi\xE7o. MESCLA por chave: gravar DATABASE_URL n\xE3o apaga um SECRET_KEY que j\xE1 estava l\xE1 (use `replace` para descartar). O retorno traz s\xF3 os NOMES das vari\xE1veis, nunca os valores.",
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
-      root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
+      root: string2().optional().describe(
+        "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
+      ),
       vars: record(string2(), string2()).describe("Pares nome/valor. O valor n\xE3o pode conter quebra de linha."),
       replace: boolean2().optional().describe("true descarta as vari\xE1veis que j\xE1 estavam no arquivo. Padr\xE3o: mesclar.")
     }),
@@ -29329,7 +29353,7 @@ server.registerTool(
   },
   async ({ domain, root, vars, replace }) => {
     try {
-      return okResult({ ...await setEnv({ domain, root, vars, replace }) });
+      return okResult({ ...await setEnv({ domain, root: rootDoSite(domain, root), vars, replace }) });
     } catch (err) {
       return errorResult(err);
     }

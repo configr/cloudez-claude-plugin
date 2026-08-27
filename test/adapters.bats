@@ -55,13 +55,29 @@ setup() { make_project; }
 # sessao. Derivar do docker-compose seria inferencia: `profiles: ["dev"]` no `db`
 # SUGERE banco gerenciado, e sugestao nao e registro.
 
+# Config publicada ANTES desta mudanca tem `root:`. Ela nao e migrada — as tools o
+# aceitam e ele vence o derivado, e reescrever o arquivo de alguem para tirar uma
+# linha mexeria no valor mais destrutivo do plugin sem ninguem ter pedido.
+@test "config antiga com root nao e tocada" {
+  cat > .cloudez.yaml <<'YAML'
+cloudez:
+  producao:
+    domain: meusite.com.br
+    root: ~/meusite.com.br/www/claude
+YAML
+  run cloudez-setup meusite.com.br producao --database docker
+  [ "$status" -eq 0 ]
+  grep -q '^    root: ~/meusite.com.br/www/claude$' .cloudez.yaml
+  grep -q '^    database: docker$' .cloudez.yaml
+}
+
 @test "setup grava o database na criacao" {
   rm .cloudez.yaml
   run cloudez-setup meusite.com.br producao --database cloudez
   [ "$status" -eq 0 ]
   [ "$(campo "$output" .status)" = "created" ]
   [ "$(campo "$output" .database)" = "cloudez" ]
-  [ "$(sed -n 5p .cloudez.yaml)" = "    database: cloudez" ]
+  [ "$(sed -n 4p .cloudez.yaml)" = "    database: cloudez" ]
 }
 
 @test "sem --database a chave nao aparece, e o template fica como era" {
@@ -163,8 +179,7 @@ YAML
   [ "$(sed -n 1p .cloudez.yaml)" = "cloudez:" ]
   [ "$(sed -n 2p .cloudez.yaml)" = "  homolog:" ]
   [ "$(sed -n 3p .cloudez.yaml)" = "    domain: meusite.com.br" ]
-  [ "$(sed -n 4p .cloudez.yaml)" = "    root: ~/meusite.com.br/www/claude" ]
-  [ "$(wc -l < .cloudez.yaml)" -eq 4 ]
+  [ "$(wc -l < .cloudez.yaml)" -eq 3 ]
   ! grep -q "staging\|production" .cloudez.yaml
 }
 
@@ -184,12 +199,15 @@ YAML
 }
 
 # O destino fica explicito na config, nunca derivado em tempo de deploy.
-@test "o template gerado traz root explicito, logo abaixo de domain" {
+# O `root` SAIU do template. Ele e sempre ~/<domain>/www/claude, e as tools o
+# derivam do dominio — guardá-lo so criava a chance de ficar velho, e o
+# envelhecimento aqui e concreto: a Cloudez RENOMEIA o diretorio quando o dominio
+# do site muda, e o valor escrito passaria a apontar para o que nao existe mais.
+@test "o template nao escreve root: ele e derivado do dominio" {
   rm .cloudez.yaml
   cloudez-setup meusite.com.br staging >/dev/null
-  grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
-  [ "$(grep -n 'domain:' .cloudez.yaml | cut -d: -f1)" \
-    -lt "$(grep -n 'root:' .cloudez.yaml | cut -d: -f1)" ]
+  ! grep -q 'root:' .cloudez.yaml
+  grep -q 'domain: meusite.com.br' .cloudez.yaml
 }
 
 # Nada sobra para o usuario preencher: o destino ssh vem do cloudez_get_site, e o
@@ -221,7 +239,6 @@ YAML
   run cloudez-setup MeuSite.COM.BR staging
   [ "$(campo "$output" .domain)" = "meusite.com.br" ]
   grep -q 'domain: meusite.com.br' .cloudez.yaml
-  grep -q 'root: ~/meusite.com.br/www/claude$' .cloudez.yaml
 }
 
 # ----------------------------------------------------------------- pubkey ---

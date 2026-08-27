@@ -127,23 +127,26 @@ minúsculas, e é essa a forma que o servidor conhece.
 
 Leia o JSON.
 
-**`status: "created"`** — o template foi escrito em `path`, com `domain` e `root`
-já preenchidos. O `root` é sempre `~/<domain>/www/claude`: o document root do site
-na Cloudez é `~/<domain>/www`, e a estrutura de releases fica num subdiretório
-`claude/` dentro dele, para o deploy não tomar conta do `www` inteiro.
+**`status: "created"`** — o template foi escrito em `path`, com o `domain`.
 
-Diga para onde o deploy vai publicar, e **avise que o document root do site no
-painel precisa apontar para `~/<domain>/www/claude/current`** — sem isso o site
-continua servindo o que já estava em `www`, e o deploy parece não ter efeito. O
-`root` é explícito no arquivo justamente para o usuário poder discordar.
+O arquivo NÃO traz o diretório do servidor, e isso é decisão: ele é sempre
+`~/<domain>/www/claude`, e as tools o derivam do domínio. Guardá-lo criaria a
+chance de ficar velho — a Cloudez renomeia o diretório quando o domínio do site
+muda, e o valor escrito passaria a apontar para o que deixou de existir. É a mesma
+razão pela qual o bloco `ssh` não está lá.
+
+Diga para onde o deploy vai publicar — `~/<domain>/www/claude` — e **avise que o
+document root do site no painel precisa apontar para
+`~/<domain>/www/claude/current`**. Sem isso o site continua servindo o que já
+estava em `www`, e o deploy parece não ter efeito.
 
 **O `database:` fica para depois.** Ele registra onde o banco de produção mora —
 `cloudez` para a instância gerenciada, `docker` para o container com volume
 nomeado — e a escolha é do `/cloudez:compose`, que é onde o usuário a faz. Não
 pergunte aqui: seria decidir antes de saber se a aplicação precisa de banco.
 
-**Não há mais nada para o usuário preencher.** O arquivo sai completo: o destino ssh
-não mora nele — vem do `cloudez_get_site` a cada deploy, e o `/cloudez:deploy`
+**Não há mais nada para o usuário preencher.** O arquivo sai completo: nem o
+destino ssh nem o diretório do servidor moram nele — vem do `cloudez_get_site` a cada deploy, e o `/cloudez:deploy`
 o repassa aos adaptadores. Uma cópia do host num arquivo versionado envelheceria:
 se a Cloudez mover o site de servidor, o valor escrito continuaria apontando para
 o antigo.
@@ -187,8 +190,8 @@ setup continua quando isso estiver feito. Não tente corrigir por conta própria
 tipo muda o que a Cloudez provisiona, e não é reversível por um comando nosso.
 
 **O `app_root_path`** é o diretório que o servidor web entrega, relativo a
-`~/<domain>/www`. O deploy publica em `<root>/current`, e com o `root` que o
-`setup` grava isso é **`claude/current`**.
+`~/<domain>/www`. O deploy publica em `~/<domain>/www/claude/current`, então o
+valor é **`claude/current`**.
 
 **A `custom_port`** é a porta do host para onde o nginx da Cloudez encaminha `/`.
 Ela precisa bater com a porta que o Compose publica. Neste passo o projeto pode

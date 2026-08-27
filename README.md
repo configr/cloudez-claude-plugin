@@ -520,6 +520,33 @@ empresa: confira com `cloudez_list_database_types`.
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
 
+## O diretório do servidor saiu do `.cloudez.yaml`
+
+O arquivo tinha `root: ~/<domain>/www/claude`. Ele saiu, e o valor passou a ser
+**derivado do domínio** pelas tools.
+
+```yaml
+cloudez:
+  producao:
+    domain: meusite.com.br      # e só. O diretório sai daqui.
+```
+
+A razão é a mesma que tirou de lá o bloco `ssh` e o `temporary_address` — cópia de
+dado derivável num arquivo versionado envelhece —, e aqui o envelhecimento é
+concreto: **a Cloudez renomeia o diretório quando o domínio do site muda.** O
+valor escrito passaria a apontar para um caminho que deixou de existir, e o deploy
+falharia longe da causa.
+
+O `root` também não servia à flexibilidade que aparentava: o próprio código
+derivava o domínio dele (`root.split("/")[0]`, no nome do projeto do Compose), o
+que só funciona porque a forma é fixa.
+
+**Config publicada antes disso não é migrada.** As cinco tools que recebem o
+caminho (`begin_deploy`, `list_releases`, `rollback`, `install_backup`, `set_env`)
+continuam aceitando `root`, e ele **vence** o derivado. Ignorá-lo publicaria noutro
+lugar sem avisar, que é o pior modo de falha deste plugin; e reescrever o arquivo
+de alguém para tirar uma linha mexeria no valor mais destrutivo que ele guarda.
+
 ## Onde a escolha do banco fica registrada
 
 O `.cloudez.yaml` ganhou `database:` no bloco do environment, com dois valores:

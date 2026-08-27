@@ -246,10 +246,18 @@ if (existsSync(target)) {
   ok({ ...gravarDatabase(target, environment, database), path: target, domain, environment, database })
 }
 
-// Só domain e root. O destino ssh saiu daqui: ele vem da conta do usuário, pelo
-// cloudez_get_site, e uma cópia num arquivo versionado envelheceria — a Cloudez
-// pode mover o site de servidor, e o host escrito continuaria apontando para o
-// antigo, mandando o deploy para o lugar errado sem reclamar.
+// Só o domínio (e o `database`, quando informado). Duas coisas saíram daqui pela
+// MESMA razão, e ela é a regra deste arquivo: cópia de dado derivável num arquivo
+// versionado envelhece.
+//
+// O destino ssh vem do `cloudez_get_site` a cada deploy — a Cloudez pode mover o
+// site de servidor, e um host escrito continuaria apontando para o antigo.
+//
+// O `root` é sempre `~/<domain>/www/claude`, e as tools o derivam do domínio. Ele
+// envelhecia de um jeito ainda mais concreto: a Cloudez RENOMEIA o diretório
+// quando o domínio do site muda, e o valor escrito passaria a apontar para um
+// caminho que deixou de existir. Config que já o tem segue valendo — as tools o
+// aceitam, e ele vence o derivado.
 //
 // O arquivo gerado não leva comentário nenhum: é config de projeto, versionada e
 // lida por quem já sabe o que está fazendo. O que os comentários explicavam —
@@ -260,7 +268,7 @@ if (existsSync(target)) {
 const linhaDb = database ? `    database: ${database}\n` : ""
 writeFileSync(
   target,
-  `cloudez:\n  ${environment}:\n    domain: ${domain}\n    root: ~/${domain}/www/claude\n${linhaDb}`,
+  `cloudez:\n  ${environment}:\n    domain: ${domain}\n${linhaDb}`,
 )
 
 // Sem `todo`: não sobra nada para o usuário preencher. O destino ssh vem do
