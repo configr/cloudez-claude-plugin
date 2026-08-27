@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.14 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.15 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27980,14 +27980,19 @@ echo "SHARED ${nome}"
   }
   return sh;
 }
-function linkEnvScript(root) {
-  const S = `'${root}/shared/${CLOUDEZ_ENV_FILE}'`;
-  const R = `'${CLOUDEZ_ENV_FILE}'`;
-  return `if [ -f ${S} ]; then
-  rm -f ${R}
-  ln -s ${S} ${R}
-  echo "ENV_LINKED ${CLOUDEZ_ENV_FILE}"
-fi
+function linkEnvScript() {
+  const F = CLOUDEZ_ENV_FILE;
+  return `cez_rel=$(pwd -P)
+case "$cez_rel" in
+  */releases/*)
+    cez_root=\${cez_rel%/releases/*}
+    if [ -f "$cez_root/shared/${F}" ]; then
+      rm -f '${F}'
+      ln -s "$cez_root/shared/${F}" '${F}'
+      echo "ENV_LINKED ${F}"
+    fi
+    ;;
+esac
 `;
 }
 function matchLines(out, tag) {
@@ -28124,7 +28129,10 @@ async function composeUp(deployId2) {
   const project = resolveProject(state);
   const cfg = await sshRun(
     ssh,
-    composePrelude(`${root}/current`) + `echo "RELEASE_DIR $(pwd)"
+    composePrelude(`${root}/current`) + // ANTES do config, e não só do up: o Compose recusa o projeto inteiro
+    // quando um `env_file` aponta para arquivo ausente, e o config é a primeira
+    // coisa que o lê.
+    linkEnvScript() + `echo "RELEASE_DIR $(pwd)"
 echo "RELEASE_DIR_P $(pwd -P)"
 $DC $FILES -p '${project}' config --format json
 `
@@ -28140,7 +28148,7 @@ ${cfg.stderr}`.trim() || void 0)
   const plano = planSharedDirs(cfg.stdout, releaseId);
   const built = state.compose?.built === true;
   const buildFlag = built ? "" : " --build";
-  const up = composePrelude(`${root}/current`) + linkEnvScript(plano.absRoot) + linkSharedScript(
+  const up = composePrelude(`${root}/current`) + linkEnvScript() + linkSharedScript(
     plano.absRoot,
     plano.dirs,
     state.previous_release_id ? `${plano.absRoot}/releases/${state.previous_release_id}` : void 0

@@ -456,21 +456,50 @@ o site saem do domínio; você não passa id de nada.
 nome é único por cloud) e pode ser cobrado. Diga o engine e o nome, e espere o
 aceite.
 
-Em produção o serviço de banco **não sobe**, e a sobreposição faz duas coisas:
+Em produção o serviço de banco **não sobe**, e a sobreposição faz quatro coisas:
 
 ```yaml
 services:
-  app:
-    # A aplicação passa a apontar para a instância da Cloudez.
-    depends_on: !reset null
   db:
     profiles: ["dev"]
+
+  app:
+    depends_on: !reset null
+
+    # A instância da Cloudez atende em 127.0.0.1 DO SERVIDOR, e `localhost` dentro
+    # de um container é o próprio container. Sem isto a aplicação sobe perfeita e
+    # não conecta em lugar nenhum.
+    network_mode: host
+    ports: !reset null
 ```
 
-O `depends_on: !reset null` **não é opcional**. Sem ele o Compose recusa o projeto
-inteiro com `service "app" depends on undefined service "db": invalid compose
-project` — verificado. Um serviço com perfil inativo não existe para quem depende
-dele, e o erro derruba tudo, não só o banco.
+Cada uma tem uma razão que só aparece quando falta:
+
+**`depends_on: !reset null`** — sem ele o Compose recusa o projeto inteiro com
+`service "app" depends on undefined service "db": invalid compose project`
+(verificado). Um serviço com perfil inativo não existe para quem depende dele, e o
+erro derruba tudo, não só o banco.
+
+**`network_mode: host`** — é a seção seguinte, e sem ela nada disto funciona. O
+banco gerenciado escuta em loopback do servidor, que o container não alcança.
+
+**`ports: !reset null`** — `ports` é descartado em host mode, e declarar um
+mapeamento que não existe engana quem lê o arquivo depois.
+
+**E as variáveis do arquivo base precisam ser apagadas**, não só sobrescritas:
+
+```yaml
+    environment:
+      PGHOST: !reset null
+      PGUSER: !reset null
+      PGPASSWORD: !reset null
+```
+
+Elas apontam para o container `db`, que não sobe aqui. E `environment` tem
+PRECEDÊNCIA sobre `env_file` — **verificado** —, então sem o reset elas venceriam a
+credencial gravada no `.cloudez.env` e a aplicação tentaria o banco que não existe.
+É o erro mais silencioso desta página: tudo declarado certo, e o valor errado
+ganhando.
 
 #### E a credencial, que é onde isto costumava parar
 
@@ -501,57 +530,110 @@ services:
       - .cloudez.env
 ```
 
+O caminho é RELATIVO: o deploy cria, dentro de cada release, um link para o
+arquivo em `shared/`. Ele o faz antes de o Compose ler qualquer coisa — inclusive
+antes do `config`, que também recusa o projeto quando o `env_file` aponta para
+arquivo ausente.
+
 **Nessa ordem: `set_env` primeiro, `env_file` depois.** O deploy só liga o arquivo
 se ele existir, e declarar o `env_file` antes de gravar as variáveis faz o Compose
-recusar o projeto inteiro com "env file not found". Falha barulhenta e de
-mensagem clara — mas falha.
+recusar o projeto inteiro com "env file not found" — verificado no `config` e no
+`up`, e não no `build`. Falha barulhenta e de mensagem clara, mas falha.
+
+Caminho ABSOLUTO (`/home/<user>/<domínio>/www/claude/shared/.cloudez.env`) também
+funciona, e é o que existe em site publicado antes de o link passar a ser feito.
+Não é o que escrever num arquivo novo: ele crava usuário e domínio, então o mesmo
+repositório publicado num segundo environment aponta para o `shared/` do primeiro.
 
 O `cloudez_set_env` devolve só os NOMES das variáveis, nunca os valores. E vale
 dizer ao usuário que **a senha ficou no transcript desta sessão**, que é um lugar
 que ele não consegue limpar.
 
-E confira o alcance: o `host` do usuário do banco decide de onde ele pode
-conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega pela
-rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
-certo, é aqui.
+Sobre o `host` do usuário do banco, que decide de onde ele pode conectar: com
+`network_mode: host` a aplicação chega pelo loopback DO SERVIDOR, então um grant
+para `127.0.0.1` é o certo — e é o que o `cloudez_create_database` já pede. Isto
+esteve registrado aqui como dúvida por um tempo, com a suspeita oposta (que o
+container chegaria pela rede do Docker, com outro endereço). A suspeita era
+correta para um container comum, e é justamente por isso que o host mode não é
+opcional.
 
-### A aplicação manda e-mail? PERGUNTE — não há padrão que funcione hoje
+### Serviço do HOST — banco gerenciado, MTA — exige `network_mode: host`
 
-O servidor tem um MTA, e ele **não é alcançável de dentro de um container**.
-Medido num servidor da Cloudez:
+Esta seção é a que faz a Opção gerenciada e o e-mail funcionarem. Sem ela as duas
+falham do mesmo jeito: tudo sobe, nada conecta.
+
+**O que o servidor oferece atende em `127.0.0.1`, e só.** Medido:
 
 ```
 # ss -lntp | grep :25
 LISTEN 0  20  127.0.0.1:25  0.0.0.0:*  users:(("exim4",pid=1533,fd=4))
 ```
 
-`127.0.0.1` e nada mais. O `localhost` do container é ELE MESMO, não o host —
-então `extra_hosts: ["host.docker.internal:host-gateway"]` resolve o nome, chega
-ao endereço do host na bridge, e encontra uma porta onde ninguém escuta. Conexão
-recusada.
+O Postgres gerenciado da Cloudez também. E `localhost` dentro de um container é o
+PRÓPRIO container — então a aplicação bate numa porta onde ninguém escuta.
 
-**Não escreva o bloco de SMTP apontando para o host.** Ele parece certo, passa em
-qualquer revisão de arquivo, e falha só quando alguém tenta recuperar uma senha.
+`extra_hosts: ["host.docker.internal:host-gateway"]` não resolve isso: o nome
+resolve mesmo (verificado) e chega ao endereço do host na bridge, onde não há
+ninguém — porque o serviço escuta em loopback, não na bridge. O caminho que
+funciona é compartilhar a pilha de rede:
 
-#### O que fazer enquanto isso
+```yaml
+services:
+  app:
+    network_mode: host
+    # Incompatível com `ports`: publicado é DESCARTADO em host mode — o Compose
+    # avisa e segue (medido, Compose 5.3.1). Sem o reset, o arquivo declara um
+    # mapeamento que não existe.
+    ports: !reset null
+```
 
-Pergunte ao usuário como a aplicação deve mandar e-mail, e diga o que você sabe:
-que o MTA do servidor existe mas não aceita conexão de container, e que a conta
-não expõe credencial de SMTP pela API — conferido em `cloudez_get_site`, que não
-traz campo nenhum de e-mail.
+Com isso, `localhost:25` é o exim do servidor e `localhost:5432` é o banco
+gerenciado. É o arranjo que está em produção hoje.
 
-As saídas que sobram são dele, não suas:
+#### O que ele custa, e quando NÃO cabe
 
-- **um serviço externo** (SES, Resend, Postmark, o que ele já usar). As credenciais
-  vão pelo `cloudez_set_env`, nunca no arquivo versionado;
-- **pedir à Cloudez** que o MTA passe a escutar na bridge. É mudança no servidor,
-  fora do alcance deste plugin, e tem uma consequência que precisa ser dita: num
-  servidor com vários sites, todo container passaria a poder relayar por ele.
+**A aplicação passa a escutar direto na porta do host.** Não há mais mapeamento: a
+porta que ela abrir é a porta do servidor, e é ela que a `custom_port` do site
+precisa encaminhar. Some junto o `127.0.0.1:` do passo 3 — quem decide em qual
+interface a aplicação escuta passa a ser a aplicação, não o Compose.
 
-**Em desenvolvimento nada disso vale.** A máquina de quem desenvolve não tem MTA,
-e apontar para um serviço real faria e-mail de teste sair para endereço de
-verdade. Localmente o projeto segue com o que já usa — um mailhog, um `console`,
-ou nada.
+**E a rede do Compose deixa de existir para esse serviço.** Aqui está a restrição
+que decide o desenho inteiro: **um serviço em host mode não alcança outro
+container pelo nome.** Se o projeto tem um `db` no Compose, a aplicação em host
+mode não o enxerga como `db`.
+
+Daí a regra prática, que amarra as duas escolhas do usuário:
+
+| Banco | E-mail pelo MTA do servidor |
+|---|---|
+| **Gerenciado pela Cloudez** | Sim. O `db` sai com `profiles: ["dev"]`, não sobra container para isolar, e o host mode não custa nada |
+| **No container** | Não, do jeito simples: a aplicação precisa da rede do Compose para achar o `db` |
+
+Com banco no container e necessidade de e-mail há uma saída — publicar o banco só
+no loopback (`127.0.0.1:5432:5432`) e pôr a aplicação em host mode, que então o
+alcança por `localhost`. **Proponha, não assuma:** ela troca isolamento do banco
+por conveniência de envio, e a escolha é do usuário. Não havendo saída boa, o
+e-mail vai por serviço externo, com as credenciais pelo `cloudez_set_env`.
+
+#### As variáveis
+
+Os nomes são os que a APLICAÇÃO usa: `MAIL_HOST` no Laravel, `EMAIL_HOST` no
+Django, `SMTP_HOST` na maioria dos projetos Node. Descubra em vez de presumir — o
+padrão errado aqui não dá erro, só não manda e-mail.
+
+```yaml
+    environment:
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: "25"
+```
+
+**Sem usuário e sem senha.** Relay local não pede autenticação, e é por isso que
+isto fica no arquivo versionado sem violar a regra dos segredos: não há segredo
+nenhum.
+
+**Em desenvolvimento nada disto vale.** A máquina de quem desenvolve não tem MTA
+nem o banco gerenciado, e apontar para lá faria o envio falhar em silêncio — ou
+mandar e-mail de teste para endereço de verdade. Tudo isto vive na SOBREPOSIÇÃO.
 
 ### Sem `container_name`
 

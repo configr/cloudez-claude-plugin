@@ -520,34 +520,40 @@ empresa: confira com `cloudez_list_database_types`.
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
 
-## E-mail: não há padrão, e o motivo está medido
+## Serviço do host: banco gerenciado e e-mail
 
-O servidor tem um MTA, e a intuição de apontar a aplicação para ele está certa —
-não fosse por um detalhe que só aparece medindo:
+O que o servidor oferece — o MTA, e a instância de banco gerenciada — atende em
+`127.0.0.1` e só ali. Medido:
 
 ```
 # ss -lntp | grep :25
 LISTEN 0  20  127.0.0.1:25  0.0.0.0:*  users:(("exim4",pid=1533,fd=4))
 ```
 
-Loopback e nada mais. O `localhost` de um container é ele mesmo, não o host, então
-`extra_hosts: ["host.docker.internal:host-gateway"]` resolve o nome, alcança o
-endereço do host na bridge, e encontra uma porta onde ninguém escuta.
+`localhost` dentro de um container é o próprio container, então a aplicação bate
+numa porta onde ninguém escuta. E `extra_hosts: ["host.docker.internal:host-gateway"]`
+não resolve: o nome resolve mesmo, chega ao endereço do host na bridge, e não
+encontra ninguém — o serviço está em loopback, não na bridge.
 
-Esta seção já descreveu esse arranjo COMO PADRÃO, com o mecanismo verificado em
-Docker e a escuta do MTA marcada como pendência. A pendência foi verificada, e
-derrubou o padrão. Ficou registrado assim de propósito: o bloco de SMTP apontando
-para o host parece certo, passa em qualquer revisão de arquivo, e falha só quando
-alguém tenta recuperar uma senha.
+O que funciona é `network_mode: host` (com `ports: !reset null`, porque publicado
+é descartado nesse modo). Com ele, `localhost:25` é o exim e `localhost:5432` é o
+banco gerenciado.
 
-O `/cloudez:compose` passa a **perguntar**, dizendo o que se sabe: que o MTA existe
-mas não aceita conexão de container, e que a conta não expõe credencial de SMTP
-pela API — conferido no `cloudez_get_site`, que não traz campo nenhum de e-mail.
-Escolhido um serviço externo, as credenciais vão pelo `cloudez_set_env`.
+**Isso amarra duas escolhas que pareciam independentes.** Um serviço em host mode
+não alcança outro container pelo nome, então:
 
-Fazer o MTA escutar na bridge resolveria, e é decisão da Cloudez, não deste
-plugin: num servidor com vários sites, todo container passaria a poder relayar
-por ele.
+| Banco | E-mail pelo MTA do servidor |
+|---|---|
+| Gerenciado pela Cloudez | Sim — o `db` sai com `profiles: ["dev"]` e não sobra container para isolar |
+| No container | Não, do jeito simples: a aplicação precisa da rede do Compose para achar o `db` |
+
+Para o segundo caso há uma saída (publicar o banco só no loopback e pôr a
+aplicação em host mode), mas ela troca isolamento por conveniência — o
+`/cloudez:compose` propõe, não assume.
+
+Isto também fecha uma dúvida que ficou aberta um tempo: se o grant `127.0.0.1` do
+usuário do banco alcançaria o container. Não alcança — para um container comum. É
+por isso que o host mode não é opcional na opção gerenciada.
 
 ## Segredos, e por onde eles chegam ao servidor
 
