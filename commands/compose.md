@@ -101,7 +101,7 @@ O que procurar, e por quê:
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
 | Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 3 propõe o container com volume nomeado e OFERECE a instância gerenciada |
-| Manda e-mail | `nodemailer`, `sendmail`, `Mail::`, `send_mail`, `SMTP_`/`MAIL_`/`EMAIL_` no ambiente. Havendo envio, o passo 3 manda PERGUNTAR: o MTA do servidor não aceita conexão de container, e não há padrão que funcione |
+| Manda e-mail | `nodemailer`, `sendmail`, `Mail::`, `send_mail`, `SMTP_`/`MAIL_`/`EMAIL_` no ambiente. Havendo envio, o padrão é o MTA do próprio servidor — sem conta externa e sem chave de API. Exige `network_mode: host`, no passo 3 |
 | Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 3 |
 | Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
@@ -597,23 +597,36 @@ porta que ela abrir é a porta do servidor, e é ela que a `custom_port` do site
 precisa encaminhar. Some junto o `127.0.0.1:` do passo 3 — quem decide em qual
 interface a aplicação escuta passa a ser a aplicação, não o Compose.
 
-**E a rede do Compose deixa de existir para esse serviço.** Aqui está a restrição
-que decide o desenho inteiro: **um serviço em host mode não alcança outro
-container pelo nome.** Se o projeto tem um `db` no Compose, a aplicação em host
-mode não o enxerga como `db`.
+**E a rede do Compose deixa de existir para esse serviço.** Um serviço em host
+mode **não alcança outro container pelo nome**: se o projeto tem um `db` no
+Compose, a aplicação em host mode não o enxerga como `db`.
 
-Daí a regra prática, que amarra as duas escolhas do usuário:
+Isso não impede nada — só muda por onde ela o alcança. Com banco NO CONTAINER, o
+banco publica no loopback do servidor e a aplicação o encontra ali:
 
-| Banco | E-mail pelo MTA do servidor |
-|---|---|
-| **Gerenciado pela Cloudez** | Sim. O `db` sai com `profiles: ["dev"]`, não sobra container para isolar, e o host mode não custa nada |
-| **No container** | Não, do jeito simples: a aplicação precisa da rede do Compose para achar o `db` |
+```yaml
+services:
+  db:
+    # Só no loopback. Sem o `127.0.0.1:` a porta sai no IP público do servidor.
+    ports:
+      - "127.0.0.1:5432:5432"
 
-Com banco no container e necessidade de e-mail há uma saída — publicar o banco só
-no loopback (`127.0.0.1:5432:5432`) e pôr a aplicação em host mode, que então o
-alcança por `localhost`. **Proponha, não assuma:** ela troca isolamento do banco
-por conveniência de envio, e a escolha é do usuário. Não havendo saída boa, o
-e-mail vai por serviço externo, com as credenciais pelo `cloudez_set_env`.
+  app:
+    network_mode: host
+    ports: !reset null
+    environment:
+      # No arquivo base isto é `db`, o nome do serviço. Em host mode esse nome não
+      # resolve, e o endereço passa a ser o loopback do próprio servidor.
+      PGHOST: 127.0.0.1
+```
+
+O volume não muda: o `pgdata` continua o mesmo volume nomeado do passo 3.
+
+Com banco GERENCIADO é ainda mais simples — o `db` sai com `profiles: ["dev"]` e
+não há porta para publicar.
+
+Nos dois casos a aplicação alcança tudo por `localhost`: `:25` é o MTA, `:5432` é
+o banco.
 
 #### As variáveis
 

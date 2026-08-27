@@ -539,17 +539,11 @@ O que funciona é `network_mode: host` (com `ports: !reset null`, porque publica
 é descartado nesse modo). Com ele, `localhost:25` é o exim e `localhost:5432` é o
 banco gerenciado.
 
-**Isso amarra duas escolhas que pareciam independentes.** Um serviço em host mode
-não alcança outro container pelo nome, então:
-
-| Banco | E-mail pelo MTA do servidor |
-|---|---|
-| Gerenciado pela Cloudez | Sim — o `db` sai com `profiles: ["dev"]` e não sobra container para isolar |
-| No container | Não, do jeito simples: a aplicação precisa da rede do Compose para achar o `db` |
-
-Para o segundo caso há uma saída (publicar o banco só no loopback e pôr a
-aplicação em host mode), mas ela troca isolamento por conveniência — o
-`/cloudez:compose` propõe, não assume.
+Um serviço em host mode não alcança outro container pelo nome, o que muda por
+onde a aplicação encontra o banco — não se ela o encontra. Com banco no container,
+ele publica em `127.0.0.1:5432:5432` e o `PGHOST` da sobreposição vira
+`127.0.0.1`; com banco gerenciado, o `db` nem sobe. Nos dois casos a aplicação
+alcança tudo por `localhost`, e o volume nomeado do banco não muda.
 
 Isto também fecha uma dúvida que ficou aberta um tempo: se o grant `127.0.0.1` do
 usuário do banco alcançaria o container. Não alcança — para um container comum. É
