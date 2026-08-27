@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.16 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.17 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -29272,7 +29272,7 @@ server.registerTool(
   "cloudez_install_backup",
   {
     title: "Instalar o backup do banco no servidor",
-    description: `Grava \`<root>/.cloudez/backup-db.sh\` no servidor e o executa UMA VEZ para provar que funciona. O script tira dump l\xF3gico (pg_dumpall/mysqldump) do container que est\xE1 no ar e guarda em <root>/shared/backup/<engine>/, com reten\xE7\xE3o de ${DIARIOS} di\xE1rios e ${SEMANAIS} semanais. Use com banco NO CONTAINER \u2014 com banco gerenciado pela Cloudez o backup \xE9 dela. Depois desta tool, agende com cloudez_create_cron usando o \`cron_command\` e o \`minute\` do retorno. Se \`verificado\` vier false, o \`log\` diz por qu\xEA e N\xC3O adianta agendar.`,
+    description: `Grava \`<root>/.cloudez/backup-db.sh\` no servidor e o executa UMA VEZ para provar que funciona. O script tira dump l\xF3gico do container que est\xE1 no ar \u2014 \`pg_dump\` do banco da aplica\xE7\xE3o no PostgreSQL, \`mysqldump --all-databases\` no MySQL \u2014 e guarda em <root>/shared/backup/<engine>/, com reten\xE7\xE3o de ${DIARIOS} di\xE1rios e ${SEMANAIS} semanais. No PostgreSQL o dump N\xC3O leva os roles nem outros bancos do mesmo container: quem restaurar precisa de uma base onde o usu\xE1rio j\xE1 exista. Diga isso ao usu\xE1rio em vez de deix\xE1-lo descobrir na restaura\xE7\xE3o. Use com banco NO CONTAINER \u2014 com banco gerenciado pela Cloudez o backup \xE9 dela. Depois desta tool, agende com cloudez_create_cron usando o \`cron_command\` e o \`minute\` do retorno. Se \`verificado\` vier false, o \`log\` diz por qu\xEA e N\xC3O adianta agendar.`,
     inputSchema: object({
       domain: string2().describe("FQDN do site, como est\xE1 no .cloudez.yaml"),
       root: string2().describe("Diret\xF3rio do site no servidor, do .cloudez.yaml. Ex.: ~/meusite.com.br/www/claude"),
