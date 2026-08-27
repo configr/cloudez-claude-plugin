@@ -82,6 +82,67 @@ function resolveConfig() {
   return ".cloudez.yaml"
 }
 
+// ─────────────────────────────────────────────────────────────────── database ──
+
+/**
+ * Escreve `database:` no bloco do environment, num arquivo que JÁ EXISTE.
+ *
+ * Linha a linha, e não parse-e-reserialize. Um round-trip de YAML reescreveria o
+ * arquivo inteiro — comentários, ordem das chaves, aspas, os outros environments —
+ * e este arquivo guarda o `root`, que é o valor mais destrutivo do plugin. Trocar
+ * uma linha é o que se pede; reescrever tudo é o que se paga.
+ *
+ * Devolve `{ status }`: "added", "updated" ou "unchanged".
+ */
+function gravarDatabase(caminho, environment, valor) {
+  const linhas = readFileSync(caminho, "utf8").split("\n")
+
+  // O bloco do environment: uma chave de segundo nível sob `cloudez:`. A
+  // indentação é a do arquivo, e não a que este programa gera — quem editou à mão
+  // pode ter usado outra, e reindentar seria reescrever o que não foi pedido.
+  const iEnv = linhas.findIndex((l) => new RegExp(`^\\s+${environment}:\\s*$`).test(l))
+  if (iEnv === -1) {
+    die("environment_not_found", `O environment '${environment}' nao esta em ${caminho}.`, {
+      hint: "Rode o setup para o environment que existe, ou acrescente o bloco antes.",
+    })
+  }
+
+  const recuo = /^(\s+)/.exec(linhas[iEnv])[1]
+  // Fim do bloco: a primeira linha com conteúdo cujo recuo não é MAIOR que o da
+  // chave do environment. Sem isso, a chave iria parar no bloco do vizinho.
+  let fim = iEnv + 1
+  while (fim < linhas.length) {
+    const l = linhas[fim]
+    if (l.trim() !== "" && !new RegExp(`^${recuo}\\s`).test(l)) break
+    fim++
+  }
+
+  const iDb = linhas.slice(iEnv + 1, fim).findIndex((l) => /^\s+database:/.test(l))
+
+  // O recuo dos IRMÃOS, e não `recuo + 2`: um arquivo escrito à mão com quatro
+  // espaços receberia a chave com seis, e o YAML sairia quebrado. Medido. O
+  // fallback só vale para um bloco sem nenhum filho, que o setup nunca gera.
+  const irmao = linhas.slice(iEnv + 1, fim).find((l) => l.trim() !== "")
+  const recuoFilho = irmao ? /^(\s*)/.exec(irmao)[1] : `${recuo}  `
+
+  if (iDb !== -1) {
+    const alvo = iEnv + 1 + iDb
+    const atual = linhas[alvo].split(":").slice(1).join(":").trim()
+    if (atual === valor) return { status: "unchanged" }
+    linhas[alvo] = `${recuoFilho}database: ${valor}`
+    writeFileSync(caminho, linhas.join("\n"))
+    return { status: "updated", previous: atual }
+  }
+
+  // Entra no FIM do bloco, e não logo abaixo da chave: assim ele fica ao lado de
+  // `domain` e `root` em vez de na frente deles.
+  let ultima = fim
+  while (ultima > iEnv + 1 && linhas[ultima - 1].trim() === "") ultima--
+  linhas.splice(ultima, 0, `${recuoFilho}database: ${valor}`)
+  writeFileSync(caminho, linhas.join("\n"))
+  return { status: "added" }
+}
+
 // ────────────────────────────────────────────────────────────────── gitignore ──
 
 /**
@@ -119,7 +180,30 @@ function garantirGitignore() {
 
 // ───────────────────────────────────────────────────────────────── entrada ──
 
-const [bruto, environment] = process.argv.slice(2)
+const argv = process.argv.slice(2)
+
+/**
+ * Onde o banco de produção mora. Fica no `.cloudez.yaml` porque é uma decisão do
+ * PROJETO, tomada uma vez com o usuário, e relida por todo passo que vem depois —
+ * o backup, um deploy futuro, outra sessão. Derivar do docker-compose seria
+ * inferência: `profiles: ["dev"]` no `db` SUGERE banco gerenciado, e sugestão não
+ * é registro.
+ */
+const BANCOS = ["cloudez", "docker"]
+
+let database
+const iDb = argv.indexOf("--database")
+if (iDb !== -1) {
+  database = argv[iDb + 1]
+  argv.splice(iDb, 2)
+  if (!BANCOS.includes(database)) {
+    die("invalid_database", `Valor invalido para --database: '${database ?? ""}'.`, {
+      hint: `Os aceitos sao: ${BANCOS.join(", ")}. 'cloudez' e a instancia gerenciada; 'docker' e o container com volume nomeado.`,
+    })
+  }
+}
+
+const [bruto, environment] = argv
 
 if (!bruto) {
   die("missing_domain", "Informe o dominio: cloudez-setup <domain> <environment>.", {
@@ -156,7 +240,10 @@ if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(environment)) {
 const target = resolveConfig()
 
 if (existsSync(target)) {
-  ok({ status: "exists", path: target, domain, environment })
+  // Sem `--database`, nada muda: sobrescrever apagaria o root e os outros
+  // environments. Com ele, mexe-se numa chave só.
+  if (database === undefined) ok({ status: "exists", path: target, domain, environment })
+  ok({ ...gravarDatabase(target, environment, database), path: target, domain, environment, database })
 }
 
 // Só domain e root. O destino ssh saiu daqui: ele vem da conta do usuário, pelo
@@ -170,8 +257,19 @@ if (existsSync(target)) {
 // para <root>/current — é trabalho do /cloudez:setup dizer na conversa, onde o
 // usuário ainda pode perguntar. No arquivo, viravam texto que ninguém relê e que
 // envelhece sozinho.
-writeFileSync(target, `cloudez:\n  ${environment}:\n    domain: ${domain}\n    root: ~/${domain}/www/claude\n`)
+const linhaDb = database ? `    database: ${database}\n` : ""
+writeFileSync(
+  target,
+  `cloudez:\n  ${environment}:\n    domain: ${domain}\n    root: ~/${domain}/www/claude\n${linhaDb}`,
+)
 
 // Sem `todo`: não sobra nada para o usuário preencher. O destino ssh vem do
 // cloudez_get_site, e o root já sai escrito.
-ok({ status: "created", path: target, domain, environment, gitignore: garantirGitignore() })
+ok({
+  status: "created",
+  path: target,
+  domain,
+  environment,
+  ...(database ? { database } : {}),
+  gitignore: garantirGitignore(),
+})

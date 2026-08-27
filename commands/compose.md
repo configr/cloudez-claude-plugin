@@ -1,7 +1,7 @@
 ---
 description: Escreve o Compose da aplicação — ou a sobreposição de produção, quando já existe um — junto com o usuário
 argument-hint: "[diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_find_compose, Bash(cloudez-setup:*), mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
 ---
 
 Escrever o Compose de uma aplicação que você não conhece. **Não há receita**: o
@@ -39,6 +39,11 @@ não o desmentiu (offline ou API fora).
 Nunca peça o token na conversa.
 
 ## 1. Já existe um?
+
+Leia também o `.cloudez.yaml`. Havendo `database:` no bloco do environment, a
+escolha do banco **já foi feita** — `cloudez` é a instância gerenciada, `docker` é
+o container com volume nomeado. Siga por ela em vez de perguntar de novo, e só
+levante o assunto se o usuário quiser mudar.
 
 ```
 cloudez_find_compose(directory: "<diretório>")
@@ -356,6 +361,10 @@ lugar do dado** — o banco não migra sozinho.
 escrita e nada rodando: **um banco no container sem cron de backup é a opção
 padrão pela metade.**
 
+Vale **só** para `database: docker` no `.cloudez.yaml`. Com `cloudez`, quem faz
+backup é a Cloudez, e instalar o script ali produziria um cron que falha todo dia
+tentando dumpar um container que não sobe.
+
 **1. Instalar e provar que funciona**
 
 ```
@@ -443,6 +452,18 @@ Confira antes o que a conta tem: `cloudez_list_database_types` lista os engines
 habilitados, e a lista é **por empresa** — uma revenda pode ter só um dos dois.
 Oferecer `postgresql` a quem não o tem vira erro depois de o usuário já ter
 escolhido.
+
+**Escolhido, registre no `.cloudez.yaml`:**
+
+```sh
+cloudez-setup <domínio> <environment> --database cloudez   # instância gerenciada
+cloudez-setup <domínio> <environment> --database docker    # container, volume nomeado
+```
+
+Não sobrescreve nada: com a config já existente, ele mexe só nessa chave. É o que
+faz a escolha sobreviver à conversa — o backup, um deploy futuro e outra sessão
+leem dali em vez de reinferir do Compose. E inferir seria adivinhação: um `db` com
+`profiles: ["dev"]` SUGERE banco gerenciado, e sugestão não é registro.
 
 **Nos dois casos o desenvolvimento é igual:** o banco sobe pelo Compose, na
 máquina dele. O que muda é só produção.

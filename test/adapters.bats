@@ -48,6 +48,94 @@ setup() { make_project; }
   [ ! -f .cloudez.yaml ]
 }
 
+# ------------------------------------------------------------------ database --
+#
+# Onde o banco de producao mora e decisao do PROJETO, tomada uma vez com o usuario
+# e relida por todo passo que vem depois — o backup, um deploy futuro, outra
+# sessao. Derivar do docker-compose seria inferencia: `profiles: ["dev"]` no `db`
+# SUGERE banco gerenciado, e sugestao nao e registro.
+
+@test "setup grava o database na criacao" {
+  rm .cloudez.yaml
+  run cloudez-setup meusite.com.br producao --database cloudez
+  [ "$status" -eq 0 ]
+  [ "$(campo "$output" .status)" = "created" ]
+  [ "$(campo "$output" .database)" = "cloudez" ]
+  [ "$(sed -n 5p .cloudez.yaml)" = "    database: cloudez" ]
+}
+
+@test "sem --database a chave nao aparece, e o template fica como era" {
+  rm .cloudez.yaml
+  cloudez-setup meusite.com.br producao >/dev/null
+  ! grep -q "database" .cloudez.yaml
+}
+
+@test "valor fora de cloudez|docker e recusado antes de tocar o arquivo" {
+  rm .cloudez.yaml
+  run cloudez-setup meusite.com.br producao --database postgres
+  [ "$status" -ne 0 ]
+  [ "$(campo "$output" .error.code)" = "invalid_database" ]
+  [ ! -f .cloudez.yaml ]
+}
+
+# Config que ja existe nao e sobrescrita — mas a chave do banco pode ser gravada
+# nela. Sem isso, quem decide o banco no /cloudez:compose (depois do setup) nao
+# teria onde registrar.
+@test "database entra em config que ja existe, sem tocar no resto" {
+  cat > .cloudez.yaml <<'YAML'
+cloudez:
+  producao:
+    domain: meusite.com.br
+    root: ~/meusite.com.br/www/claude
+
+  staging:
+    domain: staging.meusite.com.br
+    root: ~/staging.meusite.com.br/www/claude
+YAML
+  run cloudez-setup meusite.com.br producao --database docker
+  [ "$status" -eq 0 ]
+  [ "$(campo "$output" .status)" = "added" ]
+
+  # No bloco CERTO: o de producao, nao o vizinho.
+  [ "$(sed -n 5p .cloudez.yaml)" = "    database: docker" ]
+  [ "$(sed -n 7p .cloudez.yaml)" = "  staging:" ]
+  # E o root de ninguem foi reescrito.
+  [ "$(grep -c 'root: ~/' .cloudez.yaml)" -eq 2 ]
+}
+
+@test "regravar o database atualiza a linha, sem duplicar" {
+  cloudez-setup staging.example.com staging --database docker >/dev/null
+  run cloudez-setup staging.example.com staging --database cloudez
+  [ "$(campo "$output" .status)" = "updated" ]
+  [ "$(campo "$output" .previous)" = "docker" ]
+  [ "$(grep -c 'database:' .cloudez.yaml)" -eq 1 ]
+
+  # De novo com o mesmo valor: nao mexe no arquivo.
+  run cloudez-setup staging.example.com staging --database cloudez
+  [ "$(campo "$output" .status)" = "unchanged" ]
+}
+
+# O recuo vem dos IRMAOS, e nao de `pai + 2`: um arquivo escrito a mao com quatro
+# espacos recebia a chave com seis, e o YAML saia quebrado.
+@test "database respeita o recuo do arquivo, e nao o do template" {
+  cat > .cloudez.yaml <<'YAML'
+cloudez:
+    producao:
+        domain: meusite.com.br
+        root: ~/meusite.com.br/www/claude
+YAML
+  cloudez-setup meusite.com.br producao --database cloudez >/dev/null
+  [ "$(sed -n 5p .cloudez.yaml)" = "        database: cloudez" ]
+}
+
+@test "environment ausente do arquivo recusa, em vez de inventar bloco" {
+  cloudez-setup meusite.com.br producao >/dev/null
+  run cloudez-setup meusite.com.br inexistente --database docker
+  [ "$status" -ne 0 ]
+  [ "$(campo "$output" .error.code)" = "environment_not_found" ]
+  ! grep -q "database" .cloudez.yaml
+}
+
 @test "setup cria o template quando nao ha config" {
   rm .cloudez.yaml
   run cloudez-setup staging.example.com staging

@@ -1,6 +1,6 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
-argument-hint: <domain> <environment>
+argument-hint: <domain> <environment> [--database cloudez|docker]
 allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
 ---
 
@@ -120,6 +120,8 @@ resto do time usa "production" só aparece semanas depois.
 cloudez-setup <domain> <environment>
 ```
 
+O `--database` existe e **não é para agora** — ver a nota no fim deste passo.
+
 Use o domínio **como o `cloudez_get_site` o devolveu** — ele normaliza para
 minúsculas, e é essa a forma que o servidor conhece.
 
@@ -135,7 +137,12 @@ painel precisa apontar para `~/<domain>/www/claude/current`** — sem isso o sit
 continua servindo o que já estava em `www`, e o deploy parece não ter efeito. O
 `root` é explícito no arquivo justamente para o usuário poder discordar.
 
-**Não há nada para o usuário preencher.** O arquivo sai completo: o destino ssh
+**O `database:` fica para depois.** Ele registra onde o banco de produção mora —
+`cloudez` para a instância gerenciada, `docker` para o container com volume
+nomeado — e a escolha é do `/cloudez:compose`, que é onde o usuário a faz. Não
+pergunte aqui: seria decidir antes de saber se a aplicação precisa de banco.
+
+**Não há mais nada para o usuário preencher.** O arquivo sai completo: o destino ssh
 não mora nele — vem do `cloudez_get_site` a cada deploy, e o `/cloudez:deploy`
 o repassa aos adaptadores. Uma cópia do host num arquivo versionado envelheceria:
 se a Cloudez mover o site de servidor, o valor escrito continuaria apontando para

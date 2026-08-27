@@ -520,6 +520,30 @@ empresa: confira com `cloudez_list_database_types`.
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
 
+## Onde a escolha do banco fica registrada
+
+O `.cloudez.yaml` ganhou `database:` no bloco do environment, com dois valores:
+`cloudez` para a instância gerenciada e `docker` para o container com volume
+nomeado.
+
+```yaml
+cloudez:
+  producao:
+    domain: meusite.com.br
+    root: ~/meusite.com.br/www/claude
+    database: docker
+```
+
+Quem escreve é o `/cloudez:compose`, depois de o usuário escolher —
+`cloudez-setup <domínio> <env> --database <valor>`, que numa config existente mexe
+só nessa chave e não toca no `root`. Quem lê é todo passo que vem depois: o
+backup, um deploy futuro, outra sessão.
+
+Existe porque a alternativa era inferir do Compose, e inferência não serve aqui: um
+`db` com `profiles: ["dev"]` **sugere** banco gerenciado, e sugestão não é
+registro. O caso concreto é o backup — instalá-lo num site de banco gerenciado
+produz um cron que falha todo dia tentando dumpar um container que não sobe.
+
 ## Serviço do host: banco gerenciado e e-mail
 
 O que o servidor oferece — o MTA, e a instância de banco gerenciada — atende em
