@@ -176,6 +176,12 @@ inteiro, sem erro nenhum, e a Cloudez continua servindo os arquivos como estavam
 a falha mais confusa que este plugin consegue produzir. O `/cloudez:setup` para e
 avisa se encontrar o tipo errado.
 
+> **A autenticação vem sempre primeiro.** Qualquer comando que fale com a conta —
+> setup, compose, deploy, rollback — confere o token antes de começar e conduz o
+> login quando ele falta, inclusive quando você chega por linguagem natural. O
+> `/cloudez:dev` é a única exceção, e de propósito: ele só sobe a aplicação na sua
+> máquina, sem tocar na conta.
+
 ### 1. `/cloudez:login`
 
 Ele verifica se já existe token salvo. Não havendo, pergunta se você tem conta,
@@ -241,6 +247,11 @@ o site estava fora do ar antes do deploy, ele diz isso em vez de creditar a falh
 
 Em linguagem natural: *"sobe o site"*, *"publica em staging"*, *"manda pra
 produção"*.
+
+No fim, **o site abre no painel de navegador** — o mesmo que o `/cloudez:dev` usa
+para a versão local. O endereço oficial quando ele já responde; o temporário
+quando ainda não. Um link em texto obrigaria você a sair da conversa para conferir
+o próprio deploy.
 
 > **Projeto sem Compose?** O deploy **para** antes de publicar qualquer coisa e te
 > manda para o `/cloudez:compose` — sem Compose ele estaria publicando arquivos que
@@ -508,6 +519,30 @@ empresa: confira com `cloudez_list_database_types`.
 
 Nos dois casos o desenvolvimento é igual — o banco sobe pelo Compose na máquina de
 quem desenvolve. O que muda é só produção.
+
+## E-mail: o MTA do próprio servidor
+
+O servidor onde o Docker roda já tem MTA configurado pela Cloudez, e é para ele
+que o `/cloudez:compose` aponta a aplicação por padrão — sem conta em serviço
+externo, sem chave de API para guardar, e sem um segredo a mais atravessando o
+deploy.
+
+O container não enxerga o `localhost` do host; o caminho é o gateway da rede do
+Docker, que o Compose nomeia com `extra_hosts: ["host.docker.internal:host-gateway"]`
+e a aplicação usa como `SMTP_HOST`, porta 25. **Verificado** que o nome resolve
+dentro do container; exige Docker 20.10+.
+
+Relay local não pede autenticação, então isto vai no arquivo versionado sem
+violar a regra dos segredos — não há segredo nenhum.
+
+**O que falta verificar:** se o MTA escuta na interface da bridge ou só em
+`127.0.0.1`. Um Postfix com `inet_interfaces = loopback-only` recusa a conexão do
+container, e o sintoma é a aplicação subindo perfeitamente e não mandando e-mail.
+Está registrado como pendência na doutrina, com o comando para conferir.
+
+E vale só em produção: a máquina de quem desenvolve não tem MTA, e apontar para
+ela faria o envio falhar em silêncio — ou mandar e-mail de teste para endereço de
+verdade. Por isso o bloco vai na sobreposição.
 
 ## Segredos, e por onde eles chegam ao servidor
 

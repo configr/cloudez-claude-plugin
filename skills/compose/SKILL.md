@@ -9,6 +9,16 @@ Esta skill não contém procedimento. Ela existe para que pedidos em linguagem
 natural — "cria o docker-compose", "containeriza essa aplicação", "preciso de um
 postgres aqui" — cheguem ao mesmo lugar que `/cloudez:compose`.
 
+## Antes de encaminhar: o usuário está autenticado?
+
+Chame `cloudez_auth_status`. Com `authenticated: false`, **execute o
+`/cloudez:login` primeiro** e só depois siga para o comando desta skill.
+
+Isto vive nas skills, e não só nos comandos, porque a entrada em linguagem natural
+é justamente por onde alguém chega sem nunca ter feito login — quem digita
+`/cloudez:compose` costuma já conhecer o plugin. Descobrir a falta de token no meio
+do procedimento custa uma conversa interrompida no pior lugar.
+
 **Execute o comando `/cloudez:compose`**, repassando o diretório se o usuário o
 tiver mencionado.
 

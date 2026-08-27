@@ -1,7 +1,7 @@
 ---
 description: Escreve o Compose da aplicação — ou a sobreposição de produção, quando já existe um — junto com o usuário
 argument-hint: "[diretório]"
-allowed-tools: mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
 ---
 
 Escrever o Compose de uma aplicação que você não conhece. **Não há receita**: o
@@ -20,7 +20,25 @@ São dois arquivos possíveis, e qual deles você escreve é a primeira decisão
 Isto é uma conversa, não uma geração. Você propõe, o usuário corrige, e o
 arquivo só é escrito quando ele concordar.
 
-## 0. Já existe um?
+## 0. Autenticação, antes de qualquer coisa
+
+Chame `cloudez_auth_status`.
+
+**`authenticated: false`** — **pare aqui.** Conduza o `/cloudez:login` e só volte
+depois que ele passar.
+
+Não é opcional por preciosismo: este comando lê o site na Cloudez para saber a
+`custom_port`, e é ela que decide a porta que o Compose publica. Sem token, você
+escreveria o arquivo com uma porta chutada — e o sintoma seria um deploy verde com
+o site respondendo 502, três passos adiante e sem nada que ligue uma coisa à
+outra.
+
+Se `verified` for `false` com `authenticated: true`, siga: há token e a Cloudez
+não o desmentiu (offline ou API fora).
+
+Nunca peça o token na conversa.
+
+## 1. Já existe um?
 
 ```
 cloudez_find_compose(directory: "<diretório>")
@@ -31,7 +49,7 @@ O retorno decide qual dos dois trabalhos é o seu:
 | Retorno | O trabalho |
 |---|---|
 | `compose: false` | Escrever o Compose da aplicação, do zero |
-| `compose: true` | **Não sobrescreva.** O arquivo é do usuário, e quase sempre é o de desenvolvimento — é o que ele roda todo dia. Leia, diga o que ele já faz, e leve as diferenças de produção para a sobreposição (passo 3) |
+| `compose: true` | **Não sobrescreva.** O arquivo é do usuário, e quase sempre é o de desenvolvimento — é o que ele roda todo dia. Leia, diga o que ele já faz, e leve as diferenças de produção para a sobreposição (passo 4) |
 
 `compose: true` é o caso comum, e "arrumar" o arquivo é o erro. Quem já tem um
 Compose rodando escolheu aquilo: mexer ali quebra a máquina dele para consertar o
@@ -69,7 +87,7 @@ Se vier `parse_error` em vez de `ports`, diga que o arquivo existe mas não pôd
 ser lido, mostre a mensagem, e **não afirme nada sobre a porta**. Não saber é
 diferente de estar certo.
 
-## 1. Entender a aplicação
+## 2. Entender a aplicação
 
 **Leia antes de perguntar.** Perguntar o que está escrito no projeto gasta a
 paciência do usuário e sinaliza que você não olhou.
@@ -82,21 +100,22 @@ O que procurar, e por quê:
 | Como sobe | `scripts.start`, `Procfile`, `main`, `if __name__`, `CMD` de um Dockerfile existente |
 | Em que porta escuta | busca por `listen`, `PORT`, `addr`, `bind` no código |
 | Precisa de build | `scripts.build`, `tsconfig`, `vite`, `webpack`, um estágio de compilação |
-| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 2 propõe o container com volume nomeado e OFERECE a instância gerenciada |
-| Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 2 |
+| Precisa de serviços | driver de banco nas dependências (`pg`, `mysql2`, `psycopg`, `redis`). Havendo banco, o passo 3 propõe o container com volume nomeado e OFERECE a instância gerenciada |
+| Manda e-mail | `nodemailer`, `sendmail`, `Mail::`, `send_mail`, `SMTP_`/`MAIL_`/`EMAIL_` no ambiente. Havendo envio, o passo 3 aponta para o MTA do servidor — sem conta externa e sem chave de API |
+| Roda como que usuário | `USER` e `adduser -u` no Dockerfile. Não-root muda o que a sobreposição precisa fazer — passo 3 |
 | Onde escreve em runtime | busca por `writeFile`, `open(`, `mkdir`, caminhos de cache e upload. Todo caminho gravado precisa sobreviver ao deploy, ou ser gravável pelo uid certo |
 
 **Pergunte o que o projeto não responde.** Credenciais, qual banco de verdade,
 se aquele Redis é opcional, se o build precisa de variável de ambiente. E
 pergunte de uma vez, não uma por mensagem.
 
-## 2. As restrições que não são negociáveis
+## 3. As restrições que não são negociáveis
 
 Estas vêm do ambiente da Cloudez, não da aplicação. Uma aplicação que não as
 cumpra não fica no ar, por melhor que o Compose esteja.
 
 Elas valem sobre a configuração **efetiva** de produção — o arquivo base mais a
-sobreposição, já mesclados. Onde escrever cada correção é o passo 3; o que segue
+sobreposição, já mesclados. Onde escrever cada correção é o passo 4; o que segue
 é o que precisa ser verdade no fim.
 
 ### A porta publicada e a `custom_port` do site são a MESMA
@@ -240,7 +259,7 @@ imagem construiu, é o caso que o deploy recusa a compartilhar — se ele fosse 
 
 Este é o dev-ismo mais comum de todos, e num arquivo que já existe ele quase
 sempre está lá — de propósito, porque localmente é exatamente o que se quer. Não
-apague do arquivo do usuário: remova na sobreposição (passo 3).
+apague do arquivo do usuário: remova na sobreposição (passo 4).
 
 ### O container precisa CONSEGUIR escrever em `shared/`
 
@@ -323,7 +342,7 @@ nisso, leva `SIGKILL`, e sobe recuperando pelo WAL a cada deploy — funciona, m
 desligamento sujo virando rotina, e recuperação por WAL é rede de segurança, não
 procedimento.
 
-**Datadir de banco NUNCA vai para `shared/`.** O bind relativo do passo 2 é para
+**Datadir de banco NUNCA vai para `shared/`.** O bind relativo do passo 3 é para
 arquivo — upload, mídia, storage. Para banco ele junta os dois piores lados: a
 permissão passa a depender do diretório no host, e a semeadura do `shared/` copia
 arquivo de um datadir que pode estar sendo escrito, produzindo cópia
@@ -496,6 +515,54 @@ conectar. Um `127.0.0.1` vale para o host, mas o container da aplicação chega 
 rede do Docker, com outro endereço. Se a aplicação não conectar depois de tudo
 certo, é aqui.
 
+### A aplicação manda e-mail? Use o MTA do próprio servidor
+
+**Este é o padrão, e não se pergunta.** O servidor onde o Docker roda já tem um
+MTA configurado pela Cloudez. Apontar a aplicação para ele evita conta em serviço
+externo, chave de API para guardar, e um segredo a mais atravessando o deploy.
+
+O container não enxerga o `localhost` do host — o `localhost` dele é ele mesmo. O
+caminho é o gateway da rede do Docker, que o Compose sabe nomear:
+
+```yaml
+services:
+  app:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SMTP_HOST: host.docker.internal
+      SMTP_PORT: "25"
+```
+
+`host-gateway` é resolvido pelo Docker para o endereço do host na rede do
+container — **verificado**: dentro do container, `host.docker.internal` resolve.
+Exige Docker 20.10 ou mais novo, que é o caso de qualquer servidor gerenciado hoje.
+
+Os nomes das variáveis são os que a APLICAÇÃO usa: `MAIL_HOST` no Laravel,
+`EMAIL_HOST` no Django, `SMTP_HOST` na maioria dos projetos Node. Descubra em vez
+de presumir — o padrão errado aqui não dá erro, só não manda e-mail.
+
+**Sem usuário e sem senha.** Relay local não pede autenticação, e é por isso que
+isto vai no arquivo versionado sem violar a regra dos segredos: não há segredo
+nenhum. Se a aplicação exigir os campos, deixe-os vazios em vez de inventar.
+
+#### O que precisa ser conferido, e ainda não foi
+
+O MTA precisa **escutar na interface da bridge**, e não só em `127.0.0.1`. Um
+Postfix com `inet_interfaces = loopback-only` — que é o padrão de muitas
+instalações — recusa a conexão vinda do container, e o sintoma é a aplicação
+subindo perfeitamente e não mandando e-mail nenhum.
+
+Isto não foi verificado num servidor da Cloudez. Se o e-mail não sair com tudo o
+mais certo, é o primeiro lugar a olhar; do host, `ss -lntp | grep :25` mostra em
+quais endereços ele escuta.
+
+**Em desenvolvimento isto não vale.** A máquina de quem desenvolve não tem MTA, e
+apontar para ela faria o envio falhar em silêncio ou, pior, mandar e-mail de teste
+para endereço de verdade. Num arquivo que já existe, o bloco acima vai na
+SOBREPOSIÇÃO; localmente o projeto segue com o que já usa — um mailhog, um
+`console`, ou nada.
+
 ### Sem `container_name`
 
 O `cloudez_compose_up` roda o Compose com `-p <domínio>`, para dois sites no
@@ -519,9 +586,9 @@ outra rota: um `.env` local está no `.gitignore`, e o que está no `.gitignore`
 `cloudez-sync` não transfere. A sobreposição declara `env_file: [.cloudez.env]`
 para a aplicação lê-las — depois de o arquivo existir, nunca antes.
 
-## 3. Onde a correção mora
+## 4. Onde a correção mora
 
-Se **não havia** Compose, você escreve um, ele já nasce cumprindo o passo 2, e o
+Se **não havia** Compose, você escreve um, ele já nasce cumprindo o passo 3, e o
 resto desta seção não se aplica: um arquivo só, igual nos dois lugares.
 
 Se **já havia**, o arquivo é de desenvolvimento e você não vai tocar nele. As
@@ -549,7 +616,7 @@ dev-ismos perigosos moram justamente nas listas:
 | serviço de banco, com a opção 1 | **não** | `profiles: ["dev"]` no banco **e** `depends_on: !reset null` em quem depende dele |
 | `- dados:/app/dados` (volume nomeado) | nada a fazer | deixe: ele não está na release |
 | `- ./storage:/app/storage` (bind, caminho alternativo) | nada a fazer | deixe: o deploy liga a `shared/` sozinho |
-| `USER` não-root no Dockerfile | não se aplica | `user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"` — ver passo 2 |
+| `USER` não-root no Dockerfile | não se aplica | `user: "${CLOUDEZ_UID}:${CLOUDEZ_GID}"` — ver passo 3 |
 
 Acrescentar `127.0.0.1:3000:3000` a um `3000:3000` que já existe deixa os **dois**
 publicados: conflito de porta, e a aplicação exposta por fora do nginx do mesmo
@@ -569,7 +636,7 @@ substituição por alvo funciona até alguém acrescentar uma linha com outro al
 arquivo base, e aí ela vaza para produção sem ninguém perceber.
 
 Em `volumes`, escolha com cuidado: `!reset null` só serve quando não há nada a
-preservar. Havendo volume nomeado — e o passo 2 exige que haja, para o dado que
+preservar. Havendo volume nomeado — e o passo 3 exige que haja, para o dado que
 sobrevive —, use `!override` listando o que fica:
 
 ```yaml
@@ -618,7 +685,7 @@ services:
 ### O que sobrevive ao deploy
 
 Os binds relativos que você **deixar** na configuração efetiva viram diretórios em
-`shared/` (passo 2). Isso muda o que a sobreposição precisa fazer com `volumes`:
+`shared/` (passo 3). Isso muda o que a sobreposição precisa fazer com `volumes`:
 ela não remove tudo, remove o que é *fonte* e preserva o que é *dado*.
 
 ```yaml
@@ -645,7 +712,7 @@ no hint, e a correção é da Cloudez, não do projeto. Não tente contornar: se
 tags não há como remover nada, e o merge deixa passar exatamente os três campos
 que mais doem.
 
-## 4. Propor
+## 5. Propor
 
 Mostre o Compose **inteiro** antes de escrever, e explique as escolhas que não
 são óbvias: por que aquela porta interna, por que aquele volume, por que aquele
@@ -661,7 +728,7 @@ proposta — um `build:` sem Dockerfile não sobe.
 **Espere o aceite.** Só então escreva, na raiz do contexto de build, junto do
 Dockerfile.
 
-## 5. Depois de escrever
+## 6. Depois de escrever
 
 Diga ao usuário, nesta ordem:
 

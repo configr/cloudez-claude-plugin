@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_check_dns, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__Claude_Browser__preview_start, mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_check_dns, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -426,6 +426,23 @@ cloudez_check_dns(domain: "<domain>")
 O `temporary_address` veio do `cloudez_get_site` do passo 1. **Não guarde esse
 valor** — releia sempre. [A11](#a11).
 
+**Abra o site no navegador**, em vez de deixar o endereço como texto para o
+usuário copiar:
+
+```
+preview_start(url: "https://<endereço>")
+```
+
+O endereço é **o oficial quando ele veio ✅**, e o temporário quando não. É a
+diferença entre mostrar o site onde ele de fato vai viver e mostrar um endereço de
+passagem — e quando o oficial ainda não responde, abrir o temporário é a única
+forma de o usuário ver a versão nova agora.
+
+Um link em texto obriga o usuário a sair da conversa para conferir o próprio
+deploy. O painel de navegador é a mesma ferramenta que o `/cloudez:dev` usa para
+mostrar a versão local, e ver as duas do mesmo jeito é o que torna a comparação
+possível.
+
 Feche o relato com este bloco, exatamente nesta forma:
 
 ```
@@ -433,6 +450,10 @@ Nova versão da aplicação disponível em:
   https://<temporary_address>   ✅
   https://<domain>              ✅  ou  ⚠️
 ```
+
+O bloco continua, mesmo com o navegador aberto: ele carrega o que a página não
+mostra — QUAIS dos dois endereços responderam, e que o ⚠️ é do DNS e não da
+aplicação. O navegador entrega o link; o bloco entrega o diagnóstico.
 
 **Quando o oficial vier ⚠️**, acrescente duas linhas logo abaixo — a primeira
 sempre igual, a segunda vinda do `summary` do retorno, **sem reescrever**:
