@@ -344,6 +344,14 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
       se tentava tirar do ar —, então o comando reconstrói com
       `cloudez_compose_build` + `cloudez_compose_up` e fecha com
       `cloudez_health_check`
+- [x] Cadastro pelo Claude: `cloudez_panel_info`, `cloudez_signup`,
+      `cloudez_resend_phone_code` e `cloudez_confirm_phone`. Quem não tem conta
+      cria uma sem sair da conversa, com confirmação por SMS, e o token nasce
+      dentro do MCP — a senha do cadastro é aleatória e descartada, e o usuário
+      define a dele pelo e-mail de recuperação. **Não foi exercitado contra a API
+      real:** os endpoints e o formato dos erros foram lidos no código da API
+      (`ApiRegisterSerializer`, `UserPhoneViewSet`, `CompanyThemeViewSet`), e a
+      suíte cobre o fluxo contra uma API falsa
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
       `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).
@@ -367,13 +375,22 @@ pbpaste | bin/cloudez-login --stdin   # token do clipboard, sem prompt e sem TTY
 bin/cloudez-login                     # pergunta o token. Exige terminal
 ```
 
-**Token é a única forma de autenticar.** Gere no painel da Cloudez, em
-`https://<domínio-do-painel>/account?tab=token`.
+**Quem já tem conta pega o token no painel**, em
+`https://<domínio-do-painel>/account?tab=token`. Senha não autentica: o
+`--password` responde `password_login_disabled`.
 
 O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
-`cloud.configr.com` é o da Configr, não é "o" painel. Quem ainda não tem conta
-cria em <https://cloud.configr.com/register>. O `/cloudez:login` conduz os dois
-caminhos, e é ele que pergunta o domínio em vez de presumir um.
+`cloud.configr.com` é o da Configr, não é "o" painel. O `/cloudez:login` pergunta
+o domínio em vez de presumir um, e confere com `cloudez_panel_info` antes de
+mandar o usuário para lá.
+
+**Quem não tem conta cria pelo próprio Claude.** O `/cloudez:login` pergunta
+nome, e-mail e telefone, chama `cloudez_signup`, confirma o SMS de ativação e
+grava o token — sem passar pelo `cloudez-login`, porque o token nasce dentro do
+MCP e nunca entra na conversa. A senha da conta é aleatória e descartada; quem
+define a dele é o usuário, pelo e-mail que chega ao fim da validação. O contrato
+dessas tools está em [`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md),
+seções 3.15 a 3.18.
 
 O `cloudez-login` só **coleta e grava**. Quem responde se você está autenticado é
 a tool `cloudez_auth_status` do MCP, porque é o MCP que usa o token contra a API —

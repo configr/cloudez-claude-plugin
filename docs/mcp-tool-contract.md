@@ -1096,7 +1096,168 @@ o deploy terminar em erro por causa de um DNS que ainda vai propagar.
 
 ---
 
-### 3.15 Fora do escopo, por enquanto
+### 3.15 `cloudez_panel_info` — read-only
+
+Diz de que empresa é um endereço de painel e se ela abre cadastro. **Única tool
+que responde antes de existir conta**, e a única que não manda token nenhum
+contra a API da Cloudez.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "panel_host": { "type": "string", "description": "Host ou URL inteira do painel" }
+  },
+  "required": ["panel_host"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "panel_host": "cloud.configr.com",
+  "company_name": "Configr",
+  "company_code": "cfg",
+  "register_enabled": true
+}
+```
+
+**A Cloudez é white-label e nenhum domínio é presumido.** `cloud.configr.com` é o
+painel da Configr, não "o" painel. Resolver o host antes de mandar o usuário para
+uma página evita dois erros que só apareceriam tarde: o endereço digitado errado,
+que hoje só falha no navegador, e o cadastro na empresa errada, que nasceria com
+os sites fora de quem atendeu o usuário.
+
+`register_enabled: false` é a revenda que desligou o cadastro self-service. Não é
+erro: é a resposta, e o caminho passa a ser procurar a revenda.
+
+---
+
+### 3.16 `cloudez_signup` — **mutating**
+
+Cria a conta, guarda o token desta máquina e dispara o SMS de ativação.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "panel_host": { "type": "string" },
+    "full_name": { "type": "string" },
+    "email": { "type": "string" },
+    "phone": { "type": "string", "description": "Com DDD; sem país, 10 ou 11 dígitos viram +55" }
+  },
+  "required": ["panel_host", "full_name", "email", "phone"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "account_created": true,
+  "company_name": "Configr",
+  "token_saved": true,
+  "phone_id": 77,
+  "code_sent": true,
+  "warning": "…"        // só quando o SMS não pôde ser disparado
+}
+```
+
+**Nem a senha nem o token aparecem no retorno.** A conta nasce com uma senha
+aleatória gerada dentro da tool e descartada: ela não vai para o retorno, para
+`hint` nem para log. Quem define a senha de verdade é o usuário, pelo e-mail que
+o `cloudez_confirm_phone` manda ao fim da validação. Não existe, em momento
+nenhum do fluxo, uma senha que o modelo conheça.
+
+**O cadastro devolve JWT e o servidor autentica por `Token`.** São credenciais
+diferentes; a troca acontece dentro desta tool e o resultado vai para o disco
+pelo mesmo `saveToken` do `cloudez-login`.
+
+**NÃO é idempotente, e `signup_incomplete` não é convite a repetir.** Esse código
+significa que a conta **foi criada** e uma etapa posterior falhou. Uma segunda
+chamada só devolveria `email_already_registered`. O caminho é recuperar a senha
+pelo painel, não cadastrar de novo.
+
+**O país do telefone é validado antes do POST.** Fora de `+1`, `+44`, `+55` e
+`+351` a Cloudez não envia SMS e não avisa: a conta nasceria esperando um código
+que nunca foi mandado.
+
+**`code_sent` diz que a Cloudez aceitou enviar**, não que o SMS chegou. A entrega
+não é observável daqui.
+
+---
+
+### 3.17 `cloudez_resend_phone_code` — **mutating**
+
+Reenvia o código de seis dígitos para o telefone da conta. Existe porque o
+cadastro cria o telefone mas **não** dispara o SMS: na API, o sinal que enviaria
+o código está desligado, e quem envia é este endpoint.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": { "phone_id": { "type": "number" } },
+  "required": ["phone_id"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{ "phone_id": 77, "code_sent": true }
+```
+
+Idempotente: reenviar manda o mesmo código de novo, e não cria nada. Só tem
+efeito enquanto o telefone não estiver verificado.
+
+---
+
+### 3.18 `cloudez_confirm_phone` — **mutating**
+
+Valida o código do SMS, confere que o telefone ficou verificado e manda o e-mail
+para o usuário definir a senha. É o passo que fecha o cadastro.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "phone_id": { "type": "number" },
+    "code": { "type": "string", "description": "Seis dígitos, só números" }
+  },
+  "required": ["phone_id", "code"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "phone_verified": true,
+  "password_email_sent": true,
+  "warning": "…"        // só quando o e-mail de senha não saiu
+}
+```
+
+**Relê antes de afirmar.** O `PATCH` da API responde `200` mesmo quando nada foi
+verificado — basta o código vir vazio. Quem responde pelo `phone_verified` é a
+releitura, e uma divergência vira `phone_not_verified`, não sucesso.
+
+**Código errado é `sms_code_invalid`, e não erro de rede.** O `PATCH` leva um
+campo só, então um `400` ali é sempre sobre o código. Sair como
+`upstream_unavailable` faria o modelo repetir a mesma chamada errada.
+
+**Falha no e-mail de senha não derruba a verificação.** Ela já aconteceu e não se
+desfaz; virar erro apagaria um fato observado. O retorno traz
+`password_email_sent: false` e o `warning` diz o que fazer.
+
+---
+
+### 3.19 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:
@@ -1155,6 +1316,15 @@ Códigos previstos:
 | `permission_denied` | não | token sem escopo para este site |
 | `rate_limited` | sim | inclua `retry_after_seconds` |
 | `upstream_unavailable` | sim | API da Cloudez fora |
+| `panel_not_found` | não | o host informado não responde como painel da Cloudez |
+| `register_disabled` | não | a revenda desligou o cadastro self-service |
+| `email_already_registered` | não | já existe conta com esse e-mail nessa empresa |
+| `phone_already_used` | não | telefone já verificado em outra conta da mesma empresa |
+| `signup_rejected` | não | a Cloudez recusou um campo do cadastro; a conta NÃO foi criada |
+| `signup_incomplete` | não | a conta FOI criada e uma etapa seguinte falhou; não repita |
+| `already_authenticated` | não | já há token válido no disco; cadastrar sobrescreveria a conta atual |
+| `sms_code_invalid` | não | os seis dígitos não batem com o que foi enviado |
+| `phone_not_verified` | não | a API aceitou o código e a releitura diz que o telefone segue sem verificação |
 
 O campo `retryable` importa: sem ele o modelo ou desiste de erro transitório ou
 insiste em erro permanente.
