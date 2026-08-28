@@ -48,6 +48,13 @@ Gere o token e copie (Ctrl+C / Cmd+C).
 Me avise quando tiver copiado o token.
 ```
 
+**Mande só isso.** Não repita de volta qual painel ele escolheu — ele acabou de
+dizer —, e não antecipe telas que ele talvez nem veja. Se o painel pedir alguma
+coisa antes do token, como validar o telefone, ele conta e você responde na hora.
+Explicar de antemão o que *pode* acontecer transforma três linhas num parágrafo
+que ninguém pediu, e enterra a única frase que importa: você está esperando o
+token.
+
 O "me avise quando tiver copiado" acima pressupõe que **você** vai capturar o
 token — o caso do `clipboard_command`, que é o comum. Confira o retorno do
 `cloudez_auth_status` **antes** de escrever a mensagem: sem esse campo, quem
@@ -113,7 +120,7 @@ Quando falhar, o código diz o que fazer:
 
 | `code` | O que fazer |
 |---|---|
-| `email_already_registered` | Ele tinha conta e não sabia. Volte ao ramo "Se tem conta" — o token está em `/account?tab=token` |
+| `email_already_registered` | Ele tinha conta e não sabia. Volte ao ramo "Se tem conta". **Não diga que a conta foi criada agora** — ela é anterior, e nenhum SMS saiu desta tentativa |
 | `phone_already_used` | A Cloudez aceita um telefone por conta. Peça outro número |
 | `signup_rejected` | Mostre a recusa, corrija o campo apontado e chame de novo. A conta **não** foi criada |
 | `signup_incomplete` | A conta **foi** criada. **Não chame de novo** — leia abaixo |
@@ -147,7 +154,12 @@ ordem:
    painel, porque a senha do cadastro é aleatória e ninguém a conhece. Se
    `password_email_sent` vier `false`, diga que falta esse passo e que ele usa o
    "esqueci minha senha" no painel;
-3. **ainda falta um servidor.** A conta é nova e não tem cloud nenhuma; deploy
+3. **ao entrar no painel ele vai receber um segundo código, por e-mail.** Toda
+   conta nova nasce com 2FA de e-mail ligado, e o login pede esse código. Avise
+   junto com o item anterior: são dois e-mails diferentes, no mesmo endereço, e
+   quem não espera o segundo acha que a senha nova não funcionou. Isso não afeta
+   o token que já está salvo aqui — o cadastro não passa pelo login;
+4. **ainda falta um servidor.** A conta é nova e não tem cloud nenhuma; deploy
    agora falharia num ponto bem menos claro que aqui. Mande-o iniciar o teste no
    painel, em `https://<panel_host>`.
 

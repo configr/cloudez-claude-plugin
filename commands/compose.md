@@ -1,7 +1,7 @@
 ---
 description: Escreve o Compose da aplicação — ou a sobreposição de produção, quando já existe um — junto com o usuário
 argument-hint: "[diretório]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_find_compose, Bash(cloudez-setup:*), mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_find_compose, Bash(cloudez-setup:*), mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_configure_site, Read, Glob, Grep, Write, Edit, AskUserQuestion
 ---
 
 Escrever o Compose de uma aplicação que você não conhece. **Não há receita**: o

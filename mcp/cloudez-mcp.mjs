@@ -27139,12 +27139,12 @@ async function requireToken() {
   const token = await resolveToken();
   if (!token) {
     throw new ToolError("not_authenticated", "Nenhum token da Cloudez configurado.", {
-      hint: "Pe\xE7a ao usu\xE1rio para rodar `! cloudez-login` \u2014 o `!` executa no terminal dele, onde o token pode ser digitado sem entrar nesta conversa. N\xE3o pe\xE7a o token aqui: colado no chat, ele fica no transcript da sess\xE3o."
+      hint: "Conduza o `/cloudez:login`, que \xE9 onde o procedimento mora. Ele pergunta se o usu\xE1rio tem conta: quem N\xC3O tem, ele cadastra pelas tools, e n\xE3o h\xE1 nada para o usu\xE1rio rodar; quem tem, ele leva ao token no painel, e a\xED o caminho termina em `! cloudez-login` \u2014 o `!` executa no terminal dele, onde o token pode ser digitado sem entrar nesta conversa. N\xE3o pe\xE7a o token aqui: colado no chat, ele fica no transcript da sess\xE3o."
     });
   }
   if (await verifyToken(token) === "invalid") {
     throw new ToolError("token_invalid", "A Cloudez recusou o token salvo (expirado ou revogado).", {
-      hint: "Gere um token novo no painel da Cloudez e pe\xE7a ao usu\xE1rio para rodar `! cloudez-login`."
+      hint: "A conta existe, ent\xE3o n\xE3o \xE9 caso de cadastro: conduza o `/cloudez:login`, que leva ao token novo no painel e o captura com `! cloudez-login`."
     });
   }
   return token;
@@ -27163,7 +27163,7 @@ function classify(status, body) {
     return {
       code: "token_invalid",
       retryable: false,
-      hint: "O token foi recusado. Pe\xE7a ao usu\xE1rio para rodar `! cloudez-login` com um token novo do painel."
+      hint: "O token foi recusado. Conduza o `/cloudez:login`: a conta existe, ent\xE3o o caminho \xE9 um token novo no painel, capturado por `! cloudez-login`."
     };
   }
   if (status === 403) {
@@ -29139,7 +29139,7 @@ function recusarCadastro(body) {
   };
   if (/already registered/i.test(texto("email"))) {
     throw new ToolError("email_already_registered", "J\xE1 existe conta com esse e-mail neste painel.", {
-      hint: "N\xE3o cadastre de novo. Trate como quem j\xE1 tem conta: o token est\xE1 em /account?tab=token do painel."
+      hint: "N\xE3o cadastre de novo, e n\xE3o afirme que a conta foi criada agora: ela \xE9 anterior. Trate como quem j\xE1 tem conta, e avise que o painel pode pedir o c\xF3digo do SMS antes de liberar o token \u2014 \xE9 a tela de valida\xE7\xE3o de telefone, e ela se resolve ali mesmo, sem passar por aqui. Validado o telefone, o token fica em /account?tab=token."
     });
   }
   if (texto("phone_number")) {
@@ -29223,7 +29223,7 @@ server.registerTool(
   "cloudez_auth_status",
   {
     title: "Estado da autentica\xE7\xE3o na Cloudez",
-    description: "Informa se h\xE1 um token da Cloudez utiliz\xE1vel nesta m\xE1quina. Chame antes da primeira opera\xE7\xE3o que fale com a Cloudez numa sess\xE3o, e sempre que outra tool falhar com not_authenticated ou token_invalid, para saber se o problema \xE9 credencial. N\xE3o recebe nem devolve o token: se n\xE3o houver autentica\xE7\xE3o, o caminho \xE9 pedir ao usu\xE1rio que rode `! cloudez-login` no terminal dele \u2014 nunca pe\xE7a o token na conversa.",
+    description: "Informa se h\xE1 um token da Cloudez utiliz\xE1vel nesta m\xE1quina. Chame antes da primeira opera\xE7\xE3o que fale com a Cloudez numa sess\xE3o, e sempre que outra tool falhar com not_authenticated ou token_invalid, para saber se o problema \xE9 credencial. N\xE3o recebe nem devolve o token: se n\xE3o houver autentica\xE7\xE3o, o caminho \xE9 o `/cloudez:login`, que cadastra pelas tools quem n\xE3o tem conta \u2014 sem nada para rodar no terminal \u2014 e leva ao painel quem j\xE1 tem. Nunca pe\xE7a o token na conversa.",
     inputSchema: object({}),
     // Sem efeito colateral, então pode entrar no allowlist do usuário e nunca gerar prompt.
     annotations: { readOnlyHint: true, openWorldHint: true }

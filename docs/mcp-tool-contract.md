@@ -1181,6 +1181,16 @@ significa que a conta **foi criada** e uma etapa posterior falhou. Uma segunda
 chamada só devolveria `email_already_registered`. O caminho é recuperar a senha
 pelo painel, não cadastrar de novo.
 
+**`email_already_registered` é conta anterior, e a API o levanta antes de olhar o
+telefone.** Nada foi criado e nenhum SMS saiu nessa tentativa. Essa conta pode
+estar com o telefone pendente, e aí o painel trava na tela de validação antes de
+liberar o token — o `hint` diz para avisar disso, porque sem token não há como
+chamar `cloudez_confirm_phone` e resolver daqui.
+
+**A unicidade do telefone só vale para número já verificado.** O filtro da API é
+`is_verified=True`: cadastrar um número que existe em outra conta mas nunca foi
+validado **passa**. `phone_already_used` só aparece contra número verificado.
+
 **O país do telefone é validado antes do POST.** Fora de `+1`, `+44`, `+55` e
 `+351` a Cloudez não envia SMS e não avisa: a conta nasceria esperando um código
 que nunca foi mandado.
