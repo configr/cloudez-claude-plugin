@@ -1,35 +1,22 @@
 #!/usr/bin/env node
-// Barreira contra ESCRITA em aplicação viva.
+// Barreira contra escrita em aplicação viva.
 //
-// Rodado pelo harness como hook `PreToolUse`, ANTES de a tool executar. Recebe a
-// chamada em JSON pelo stdin e decide pelo código de saída: 0 deixa passar, 2
-// bloqueia e devolve o stderr ao modelo como motivo.
+// Rodado pelo harness como hook `PreToolUse`, antes de a tool executar.
+// Recebe a chamada em JSON pelo stdin e decide pelo código de saída: 0
+// deixa passar, 2 bloqueia e devolve o stderr ao modelo como motivo.
 //
-// ## Por que existe
+// Existe por dois incidentes reais (um recado de teste gravado num mural
+// público, um PNG num site de uploads), nenhum por desobediência a uma
+// regra escrita: nos dois casos a escrita parecia parte do pedido. Por isso
+// o hook não interpreta a intenção, só vê verbo de escrita para host remoto
+// e barra.
 //
-// Duas vezes um agente escreveu dado de teste em aplicação de produção: um recado
-// assinado "Claude" num mural público gravado em Postgres, e um PNG num site de
-// uploads. Nenhuma foi desobediência a uma regra — foram falhas de CLASSIFICAÇÃO.
-// Nos dois casos a escrita parecia parte do que tinha sido pedido: provar que o
-// banco sobreviveu ao deploy, diagnosticar um 500.
+// A aprovação exige terminal pelo mesmo motivo que o `cloudez-login`
+// interativo falha com `no_tty` pela tool Bash: sem terminal de controle,
+// "aprovado" significaria "o modelo decidiu por si".
 //
-// Instrução em `commands/` não corrige isso, porque depende do mesmo julgamento
-// que falhou. Este hook não pergunta o que a escrita significa: vê verbo de
-// escrita para host remoto e barra.
-//
-// ## Por que a aprovação exige terminal
-//
-// É a única parte que resiste ao próprio agente. Rodado pela tool Bash não há
-// terminal de controle, e o `cloudez-approve` recusa — o mesmo mecanismo que já
-// faz o `cloudez-login` interativo falhar com `no_tty`. Sem isso, "aprovado"
-// significaria "o modelo decidiu por si".
-//
-// ## O limite, dito de frente
-//
-// Fecha as vias enumeráveis: `curl` e `wget` pela tool Bash. Não fecha
-// `python -c "requests.post(...)"`, `nc`, ou a tool de outro MCP. Prometer
-// cobertura total seria repetir o erro de confiar num julgamento — agora no
-// julgamento sobre o que foi enumerado.
+// Fecha só as vias enumeráveis (`curl`, `wget` pela tool Bash), não
+// `python -c "requests.post(...)"` nem a tool de outro MCP.
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -41,11 +28,8 @@ import { escritaRemota, hash } from "./_guard.mjs"
 export const TTL_MIN = 10
 
 /**
- * Onde ficam o pedido e a aprovação.
- *
- * `CLOUDEZ_GUARD_DIR` existe pelo mesmo motivo do `CLOUDEZ_TOKEN_FILE`: sem um
- * override, a suíte escreveria no `~/.cloudez` real de quem roda os testes. Um
- * teste que esquecesse de isolar sujaria a máquina do desenvolvedor.
+ * Onde ficam o pedido e a aprovação. `CLOUDEZ_GUARD_DIR` isola a suíte do
+ * `~/.cloudez` real, como `CLOUDEZ_TOKEN_FILE` faz para o token.
  */
 const DIR = process.env.CLOUDEZ_GUARD_DIR || join(homedir(), ".cloudez")
 const PENDENTE = join(DIR, "pending-write.json")
@@ -54,8 +38,7 @@ const APROVADO = join(DIR, "approved-write.json")
 const chamada = interpretar(await lerStdin())
 const comando = chamada?.tool_input?.command
 
-// Só a tool Bash. As demais não passam por aqui, e o cabeçalho registra isso
-// como limite conhecido em vez de deixar parecer cobertura.
+// Só a tool Bash; as demais não passam por aqui.
 if (chamada?.tool_name !== "Bash" || typeof comando !== "string") process.exit(0)
 
 const alvos = escritaRemota(comando)
@@ -64,8 +47,7 @@ if (alvos.length === 0) process.exit(0)
 const digest = hash(comando)
 
 if (aprovado(digest)) {
-  // Uso ÚNICO: some ao ser usada. Sem isso, um comando aprovado uma vez ficaria
-  // liberado pelo resto do TTL, e "por comando" viraria "por janela de tempo".
+  // Uso único: some ao ser usada, senão "por comando" viraria "por TTL".
   try {
     unlinkSync(APROVADO)
   } catch {}
@@ -75,8 +57,6 @@ if (aprovado(digest)) {
 registrarPendente(comando, digest, alvos)
 process.stderr.write(motivo(alvos))
 process.exit(2)
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function motivo(alvos) {
   return (
@@ -113,10 +93,8 @@ function aprovado(digest) {
 }
 
 /**
- * Deixa o comando bloqueado em disco para o `cloudez-approve` exibi-lo.
- *
- * Sem isto o usuário teria de redigitar o comando — e comando redigitado é
- * comando que ele pode aprovar diferente do que vai rodar.
+ * Deixa o comando bloqueado em disco para o `cloudez-approve` exibi-lo, em
+ * vez de o usuário redigitar um comando que pode aprovar diferente do real.
  */
 function registrarPendente(cmd, digest, alvos) {
   try {

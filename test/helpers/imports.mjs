@@ -1,16 +1,13 @@
 // Confere que todo import relativo de um arquivo do plugin aponta para um
-// arquivo RASTREADO pelo git.
+// arquivo rastreado pelo git.
 //
-// Existe por um defeito concreto: `git commit -am` estagia os arquivos
-// modificados, mas NÃO os novos. Um módulo novo (`bin/_ignore.mjs`) ficou fora do
-// commit, e a suíte inteira passou — porque ela roda contra a árvore de trabalho,
-// onde o arquivo está. A versão publicada saiu sem ele, e o `cloudez-sync` morria
-// no import antes de fazer qualquer coisa.
+// `git commit -am` estagia modificados, mas não novos: um módulo novo
+// esquecido no commit faria a suíte passar (roda contra a árvore de
+// trabalho) e a versão publicada quebrar no import.
 //
-// A verificação é contra `git ls-files`, e não contra um `git archive HEAD`, de
-// propósito: com o archive, escrever um módulo novo e rodar a suíte antes de
-// commitar falharia sempre, e o teste viraria ruído que se aprende a ignorar.
-// Rastreado é o que basta — um arquivo em `git add` já vai junto no commit.
+// Contra `git ls-files`, não `git archive HEAD`: rastreado (em `git add`)
+// já basta, e exigir o commit feito faria o teste falhar sempre que se
+// escreve um módulo novo antes de commitar.
 //
 // Imprime uma linha por problema e sai com 1. Silêncio e 0 é sucesso.
 
@@ -24,9 +21,8 @@ const rastreados = new Set(
   execFileSync("git", ["-C", raiz, "ls-files"], { encoding: "utf8" }).split("\n").filter(Boolean),
 )
 
-// Só os arquivos que o plugin de fato carrega em tempo de execução — inclusive
-// os `hooks/`, que o harness executa fora de qualquer comando. Os `mcp/*.mjs`
-// são bundles sem import relativo — se um dia tiverem, entram aqui também.
+// Só os arquivos que o plugin de fato carrega em tempo de execução,
+// incluindo hooks/, que o harness executa fora de qualquer comando.
 const alvos = [...rastreados].filter(
   (f) => (f.startsWith("bin/") || f.startsWith("mcp/") || f.startsWith("hooks/")) && (f.endsWith(".mjs") || f === "bin/cloudez-sync"),
 )
@@ -36,8 +32,8 @@ const problemas = []
 for (const arquivo of alvos) {
   const texto = readFileSync(resolve(raiz, arquivo), "utf8")
 
-  // `import ... from "./x.mjs"` e `import("./x.mjs")`. Só os relativos: pacote do
-  // npm e módulo do node não são problema nosso.
+  // `import ... from "./x.mjs"` e `import("./x.mjs")`. Só os relativos:
+  // pacote do npm e módulo do node não são problema nosso.
   for (const m of texto.matchAll(/from\s+"(\.\.?\/[^"]+)"|import\(\s*"(\.\.?\/[^"]+)"/g)) {
     const especificador = m[1] ?? m[2]
     const destino = resolve(dirname(resolve(raiz, arquivo)), especificador)

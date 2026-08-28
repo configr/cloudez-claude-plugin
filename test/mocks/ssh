@@ -14,10 +14,9 @@ case "$*" in
   *"tar xzf -"*) cat > /dev/null 2>&1 || true ;;
 esac
 
-# MOCK_SSH_STDERR_FIRST modela o aviso de conexao — "Permanently added ... to the
-# list of known hosts" —, que o ssh emite ANTES de rodar o comando remoto. A
-# ordem so importa para quem funde os dois fluxos, e e justamente quem funde que
-# quebra: um aviso na frente desloca as linhas de dados.
+# MOCK_SSH_STDERR_FIRST simula o aviso de conexao que o ssh emite antes de
+# rodar o comando remoto: quem funde stdout e stderr precisa tolerar essa
+# ordem, e e justamente isso que este mock exercita.
 if [ -n "${MOCK_SSH_STDERR_FIRST:-}" ]; then
   printf '%s\n' "$MOCK_SSH_STDERR_FIRST" >&2
 fi

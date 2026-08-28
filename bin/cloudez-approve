@@ -1,26 +1,17 @@
 #!/usr/bin/env node
 // Uso: cloudez-approve
 //
-// Libera UMA escrita remota que o hook `hooks/guard-write.mjs` bloqueou.
+// Libera uma escrita remota que o hook `hooks/guard-write.mjs` bloqueou.
 //
-// ## Exige terminal de propósito
+// Exige terminal de propósito: rodado pela tool Bash de um agente não há
+// terminal de controle, e o comando falha. É isso que distingue "um humano
+// decidiu" de "o modelo decidiu por si": mesmo mecanismo do prompt de
+// `cloudez-login`.
 //
-// Esta é a peça que faz a barreira valer alguma coisa. Rodado pela tool Bash de
-// um agente não há terminal de controle — `/dev/tty` responde "Device not
-// configured" — e o comando falha. É isso, e só isso, que distingue "um humano
-// decidiu" de "o modelo decidiu por si".
-//
-// O mesmo mecanismo já sustenta o prompt do `cloudez-login`. Aqui ele protege o
-// que é mais difícil de desfazer: escrita em aplicação viva.
-//
-// ## Aprova o comando que foi bloqueado, não um que se digite
-//
-// O hook grava o comando barrado em `~/.cloudez/pending-write.json`, e este
-// programa o EXIBE para confirmação. Pedir que o usuário redigitasse abriria a
-// porta para ele aprovar uma coisa e o agente rodar outra.
-//
-// A aprovação vale para o comando exato (hash do texto inteiro), uma única vez —
-// o hook a apaga ao usar — e expira em minutos.
+// Exibe o comando que o hook bloqueou (`~/.cloudez/pending-write.json`) em
+// vez de pedir que o usuário o redigite, para ele não aprovar uma coisa e o
+// agente rodar outra. A aprovação vale para o comando exato, uma única vez,
+// e expira em minutos.
 
 import { mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { ReadStream } from "node:tty"
@@ -85,22 +76,13 @@ try {
 
 ok({ status: "approved", hosts: p.hosts || [], expires_in_minutes: TTL_MIN, single_use: true })
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Abre o terminal de CONTROLE, ou devolve `null`.
+ * Abre o terminal de controle, ou devolve `null`.
  *
- * `openSync` e não `createReadStream`: o stream é preguiçoso, não abre nada de
- * forma síncrona, e o `try/catch` em volta dele não vê erro nenhum. A primeira
- * versão deste arquivo fazia isso, e o resultado foi o pior possível — o
- * `cloudez-approve` rodado SEM terminal exibiu o prompt de aprovação em vez de
- * recusar, derrubando a única propriedade que a barreira tem.
- *
- * `statSync` também não serve: `/dev/tty` costuma EXISTIR mesmo sem terminal de
- * controle; o que falha é abri-lo ("Device not configured"). É o mesmo teste que
- * o `bin/cloudez-login` já usa.
- *
- * E não é `process.stdin.isTTY`, que um agente satisfaz redirecionando.
+ * `openSync`, não `createReadStream`: um stream é preguiçoso e não abriria
+ * nada de forma síncrona, deixando o `try/catch` sem erro para pegar. Não é
+ * `process.stdin.isTTY` pelo mesmo motivo do `cloudez-login`: um agente
+ * satisfaz isso redirecionando.
  */
 function abrirTerminal() {
   try {
