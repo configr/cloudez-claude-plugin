@@ -1,6 +1,6 @@
 ---
-description: Verifica se há um token da Cloudez salvo e, se não houver, conduz o usuário até ele no painel e faz o login
-allowed-tools: mcp__cloudez__cloudez_auth_status, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
+description: Verifica se há um token da Cloudez salvo e, se não houver, cria a conta ou conduz o usuário até o token no painel
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
 ---
 
 Chame a tool `cloudez_auth_status`. Ela é quem responde pelo estado da
@@ -13,21 +13,16 @@ e pare. Se `verified` for `false`, avise que não foi possível confirmar o toke
 com a API (o campo `warning` explica) — não trate como erro, mas não afirme que
 está tudo certo.
 
-**`authenticated: false`** — o usuário precisa fazer o login, e **você não pode
-fazer por ele**. São duas etapas: achar o token no painel (passo 1) e capturá-lo
-sem que ele passe por aqui (passo 2).
+**`authenticated: false`** — há dois caminhos, e eles não se parecem. Quem já tem
+conta pega o token no painel, e **você não pode fazer isso por ele**. Quem não
+tem conta se cadastra aqui mesmo, e aí é você quem executa quase tudo.
 
-# 1. Achar o token no painel
+# 1. Ele já tem conta?
 
-Antes existia só "gere o token no painel da Cloudez", e o comando parava aí. Para
-quem nunca viu o painel, isso é um beco: ele não sabe em que página procurar, e
-metade das vezes nem tem conta ainda.
+**Pergunte.** É a bifurcação do comando inteiro, e não dá para deduzir do
+ambiente.
 
-## Ele já tem conta?
-
-**Pergunte.** É a bifurcação do passo inteiro, e não dá para deduzir do ambiente.
-
-### Se tem conta
+## Se tem conta
 
 **Peça o endereço do painel dele.** Não presuma nenhum: a Cloudez é white-label, e
 cada revenda tem o seu domínio — `cloud.configr.com` é o da Configr, não é "o"
@@ -36,60 +31,22 @@ painel. Inventar um manda o usuário para um site que não é o dele.
 Se ele não souber qual é, o endereço está no e-mail de boas-vindas da revenda, ou
 é o que ele usa para entrar todo dia.
 
-**Normalize o que ele colar.** Ele vai mandar o que tiver na barra de endereços —
-`https://painel.exemplo.com/sites/123`, ou só `painel.exemplo.com`. Extraia o
-**host** e monte a URL a partir dele. Concatenar em cima do que ele colou produz
-`.../sites/123/account?tab=token`, que não existe.
+**Confira com `cloudez_panel_info` antes de mandá-lo para lá.** Ele vai colar o
+que estiver na barra de endereços — `https://painel.exemplo.com/sites/123`, ou só
+`painel.exemplo.com` —, e a tool aceita as duas formas e devolve o host limpo em
+`panel_host`. Use esse valor, e não o que ele colou: concatenar em cima do que
+veio produz `.../sites/123/account?tab=token`, que não existe.
 
-Então diga, com o domínio dele já aplicado:
+Se vier `panel_not_found`, o endereço está errado. Diga isso e peça de novo, em
+vez de mandá-lo abrir uma página que não vai carregar.
+
+Então, com o `panel_host` da resposta:
 
 ```
-Abra: https://<host>/account?tab=token
+Abra: https://<panel_host>/account?tab=token
 Gere o token e copie (Ctrl+C / Cmd+C).
 Me avise quando tiver copiado o token.
 ```
-
-### Se não tem conta
-
-**Pergunte se ele chegou por alguma revenda** — e deixe claro que "não" e "não
-sei" são respostas válidas. Não insista: quem não sabe, não sabe, e o padrão
-resolve.
-
-Isso não é formalidade. A Cloudez é white-label, e mandar para a Configr quem foi
-atendido por uma revenda cria a conta **na empresa errada**: os sites nasceriam
-fora de quem o trouxe, e o token de um painel não vale no outro. É o mesmo erro
-que o comando evita ao não presumir domínio para quem já tem conta — só que aqui
-ele cai sobre quem tem menos condição de perceber.
-
-| A resposta | O painel |
-|---|---|
-| veio por uma revenda | **peça o domínio dela**, como no ramo de quem já tem conta |
-| não veio, ou não sabe | `cloud.configr.com` — a Configr é o padrão |
-
-O caminho dentro do painel é o mesmo em qualquer revenda: o software é o mesmo, e
-tanto `/register` quanto `/account?tab=token` existem nos dois que foram
-conferidos. Se o `/register` do domínio dele não responder, não invente outro —
-diga para procurar a revenda, que pode não abrir cadastro self-service.
-
-Com o `<host>` decidido, mande os **dois endereços de uma vez**, para ele não
-voltar só para perguntar qual é o próximo passo:
-
-```
-Crie a conta: https://<host>/register
-Depois abra:  https://<host>/account?tab=token
-Gere o token e copie (Ctrl+C / Cmd+C).
-Me avise quando tiver copiado o token.
-```
-
-O cadastro se resolve inteiro no site, senha inclusive — não há etapa em que o
-plugin participe, e não há o que esperar aqui.
-
-**Não peça e-mail nem telefone.** O cadastro é preenchido por ele, no painel —
-seja o da revenda, seja o da Configr. Pedir aqui traria dado pessoal para o
-transcript sem nenhum uso: não há tool que crie conta, e criar conta em nome de
-outra pessoa não é coisa que este comando faça.
-
-### Como fechar a mensagem
 
 O "me avise quando tiver copiado" acima pressupõe que **você** vai capturar o
 token — o caso do `clipboard_command`, que é o comum. Confira o retorno do
@@ -99,7 +56,105 @@ executa é o usuário, e a última linha vira o comando do passo 2.2 em vez do a
 Errar isso custa uma ida e volta boba: ele copia, avisa, e só então descobre que
 ainda falta rodar alguma coisa.
 
+**Siga para o passo 2.**
+
+## Se não tem conta
+
+**Pergunte se ele chegou por alguma revenda** — e deixe claro que "não" e "não
+sei" são respostas válidas. Não insista: quem não sabe, não sabe, e o padrão
+resolve.
+
+Isso não é formalidade. A Cloudez é white-label, e cadastrar na Configr quem foi
+atendido por uma revenda cria a conta **na empresa errada**: os sites nasceriam
+fora de quem o trouxe, e o token de um painel não vale no outro.
+
+| A resposta | O painel |
+|---|---|
+| veio por uma revenda | **peça o domínio dela** |
+| não veio, ou não sabe | `cloud.configr.com` — a Configr é o padrão |
+
+Com o host decidido, chame `cloudez_panel_info`. Ela resolve a empresa e diz se
+o cadastro está aberto:
+
+- **`register_enabled: false`** — essa revenda não abre cadastro self-service.
+  Pare aqui e diga para ele procurar a revenda. Não tente outro painel: criar a
+  conta na Configr seria criá-la na empresa errada;
+- **`panel_not_found`** — o endereço está errado. Peça de novo;
+- **`register_enabled: true`** — siga.
+
+### Colete os dados, um por vez
+
+Use `AskUserQuestion`, **uma pergunta por caixa**, nesta ordem: nome completo,
+e-mail, telefone com DDD. Três campos numa mensagem só voltam pela metade, e aí
+falta justo o que trava o cadastro.
+
+Não peça senha, e não aceite se ele oferecer. O cadastro não tem esse campo: a
+conta nasce com uma senha aleatória que ninguém conhece, e ele define a dele pelo
+e-mail que chega no fim deste fluxo. Senha colada aqui ficaria no transcript da
+sessão sem ter servido para nada.
+
+### Confirme antes de cadastrar
+
+Repita os três de volta e espere ele confirmar. É a última parada antes de uma
+conta existir de verdade, e o telefone é onde isso importa mais: sem código de
+país, um número de 10 ou 11 dígitos é lido como **brasileiro**. Para quem está em
+Portugal, isso está errado, e ele só descobriria quando o SMS não chegasse.
+
+Se ele corrigir alguma coisa, refaça a confirmação com o valor novo.
+
+### Cadastre
+
+Chame `cloudez_signup` com `panel_host`, `full_name`, `email` e `phone`. Ela cria
+a conta, guarda o token desta máquina e dispara o SMS. **Não rode
+`cloudez-login`, e não vá para o passo 2**: o token já foi salvo pela tool, e não
+passou por aqui em momento nenhum.
+
+Quando falhar, o código diz o que fazer:
+
+| `code` | O que fazer |
+|---|---|
+| `email_already_registered` | Ele tinha conta e não sabia. Volte ao ramo "Se tem conta" — o token está em `/account?tab=token` |
+| `phone_already_used` | A Cloudez aceita um telefone por conta. Peça outro número |
+| `signup_rejected` | Mostre a recusa, corrija o campo apontado e chame de novo. A conta **não** foi criada |
+| `signup_incomplete` | A conta **foi** criada. **Não chame de novo** — leia abaixo |
+| `already_authenticated` | Apareceu um token válido no meio do caminho. Pare e confirme com o usuário antes de trocar de conta |
+
+O `signup_incomplete` é o único que engana. Ele parece um erro de "não deu
+certo", mas significa que a conta existe e uma etapa posterior falhou. Repetir só
+devolve `email_already_registered` e deixa o usuário achando que não tem conta
+nenhuma. O caminho é o que o `hint` diz: definir a senha pelo link de recuperação
+do painel e pegar o token por lá.
+
+### Confirme o SMS
+
+Com `code_sent: true`, peça os seis dígitos e chame `cloudez_confirm_phone` com o
+`phone_id` do retorno. Não afirme que o SMS chegou: o que a tool observou é que a
+Cloudez aceitou enviar, e a entrega ela não vê.
+
+- **não chegou** — `cloudez_resend_phone_code` com o mesmo `phone_id`;
+- **`sms_code_invalid`** — o código não bate. Confira os dígitos com ele; se
+  desconfiar que leu um SMS antigo, reenvie e peça o novo;
+- **`code_sent: false` no signup** — o `warning` diz o que houve. Tente o reenvio
+  antes de pedir qualquer código.
+
+### Feche
+
+Com `phone_verified: true`, a conta está ativa e o token já está salvo. Diga, nesta
+ordem:
+
+1. a conta foi criada na empresa que veio em `company_name`;
+2. um e-mail para **definir a senha** foi enviado — é assim que ele entra no
+   painel, porque a senha do cadastro é aleatória e ninguém a conhece. Se
+   `password_email_sent` vier `false`, diga que falta esse passo e que ele usa o
+   "esqueci minha senha" no painel;
+3. **ainda falta um servidor.** A conta é nova e não tem cloud nenhuma; deploy
+   agora falharia num ponto bem menos claro que aqui. Mande-o iniciar o teste no
+   painel, em `https://<panel_host>`.
+
 # 2. Capturar o token
+
+**Este passo é só de quem já tinha conta.** Quem se cadastrou pelo passo 1 já
+está autenticado.
 
 Daqui em diante nada mudou, e a razão é a que importa: **o token não passa pelo
 seu contexto em nenhum dos caminhos.**
@@ -141,9 +196,9 @@ para o transcript. O `--stdin` é seguro porque quem executa não vê o valor: u
 `clipboard_command` da resposta, um arquivo, ou `$CLOUDEZ_TOKEN`, nunca um
 literal.
 
-O token vem do painel da Cloudez — é a única forma de autenticar. Se ele pedir
-login com e-mail e senha, diga que foi descontinuado (`--password` responde
-`password_login_disabled`).
+O token vem do painel da Cloudez — é a única forma de autenticar quem já tem
+conta. Se ele pedir login com e-mail e senha, diga que foi descontinuado
+(`--password` responde `password_login_disabled`).
 
 **Nunca peça o token na conversa.** Nem "cole aqui que eu salvo", nem em pedaços,
 nem "só os últimos caracteres". O que passa por aqui fica no meu contexto e no

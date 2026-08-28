@@ -27018,6 +27018,38 @@ function cloudUserPatchPath(id) {
   const template = process.env.CLOUDEZ_API_CLOUD_USER_PATCH_PATH || "/v3/cloud-user/{id}/";
   return template.replace("{id}", encodeURIComponent(String(id)));
 }
+function companyThemePath(host) {
+  const template = process.env.CLOUDEZ_API_COMPANY_THEME_PATH || "/v3/company/theme/{host}/";
+  return template.replace("{host}", encodeURIComponent(host));
+}
+function signupPath() {
+  return process.env.CLOUDEZ_API_SIGNUP_PATH || "/auth/signup/";
+}
+function authTokenPath() {
+  return process.env.CLOUDEZ_API_AUTH_TOKEN_PATH || "/auth/token/";
+}
+function authUserPath() {
+  return process.env.CLOUDEZ_API_AUTH_USER_PATH || "/auth/user/";
+}
+function passwordResetPath() {
+  return process.env.CLOUDEZ_API_PASSWORD_RESET_PATH || "/auth/password/reset/";
+}
+function userPhonePath() {
+  return process.env.CLOUDEZ_API_USER_PHONE_PATH || "/v3/user-phone/";
+}
+function userPhoneResendPath(id) {
+  const template = process.env.CLOUDEZ_API_USER_PHONE_RESEND_PATH || "/v3/user-phone/{id}/resend/";
+  return template.replace("{id}", encodeURIComponent(String(id)));
+}
+function userPhonePatchPath(id) {
+  const template = process.env.CLOUDEZ_API_USER_PHONE_PATCH_PATH || "/v3/user-phone/{id}/";
+  return template.replace("{id}", encodeURIComponent(String(id)));
+}
+function allowedPhoneCountries() {
+  const bruto = process.env.CLOUDEZ_PHONE_COUNTRIES;
+  if (!bruto) return [1, 44, 55, 351];
+  return bruto.split(",").map((n) => Number(n.trim())).filter((n) => Number.isInteger(n) && n > 0);
+}
 function apiTimeoutMs() {
   const raw = Number(process.env.CLOUDEZ_API_TIMEOUT);
   return Number.isFinite(raw) && raw > 0 ? raw * 1e3 : 1e4;
@@ -27120,6 +27152,13 @@ async function requireToken() {
 
 // src/api.ts
 function classify(status, body) {
+  if (status === 400) {
+    return {
+      code: "invalid_argument",
+      retryable: false,
+      hint: "A Cloudez recusou o que foi enviado. Corrija o dado antes de chamar de novo."
+    };
+  }
   if (status === 401) {
     return {
       code: "token_invalid",
@@ -27176,6 +27215,27 @@ async function request(method, path, body) {
 var apiGet = (path) => request("GET", path);
 var apiPost = (path, body) => request("POST", path, body);
 var apiPatch = (path, body) => request("PATCH", path, body);
+async function apiPublic(method, path, body, authorization) {
+  let response;
+  try {
+    response = await fetch(`${apiUrl()}${path}`, {
+      method,
+      headers: {
+        Accept: "application/json",
+        ...authorization ? { Authorization: authorization } : {},
+        ...body === void 0 ? {} : { "Content-Type": "application/json" }
+      },
+      ...body === void 0 ? {} : { body: JSON.stringify(body) },
+      signal: AbortSignal.timeout(apiTimeoutMs())
+    });
+  } catch (cause) {
+    throw new ToolError("upstream_unavailable", "N\xE3o foi poss\xEDvel falar com a API da Cloudez.", {
+      retryable: true,
+      hint: cause instanceof Error ? cause.message : void 0
+    });
+  }
+  return { status: response.status, body: await response.json().catch(() => null) };
+}
 
 // src/sites.ts
 var EXPECTED_APP_ROOT_PATH = "claude/current";
@@ -27439,8 +27499,7 @@ async function createDatabase(args) {
     ...idValido(criado?.port) ? { port: Number(criado.port) } : {},
     cloud,
     website,
-    // O vínculo é o que faz a aplicação enxergar o banco. A API aceitou a criação
-    // sem devolvê-lo, e afirmar que está vinculado seria afirmar o que não se viu.
+    // O vínculo é o que faz a aplicação enxergar o banco, e a API às vezes cria sem devolvê-lo.
     ...vinculado ? {} : { warning: "A API n\xE3o confirmou o v\xEDnculo com o site no retorno da cria\xE7\xE3o. Confira no painel antes de apontar a aplica\xE7\xE3o para este banco." }
   };
 }
@@ -27770,11 +27829,11 @@ async function beginDeploy(args) {
   const deployId2 = deployId(releaseId, idempotencyKey);
   const root = stripHome(args.root);
   const releasePath = `${root}/releases/${releaseId}`;
-  const mkdir = await sshRun(ssh, `mkdir -p '${releasePath}' '${root}/releases' '${root}/shared'`);
-  if (mkdir.code !== 0) {
+  const mkdir2 = await sshRun(ssh, `mkdir -p '${releasePath}' '${root}/releases' '${root}/shared'`);
+  if (mkdir2.code !== 0) {
     throw new ToolError("ssh_failed", `N\xE3o foi poss\xEDvel preparar o diret\xF3rio de release em ${ssh.host}.`, {
       retryable: true,
-      hint: (mkdir.stderr || mkdir.stdout).trim() || void 0
+      hint: (mkdir2.stderr || mkdir2.stdout).trim() || void 0
     });
   }
   const state = {
@@ -27783,17 +27842,12 @@ async function beginDeploy(args) {
     environment: args.environment ?? "",
     domain: args.domain,
     ref: args.ref ?? "",
-    // Gravado mesmo quando o sufixo veio do git. O commit descreve o fonte; no
-    // caminho sem container o que se publica é a saída do build, que ele não
-    // fixa — o mesmo commit com outra versão do Node produz bytes diferentes.
-    // Manter os dois é o que impede a precisão de se perder junto com a
-    // legibilidade do nome.
+    // Gravado mesmo quando o sufixo veio do git: o commit descreve o fonte, e no caminho sem
+    // container o que se publica é a saída do build, que o mesmo commit não fixa.
     content_sha256: args.content_sha256 ?? "",
     note: args.note ?? "",
     status: "awaiting_upload",
-    // O `path` sempre termina em `/`: significa "conteúdo de", não "o diretório em
-    // si" — a diferença entre `dist/` e `dist` é uma fonte clássica de deploy
-    // aninhado um nível errado.
+    // O `path` termina em `/` porque significa conteúdo de, e não o diretório em si.
     ssh: { host: ssh.host, user: ssh.user, port: ssh.port, path: `${releasePath}/` },
     root
   };
@@ -28040,10 +28094,7 @@ function composeFiles(stdout) {
   return {
     ...files ? { files: files.split(" ").filter(Boolean) } : {},
     ...ignored ? { override_ignored: ignored } : {},
-    // Gravada SEMPRE, com ou sem sobreposição. É a resposta acumulada para "que
-    // versão de Compose a frota tem?" — uma pergunta que, sem isto, exigiria
-    // entrar em cada servidor, e que decide se a subtração da sobreposição
-    // funciona.
+    // Gravada sempre, porque é ela que decide se as tags de merge da sobreposição funcionam.
     ...version2 && version2 !== "desconhecida" ? { version: version2 } : {},
     ...hostUid ? { host_uid: hostUid } : {}
   };
@@ -28133,9 +28184,7 @@ async function composeUp(deployId2) {
   const project = resolveProject(state);
   const cfg = await sshRun(
     ssh,
-    composePrelude(`${root}/current`) + // ANTES do config, e não só do up: o Compose recusa o projeto inteiro
-    // quando um `env_file` aponta para arquivo ausente, e o config é a primeira
-    // coisa que o lê.
+    composePrelude(`${root}/current`) + // Antes do config, e não só do up: o config é a primeira coisa que lê o `env_file`.
     linkEnvScript() + `echo "RELEASE_DIR $(pwd)"
 echo "RELEASE_DIR_P $(pwd -P)"
 $DC $FILES -p '${project}' config --format json
@@ -28182,14 +28231,11 @@ ${res.stderr}`;
     ...composeFiles(res.stdout),
     ...envLinked ? { env_file: envLinked } : {},
     ...shared.length > 0 ? { shared } : {},
-    // Separado dos demais porque é o único deploy em que aquele diretório nasceu.
-    // Depois disto ele é dado do usuário, e um `shared_created` reaparecendo
-    // significa que alguém apagou o de `shared/` — o que o retorno precisa deixar
-    // ver, e não normalizar.
+    // Separado porque é o único deploy em que aquele diretório nasceu. Reaparecer aqui significa
+    // que alguém apagou o de `shared/`.
     ...criados.length > 0 ? { shared_created: criados } : {},
-    // Estes vieram da release ANTERIOR: é a migração do dado de um site que já
-    // rodava. Acontece uma vez por diretório, e é a operação mais consequente que
-    // o deploy faz sem o usuário ter pedido — some do retorno seria errado.
+    // Vieram da release anterior: é a migração do dado de um site que já rodava, e acontece uma
+    // vez por diretório.
     ...migrados.length > 0 ? { shared_migrated: migrados } : {},
     ...recreated ? { recreated: recreated === "yes" } : {},
     containers
@@ -28234,7 +28280,7 @@ function minutoEstavel(domain) {
 function scriptDeBackup({ root, engine, service, project }) {
   const overlays = CLOUDEZ_OVERLAY_FILES.join(" ");
   return `#!/bin/sh
-# Backup do banco \u2014 GERADO pelo plugin da Cloudez (cloudez_install_backup).
+# Backup do banco, gerado pelo cloudez_install_backup.
 # N\xE3o edite \xE0 m\xE3o: reinstalar o agendamento sobrescreve este arquivo.
 set -eu
 
@@ -28248,9 +28294,7 @@ SEMANAIS=${SEMANAIS}
 DEST="$ROOT/shared/backup/$ENGINE"
 mkdir -p "$DEST/diario" "$DEST/semanal"
 
-# O log guarda a \xDALTIMA execu\xE7\xE3o, n\xE3o todas: um di\xE1rio que roda por um ano
-# encheria o disco com o pr\xF3prio relato. O resumo de uma linha vai no history.log,
-# que \xE9 aparado a cada vez.
+# O log guarda s\xF3 a \xFAltima execu\xE7\xE3o. O resumo de uma linha vai no history.log, que \xE9 aparado a cada vez.
 exec >"$DEST/last.log" 2>&1
 
 agora() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -28261,15 +28305,12 @@ registrar() {
     mv "$DEST/.history.tmp" "$DEST/history.log"
 }
 
-# Cron que falha em sil\xEAncio \xE9 o modo de falha que este script existe para n\xE3o
-# ter. O MAILTO do crontab pode n\xE3o estar configurado; o marcador em disco est\xE1
-# sempre l\xE1, e \xE9 o que o cloudez_health_check tem como ler.
+# O marcador em disco existe porque o MAILTO do crontab pode n\xE3o estar configurado,
+# e \xE9 o que o cloudez_health_check tem como ler.
 falhar() {
   echo "FALHA: $1"
   registrar "FALHA $1"
-  # O parcial n\xE3o pode ficar. Um dump que morre na metade deixa um arquivo do
-  # tamanho do que j\xE1 tinha sa\xEDdo, e um cron quebrado acumularia um por dia at\xE9
-  # encher o disco \u2014 falha de backup virando falha de servidor.
+  # Sem isto, um cron quebrado acumula um parcial por dia at\xE9 encher o disco.
   rm -f "$DEST"/.parcial-*.sql.gz
   { agora; echo "$1"; } > "$DEST/ULTIMA_FALHA"
   exit 1
@@ -28277,8 +28318,7 @@ falhar() {
 
 cd "$ROOT/current" 2>/dev/null || falhar "n\xE3o h\xE1 release publicada em $ROOT/current"
 
-# O MESMO par de arquivos que o deploy usa. Com outro, o dump sairia de outro
-# projeto \u2014 outro banco, ou nenhum.
+# O mesmo par de arquivos que o deploy usa. Com outro, o dump sairia de outro projeto.
 base=
 for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
   [ -f "$f" ] && { base=$f; break; }
@@ -28297,45 +28337,32 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 TMP="$DEST/.parcial-$STAMP.sql.gz"
 ALVO="$DEST/diario/$STAMP.sql.gz"
 
-# O status do DUMP, e n\xE3o o do gzip.
-#
-# \`set -e\` num pipeline olha s\xF3 o \xDALTIMO comando. Um dump que morre com o gzip
-# feliz produz um .gz v\xE1lido e VAZIO \u2014 que entraria na rota\xE7\xE3o e empurraria um
-# backup bom para fora. \xC9 exatamente o desastre que este script existe para
-# evitar, ent\xE3o o status atravessa o pipe pelo descritor 4.
+# O status do dump atravessa o pipe pelo descritor 4 porque \`set -e\` olha s\xF3 o \xFAltimo comando,
+# e um dump que morre com o gzip feliz produz um .gz v\xE1lido e vazio que entraria na rota\xE7\xE3o.
 set +e
 ec=$( { { ${comandoDeDump(engine)} ; echo $? >&4 ; } | gzip -c > "$TMP" ; } 4>&1 )
 set -e
 [ "\${ec:-1}" = 0 ] || falhar "o dump saiu com status \${ec:-?} \u2014 o erro est\xE1 acima"
 
-# Tr\xEAs perguntas diferentes: o dump terminou bem, o arquivo \xE9 um gzip \xEDntegro, e
-# o SQL l\xE1 dentro tem tamanho de banco. Um dump vazio passa nas duas primeiras.
 gzip -t "$TMP" 2>/dev/null || falhar "o arquivo gerado n\xE3o \xE9 um gzip \xEDntegro"
 
-# O piso \xE9 sobre o conte\xFAdo DESCOMPRIMIDO, e a diferen\xE7a n\xE3o \xE9 detalhe: o gzip de
-# um dump vazio \u2014 ou de uma mensagem de erro repetida \u2014 cabe em poucas dezenas de
-# bytes, e um piso medido no .gz o aprovaria. O que interessa \xE9 o tamanho do SQL.
-#
-# 512 tem folga curta de prop\xF3sito: MEDIDO, o menor dump leg\xEDtimo \xE9 o \`pg_dump\` de
-# um banco sem tabela nenhuma, com 643 bytes s\xF3 de cabe\xE7alho e SET. Subir o piso
-# passaria a recusar o backup de um banco rec\xE9m-criado, que \xE9 exatamente quando
-# ningu\xE9m est\xE1 olhando.
+# O piso \xE9 sobre o SQL descomprimido: o gzip de um dump vazio cabe em poucas dezenas de bytes
+# e passaria num piso medido no .gz.
+# 512 tem folga curta porque o menor dump leg\xEDtimo medido, de um banco sem tabelas, tem 643 bytes.
 bruto=$(gzip -dc "$TMP" | wc -c | tr -d ' ')
 [ "$bruto" -ge 512 ] || falhar "o dump tem $bruto bytes de SQL: pequeno demais para ser um banco"
 tam=$(wc -c < "$TMP" | tr -d ' ')
 
 mv "$TMP" "$ALVO"
 
-# Domingo. \`ln\` e n\xE3o \`cp\`: \xE9 o mesmo arquivo em dois lugares, e a c\xF3pia semanal
-# n\xE3o custa disco enquanto o di\xE1rio correspondente existir.
+# Aos domingos, com \`ln\` em vez de \`cp\`: a semanal n\xE3o custa disco enquanto a di\xE1ria existir.
 if [ "$(date -u +%u)" = 7 ]; then
   ln "$ALVO" "$DEST/semanal/$STAMP.sql.gz" 2>/dev/null ||
     cp "$ALVO" "$DEST/semanal/$STAMP.sql.gz"
 fi
 
-# A poda vem DEPOIS de o dump novo estar no lugar, e nunca antes: rodando primeiro,
-# uma semana de dumps que falham deixaria o site sem backup nenhum \u2014 apagando os
-# bons um por dia, sem nunca escrever um novo.
+# A poda vem depois do dump novo estar no lugar: antes, uma semana de dumps que falham
+# apagaria os bons um por dia sem nunca escrever um novo.
 podar() {
   ls -1t "$1"/*.sql.gz 2>/dev/null | tail -n +"$2" | while read -r velho; do rm -f "$velho"; done
 }
@@ -28463,9 +28490,7 @@ async function createCron(args) {
     name: args.name,
     command: args.command,
     schedule: CAMPOS.map((c) => tempo[c.chave]).join(" "),
-    // A API pode devolver 201 com um corpo que não repete o que foi enviado. Dizer
-    // o que se viu, em vez de afirmar que está tudo certo, é a mesma conduta do
-    // `warning` de vínculo em databases.ts.
+    // A API pode devolver 201 com um corpo que não repete o que foi enviado.
     raw_ok: idValido2(criado?.id)
   };
 }
@@ -28785,7 +28810,7 @@ mv -Tf '${root}/.current.tmp.$$' '${root}/current'`;
   return {
     domain,
     status: "rolled_back",
-    // Ausente quando não havia release ativa — a mesma regra do resto do plugin.
+    // Ausente quando não havia release ativa.
     ...current ? { from_release_id: current } : {},
     to_release_id: target
   };
@@ -28913,6 +28938,282 @@ async function healthCheck(domain, opts = {}) {
   };
 }
 
+// src/signup.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+
+// src/token-store.ts
+import { chmod, mkdir, readFile as readFile3, rm, writeFile } from "node:fs/promises";
+import { dirname as dirname3 } from "node:path";
+async function escreverSegredo(arquivo, token) {
+  await writeFile(arquivo, token + "\n", { mode: 384 });
+  await chmod(arquivo, 384);
+}
+async function saveToken(token) {
+  const arquivo = tokenFile();
+  let anterior = null;
+  try {
+    anterior = (await readFile3(arquivo, "utf8")).trim() || null;
+  } catch {
+  }
+  await mkdir(dirname3(arquivo), { recursive: true, mode: 448 });
+  await escreverSegredo(arquivo, token);
+  const verdict = await verifyToken(token);
+  if (verdict === "invalid") {
+    if (anterior) await escreverSegredo(arquivo, anterior);
+    else await rm(arquivo, { force: true });
+    return { verdict, restored: Boolean(anterior) };
+  }
+  return { verdict, restored: false };
+}
+
+// src/signup.ts
+function normalizePanelHost(entrada) {
+  const bruto = String(entrada ?? "").trim();
+  const host = bruto.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0].replace(/\.$/, "").toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)) {
+    throw new ToolError("invalid_argument", `'${entrada}' n\xE3o \xE9 um dom\xEDnio de painel.`, {
+      hint: "Pe\xE7a ao usu\xE1rio o endere\xE7o que ele usa para entrar na Cloudez, como painel.exemplo.com."
+    });
+  }
+  return host;
+}
+async function panelInfo(panelHost) {
+  const host = normalizePanelHost(panelHost);
+  const { status, body } = await apiPublic("GET", companyThemePath(host));
+  if (status === 404) {
+    throw new ToolError("panel_not_found", `'${host}' n\xE3o responde como painel da Cloudez.`, {
+      hint: "Confira o endere\xE7o com o usu\xE1rio: \xE9 o mesmo que ele usa para entrar todo dia."
+    });
+  }
+  if (status !== 200) {
+    throw new ToolError("upstream_unavailable", `A API da Cloudez respondeu ${status} ao resolver o painel.`, {
+      retryable: true
+    });
+  }
+  const tema = body;
+  const code = typeof tema?.code === "string" ? tema.code : "";
+  if (!code) {
+    throw new ToolError("panel_not_found", `O painel '${host}' respondeu sem identificar a empresa.`, {
+      hint: "Sem o c\xF3digo da empresa n\xE3o h\xE1 onde criar a conta. Confira o endere\xE7o com o usu\xE1rio."
+    });
+  }
+  return {
+    panel_host: host,
+    company_name: typeof tema?.name === "string" ? tema.name : host,
+    company_code: code,
+    register_enabled: tema?.has_disabled_register !== true
+  };
+}
+function normalizeEmail(entrada) {
+  const email3 = String(entrada ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email3)) {
+    throw new ToolError("invalid_argument", `'${entrada}' n\xE3o \xE9 um e-mail.`, {
+      hint: "\xC9 por ele que o usu\xE1rio define a senha depois, ent\xE3o precisa ser um endere\xE7o que ele l\xEA."
+    });
+  }
+  return email3;
+}
+function normalizePhone(entrada) {
+  const bruto = String(entrada ?? "").trim();
+  const digitos = bruto.replace(/\D/g, "");
+  const recusa = (motivo, hint) => {
+    throw new ToolError("invalid_argument", `'${entrada}' n\xE3o serve como telefone: ${motivo}.`, { hint });
+  };
+  if (digitos.length < 8 || digitos.length > 15) {
+    recusa("n\xE3o tem a quantidade de d\xEDgitos de um telefone", "Pe\xE7a o n\xFAmero com DDD, como (11) 98765-4321.");
+  }
+  const e1642 = bruto.startsWith("+") ? `+${digitos}` : digitos.length === 10 || digitos.length === 11 ? `+55${digitos}` : "";
+  if (!e1642) recusa("falta o c\xF3digo do pa\xEDs", "Pe\xE7a o n\xFAmero com o c\xF3digo do pa\xEDs, como +351 912 345 678.");
+  const paises = allowedPhoneCountries();
+  const casa = [...paises].sort((a, b) => String(b).length - String(a).length);
+  if (!casa.some((pais) => e1642.startsWith(`+${pais}`))) {
+    recusa(
+      "a Cloudez n\xE3o envia SMS para esse pa\xEDs",
+      `Os c\xF3digos aceitos s\xE3o ${[...paises].sort((a, b) => a - b).join(", ")}. Sem SMS n\xE3o h\xE1 como validar a conta.`
+    );
+  }
+  return e1642;
+}
+async function signup(args) {
+  await recusarSeJaAutenticado();
+  const fullName = String(args.full_name ?? "").trim();
+  if (!fullName) {
+    throw new ToolError("invalid_argument", "O cadastro precisa do nome do usu\xE1rio.", {
+      hint: "\xC9 o nome que aparece no painel e nos e-mails da Cloudez."
+    });
+  }
+  const email3 = normalizeEmail(args.email);
+  const phone = normalizePhone(args.phone);
+  const painel = await panelInfo(args.panel_host);
+  if (!painel.register_enabled) {
+    throw new ToolError("register_disabled", `${painel.company_name} n\xE3o abre cadastro pelo painel.`, {
+      hint: "Pe\xE7a ao usu\xE1rio para procurar a revenda: s\xF3 ela cria conta nesse painel."
+    });
+  }
+  const senha = randomBytes2(24).toString("base64url");
+  const criado = await apiPublic("POST", signupPath(), {
+    full_name: fullName,
+    email: email3,
+    password1: senha,
+    password2: senha,
+    company: painel.company_code,
+    phone_number: phone
+  });
+  if (criado.status === 400) recusarCadastro(criado.body);
+  if (criado.status < 200 || criado.status > 299) {
+    throw new ToolError("upstream_unavailable", `A API da Cloudez respondeu ${criado.status} ao cadastrar.`, {
+      retryable: true
+    });
+  }
+  const jwt = criado.body?.token;
+  if (typeof jwt !== "string" || !jwt) {
+    throw new ToolError("signup_incomplete", "A conta foi criada, mas o cadastro n\xE3o devolveu credencial nenhuma.", {
+      hint: CONTA_JA_EXISTE
+    });
+  }
+  await trocarPorTokenDaApi(jwt);
+  return {
+    account_created: true,
+    company_name: painel.company_name,
+    token_saved: true,
+    ...await dispararSms()
+  };
+}
+var CONTA_JA_EXISTE = "N\xC3O repita o cadastro: o e-mail j\xE1 est\xE1 em uso e a segunda tentativa falha. Pe\xE7a ao usu\xE1rio para definir a senha pelo link de recupera\xE7\xE3o do painel e pegar o token em /account?tab=token.";
+async function recusarSeJaAutenticado() {
+  const token = await resolveToken();
+  if (!token || await verifyToken(token) !== "valid") return;
+  throw new ToolError("already_authenticated", "J\xE1 existe um token da Cloudez v\xE1lido nesta m\xE1quina.", {
+    hint: "Cadastrar agora sobrescreveria a credencial da conta atual. Confirme com o usu\xE1rio antes de trocar de conta."
+  });
+}
+async function trocarPorTokenDaApi(jwt) {
+  const { status, body } = await apiPublic("GET", authTokenPath(), void 0, `JWT ${jwt}`);
+  const chave = body?.token;
+  if (status !== 200 || typeof chave !== "string" || !chave) {
+    throw new ToolError("signup_incomplete", "A conta foi criada, mas n\xE3o foi poss\xEDvel obter o token da API.", {
+      hint: CONTA_JA_EXISTE
+    });
+  }
+  if ((await saveToken(chave)).verdict === "invalid") {
+    throw new ToolError("signup_incomplete", "A conta foi criada, mas a Cloudez recusou o token gerado para ela.", {
+      hint: CONTA_JA_EXISTE
+    });
+  }
+}
+async function dispararSms() {
+  let id;
+  try {
+    id = await acharTelefone();
+  } catch {
+    return {
+      code_sent: false,
+      warning: "A conta e o token est\xE3o prontos, mas o telefone da conta n\xE3o foi localizado para enviar o c\xF3digo."
+    };
+  }
+  try {
+    await apiPost(userPhoneResendPath(id), {});
+    return { phone_id: id, code_sent: true };
+  } catch {
+    return {
+      phone_id: id,
+      code_sent: false,
+      warning: "A conta e o token est\xE3o prontos, mas o envio do SMS falhou. Tente cloudez_resend_phone_code."
+    };
+  }
+}
+async function acharTelefone() {
+  const lista = await apiGet(userPhonePath());
+  const itens = Array.isArray(lista) ? lista : lista?.results ?? [];
+  const id = Number(itens[0]?.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new ToolError("upstream_unavailable", "A conta n\xE3o trouxe telefone utiliz\xE1vel.");
+  }
+  return id;
+}
+function recusarCadastro(body) {
+  const campos = body ?? {};
+  const texto = (chave) => {
+    const valor = campos[chave];
+    return Array.isArray(valor) ? valor.map(String).join(" ") : typeof valor === "string" ? valor : "";
+  };
+  if (/already registered/i.test(texto("email"))) {
+    throw new ToolError("email_already_registered", "J\xE1 existe conta com esse e-mail neste painel.", {
+      hint: "N\xE3o cadastre de novo. Trate como quem j\xE1 tem conta: o token est\xE1 em /account?tab=token do painel."
+    });
+  }
+  if (texto("phone_number")) {
+    throw new ToolError("phone_already_used", "Esse telefone j\xE1 est\xE1 verificado em outra conta deste painel.", {
+      hint: "A Cloudez aceita um telefone por conta. Pe\xE7a outro n\xFAmero, ou leve o usu\xE1rio \xE0 conta que j\xE1 existe."
+    });
+  }
+  const detalhe = Object.keys(campos).map((chave) => `${chave}: ${texto(chave)}`).filter((linha) => !linha.endsWith(": ")).join("; ");
+  throw new ToolError("signup_rejected", `A Cloudez recusou o cadastro \u2014 ${detalhe || "sem detalhe no retorno"}.`, {
+    hint: "Mostre a recusa ao usu\xE1rio, corrija o campo apontado e chame de novo. A conta N\xC3O foi criada."
+  });
+}
+
+// src/phone.ts
+async function resendCode(phoneId) {
+  const id = idDoTelefone(phoneId);
+  await apiPost(userPhoneResendPath(id), {});
+  return { phone_id: id, code_sent: true };
+}
+async function confirmPhone(phoneId, code) {
+  const id = idDoTelefone(phoneId);
+  const codigo = String(code ?? "").trim();
+  if (!/^\d{6}$/.test(codigo)) {
+    throw new ToolError("invalid_argument", `'${code}' n\xE3o \xE9 um c\xF3digo de SMS: s\xE3o seis d\xEDgitos.`, {
+      hint: "Pe\xE7a ao usu\xE1rio o c\xF3digo que chegou por SMS, s\xF3 os n\xFAmeros."
+    });
+  }
+  try {
+    await apiPatch(userPhonePatchPath(id), { validation: codigo });
+  } catch (err) {
+    throw recusaDoCodigo(err);
+  }
+  const telefone = await apiGet(userPhonePatchPath(id));
+  if (telefone?.is_verified !== true) {
+    throw new ToolError("phone_not_verified", "A Cloudez aceitou o c\xF3digo, mas o telefone continua sem verifica\xE7\xE3o.", {
+      hint: "Pe\xE7a um c\xF3digo novo com cloudez_resend_phone_code e confirme de novo."
+    });
+  }
+  return { phone_verified: true, ...await mandarEmailDeSenha() };
+}
+function idDoTelefone(entrada) {
+  const id = Number(entrada);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new ToolError("invalid_argument", `'${entrada}' n\xE3o \xE9 um id de telefone.`, {
+      hint: "O id vem do `phone_id` que o cloudez_signup devolveu."
+    });
+  }
+  return id;
+}
+function recusaDoCodigo(err) {
+  if (err instanceof ToolError && err.body.error.code === "invalid_argument") {
+    return new ToolError("sms_code_invalid", "A Cloudez recusou esse c\xF3digo.", {
+      hint: "Confira os seis d\xEDgitos com o usu\xE1rio. Se o SMS n\xE3o chegou, use cloudez_resend_phone_code."
+    });
+  }
+  return err;
+}
+async function mandarEmailDeSenha() {
+  try {
+    const conta = await apiGet(authUserPath());
+    const email3 = typeof conta?.email === "string" ? conta.email : "";
+    const company = typeof conta?.company === "string" ? conta.company : "";
+    if (!email3 || !company) throw new Error("a conta n\xE3o trouxe e-mail e empresa");
+    const { status } = await apiPublic("POST", passwordResetPath(), { email: email3, company });
+    if (status < 200 || status > 299) throw new Error(`a API respondeu ${status}`);
+    return { password_email_sent: true };
+  } catch {
+    return {
+      password_email_sent: false,
+      warning: "O telefone foi verificado, mas o e-mail para definir a senha n\xE3o saiu. Pe\xE7a ao usu\xE1rio para usar 'esqueci minha senha' no painel: a conta foi criada com uma senha que ningu\xE9m conhece."
+    };
+  }
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "Cloudez MCP",
@@ -28924,8 +29225,7 @@ server.registerTool(
     title: "Estado da autentica\xE7\xE3o na Cloudez",
     description: "Informa se h\xE1 um token da Cloudez utiliz\xE1vel nesta m\xE1quina. Chame antes da primeira opera\xE7\xE3o que fale com a Cloudez numa sess\xE3o, e sempre que outra tool falhar com not_authenticated ou token_invalid, para saber se o problema \xE9 credencial. N\xE3o recebe nem devolve o token: se n\xE3o houver autentica\xE7\xE3o, o caminho \xE9 pedir ao usu\xE1rio que rode `! cloudez-login` no terminal dele \u2014 nunca pe\xE7a o token na conversa.",
     inputSchema: object({}),
-    // Sem efeito colateral: pode entrar no allowlist do usuário e nunca gerar
-    // prompt de permissão. É por isso que ela não escreve nada.
+    // Sem efeito colateral, então pode entrar no allowlist do usuário e nunca gerar prompt.
     annotations: { readOnlyHint: true, openWorldHint: true }
   },
   async () => {
@@ -28948,8 +29248,7 @@ server.registerTool(
         source,
         token_file: tokenFile(),
         verified: verdict === "valid",
-        // Recusado é o mesmo problema de não ter nenhum — o usuário precisa
-        // autenticar de novo, e a instrução para isso é a mesma.
+        // Recusado dá no mesmo que não ter nenhum: a instrução para o usuário é a mesma.
         ...verdict === "invalid" && {
           ...loginHint(),
           message: "A Cloudez recusou o token (expirado ou revogado). Gere outro no painel."
@@ -29154,11 +29453,7 @@ server.registerTool(
         "Diret\xF3rio do site no servidor. OMITA: \xE9 derivado do dom\xEDnio como ~/<domain>/www/claude. Passe s\xF3 se o .cloudez.yaml do projeto trouxer um `root` expl\xEDcito."
       ),
       to_release_id: string2().optional().describe("Release alvo. Omitido, volta para a imediatamente anterior.")
-      // Sem idempotency_key, pela mesma razão do cloudez_set_app_root_path
-      // (contrato §3.4): esta tool ATRIBUI um valor fixo — o symlink aponta para
-      // a release escolhida —, então repetir dá no mesmo. A chave existia aqui
-      // declarada e o handler a ignorava, que é o pior dos dois mundos: pedia ao
-      // modelo um argumento que não fazia nada.
+      // Sem idempotency_key (contrato §3.4): a tool atribui um valor fixo, então repetir dá no mesmo.
     }),
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
   },
@@ -29354,6 +29649,86 @@ server.registerTool(
   async ({ domain, root, vars, replace }) => {
     try {
       return okResult({ ...await setEnv({ domain, root: rootDoSite(domain, root), vars, replace }) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_panel_info",
+  {
+    title: "Identificar o painel da Cloudez",
+    description: "Diz de que empresa \xE9 um endere\xE7o de painel da Cloudez e se ela abre cadastro por ali. Chame ANTES de mandar o usu\xE1rio para uma p\xE1gina do painel e antes de cloudez_signup: a Cloudez \xE9 white-label, cada revenda tem o seu dom\xEDnio, e um endere\xE7o digitado errado s\xF3 apareceria depois, com o usu\xE1rio j\xE1 perdido no navegador. N\xE3o precisa de token.",
+    inputSchema: object({
+      panel_host: string2().describe(
+        "Endere\xE7o do painel do usu\xE1rio. Pode ser a URL inteira que ele copiou (https://cloud.configr.com/sites/12), que s\xF3 o host \xE9 usado."
+      )
+    }),
+    annotations: { readOnlyHint: true, openWorldHint: true }
+  },
+  async ({ panel_host }) => {
+    try {
+      return okResult({ ...await panelInfo(panel_host) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_signup",
+  {
+    title: "Criar conta na Cloudez",
+    description: "Cria a conta do usu\xE1rio no painel informado, guarda o token da API desta m\xE1quina e dispara o SMS de ativa\xE7\xE3o. Chame s\xF3 depois de cloudez_auth_status dizer que n\xE3o h\xE1 autentica\xE7\xE3o, de o usu\xE1rio confirmar que N\xC3O tem conta, e de ele conferir nome, e-mail e telefone como voc\xEA os repetiu de volta. Em seguida pe\xE7a o c\xF3digo de seis d\xEDgitos e chame cloudez_confirm_phone. A senha \xE9 gerada aqui e descartada: quem define a dele \xE9 o pr\xF3prio usu\xE1rio, pelo e-mail que o cloudez_confirm_phone manda no fim. N\xC3O \xE9 idempotente e N\xC3O deve ser repetida: se falhar com signup_incomplete a conta J\xC1 EXISTE, e uma segunda chamada s\xF3 devolve e-mail duplicado.",
+    inputSchema: object({
+      panel_host: string2().describe("Host do painel, o mesmo passado a cloudez_panel_info (cloud.configr.com)"),
+      full_name: string2().describe("Nome completo, como o usu\xE1rio escreveu (Maria Silva)"),
+      email: string2().describe("E-mail do usu\xE1rio. \xC9 por ele que a senha vai ser definida depois."),
+      phone: string2().describe(
+        "Telefone com DDD para receber o SMS. Sem c\xF3digo de pa\xEDs, um n\xFAmero de 10 ou 11 d\xEDgitos \xE9 lido como brasileiro (+55). A Cloudez s\xF3 envia para +1, +44, +55 e +351."
+      )
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+  },
+  async ({ panel_host, full_name, email: email3, phone }) => {
+    try {
+      return okResult({ ...await signup({ panel_host, full_name, email: email3, phone }) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_resend_phone_code",
+  {
+    title: "Reenviar o SMS de ativa\xE7\xE3o",
+    description: "Pede \xE0 Cloudez que reenvie o c\xF3digo de seis d\xEDgitos para o telefone da conta. Chame quando o usu\xE1rio disser que o SMS n\xE3o chegou, ou depois de sms_code_invalid, se ele suspeitar que leu um c\xF3digo velho. O retorno diz que a Cloudez ACEITOU enviar; a entrega em si n\xE3o \xE9 observ\xE1vel daqui, ent\xE3o n\xE3o afirme ao usu\xE1rio que o SMS chegou.",
+    inputSchema: object({
+      phone_id: number2().describe("O `phone_id` que cloudez_signup devolveu")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ phone_id }) => {
+    try {
+      return okResult({ ...await resendCode(phone_id) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_confirm_phone",
+  {
+    title: "Confirmar o SMS e liberar a senha",
+    description: "Valida o c\xF3digo de seis d\xEDgitos que chegou por SMS, confere relendo que o telefone ficou verificado, e ent\xE3o manda o e-mail para o usu\xE1rio definir a senha dele. \xC9 o passo que fecha o cadastro: sem ele a conta fica com uma senha aleat\xF3ria que ningu\xE9m conhece. Chame depois de cloudez_signup, com o c\xF3digo que o usu\xE1rio ditou. C\xF3digo errado volta como sms_code_invalid, e a\xED o caminho \xE9 conferir os d\xEDgitos ou reenviar com cloudez_resend_phone_code. Chamar de novo depois de verificado dispara um segundo e-mail de senha.",
+    inputSchema: object({
+      phone_id: number2().describe("O `phone_id` que cloudez_signup devolveu"),
+      code: string2().describe("Os seis d\xEDgitos do SMS, s\xF3 n\xFAmeros (123456)")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  async ({ phone_id, code }) => {
+    try {
+      return okResult({ ...await confirmPhone(phone_id, code) });
     } catch (err) {
       return errorResult(err);
     }
