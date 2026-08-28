@@ -6,93 +6,34 @@
 //                  echo "$CLOUDEZ_TOKEN" | ... --stdin    (CI)
 //   (sem flag)   pergunta o token e salva. Exige terminal.
 //
-// ─── Por que Node, e não shell ──────────────────────────────────────────────
+// Token é a única forma de autenticar; login por senha foi descontinuado,
+// ver `docs/mcp-tool-contract.md`.
 //
-// Isto era bash que chamava Node para escrever JSON. O `bin/_json.mjs` nasceu
-// para tirar o `jq` da lista de dependências, e trouxe junto uma minilinguagem
-// de prefixos (`:chave` para literal, `+chave` para mesclar na raiz) que existia
-// só porque quem construía o objeto era um shell. Um dos comentários de lá
-// registrava o preço: `:verified` precisava do prefixo, senão a string "false"
-// passaria por verdadeiro em JavaScript — um defeito que só é possível quando um
-// lado monta texto e o outro parseia.
+// O modo interativo exige TTY: um token digitado na conversa entraria no
+// contexto do modelo e no transcript da sessão. No Claude Code, chame com
+// `!` na frente para rodar no terminal da sessão. O --stdin existe para
+// quem não tem terminal: o segredo vai de um pipe direto ao processo, sem
+// passar pela conversa. O token não aparece em nenhuma saída deste script.
 //
-// Com Node 20+ como pré-requisito declarado do plugin, nada disso se paga:
-// `JSON.stringify` escapa igual, `fetch` dispensa o `curl`, e some a pergunta de
-// se existe bash na máquina. É a mesma decisão que já tinha sido tomada para o
-// `cloudez-sync` (Go) e para o servidor MCP.
+// Este script só coleta e grava. Quem responde se o usuário está
+// autenticado é a tool `cloudez_auth_status` do MCP.
 //
-// ─── O que NÃO mudou, e não muda ────────────────────────────────────────────
-//
-// Token é a única forma de autenticar. Existiu um modo --password (e-mail, senha
-// e 2FA, batendo em POST /auth/login/); foi removido de propósito — veja a nota
-// em docs/mcp-tool-contract.md, que guarda o que já foi descoberto da API para
-// não ser redescoberto do zero.
-//
-// O modo interativo EXIGE TTY, e isso não vem de dependência nenhuma: um token
-// digitado na conversa entra no contexto do modelo e no transcript da sessão,
-// que o usuário não controla e não consegue limpar. No Claude Code o jeito de
-// chamar é prefixar com `!`, que executa no terminal da sessão — a tool Bash não
-// serve, ali /dev/tty responde "Device not configured".
-//
-// O --stdin existe porque um pipe resolve o mesmo problema sem terminal: o
-// segredo vai da origem (clipboard, arquivo, variável) direto para o processo,
-// sem passar pelo contexto de ninguém. Quem chama nunca vê o valor — e é isso
-// que permite rodar pela tool Bash sem vazar nada. O que NÃO vale é o próprio
-// agente montar o pipe com um token que ele conhece: se ele conhece, já vazou.
-//
-// O token não aparece em nenhuma saída deste script, nem truncado.
-//
-// Este script SÓ coleta e grava. Consultar o estado da autenticação é com a tool
-// `cloudez_auth_status` do MCP: é o MCP que usa o token contra a API, e ter duas
-// noções de "estou autenticado" em lugares diferentes só cria a divergência em
-// que uma diz sim e a outra diz não. Ela também é quem diz COMO autenticar nesta
-// máquina — existiu um `--hint` aqui para isso, e saiu quando o servidor passou
-// a ser distribuído dentro do plugin. Ver login-hint.ts, no repositório do MCP.
-
-// O arquivo NAO tem extensao, de proposito: `cloudez-login` e o nome que o
-// usuario digita, que a doc cita e que o allowlist autoriza. O preco disso e que
-// o Node precisa ser informado de que isto e um modulo ES — sem extensao e sem
-// aviso ele assume CommonJS, e o `import` abaixo vira erro de sintaxe.
-//
-// Quem informa e o `bin/package.json`, com `{"type": "module"}`. Node 22+ detecta
-// sozinho pela sintaxe, e por isso o problema fica INVISIVEL em maquina moderna:
-// so aparece no Node 20, que e o piso declarado do plugin. Ha um teste que roda
-// este arquivo com `--no-experimental-detect-module` justamente para nao
-// depender da versao de quem rodar a suite.
+// Sem extensão de propósito: `cloudez-login` é o nome que o usuário digita
+// e que o allowlist autoriza. `bin/package.json` (`{"type": "module"}`) é
+// quem informa ao Node que este arquivo é ESM.
 
 import { openSync } from "node:fs"
 import { ReadStream } from "node:tty"
 import { fileURLToPath } from "node:url"
 
-// ───────────────────────────────────────────────────────────────────── saída ──
-//
-// O envelope — sucesso em stdout, erro em stderr, JSON nos dois — é o mesmo do
-// cloudez-setup, e por isso mora fora daqui. Ver bin/_out.mjs.
-
+// Envelope de saída compartilhado com cloudez-setup.
 import { die, ok } from "./_out.mjs"
 
-// ─────────────────────────────────────────────────────────────────── token ──
-//
-// Nada disto é implementado aqui. `mcp/cloudez-auth.mjs` é um bundle do mesmo
-// código que o servidor MCP usa: mesma precedência CLOUDEZ_TOKEN > arquivo,
-// mesmo `Authorization: Token`, mesma tabela de vereditos, mesma ordem de
-// gravar-depois-validar.
-//
-// Antes havia duas implementações — esta e a do MCP —, e o comentário que ficava
-// aqui admitia o arranjo: "são duas implementações de um contrato, não duas
-// opiniões". Era uma promessa sustentada só pela disciplina de quem edita, e o
-// modo de falha era o pior possível de diagnosticar: o login dizendo que está
-// autenticado e o MCP dizendo que não.
-//
-// O que segurava a duplicação era este arquivo ser shell — não havia como
-// importar TypeScript de um script bash. Com ele em Node, deixou de haver razão.
-//
-// O import é do BUNDLE de biblioteca, não do servidor: `mcp/cloudez-mcp.mjs`
-// sobe um transporte stdio ao ser importado, e penduraria este processo.
-
+// Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
+// subiria um transporte stdio e penduraria este processo. Implementa a
+// mesma precedência de token, o mesmo Authorization: Token e a mesma
+// tabela de vereditos que o servidor MCP usa.
 import { resolveToken, saveToken, tokenFile, tokenSource, verifyToken } from "../mcp/cloudez-auth.mjs"
-
-// ────────────────────────────────────────────────────────────────── resposta ──
 
 async function statusJson(status, verified) {
   const base = { status, source: await tokenSource(), token_file: tokenFile(), verified }
@@ -108,9 +49,8 @@ async function statusJson(status, verified) {
 /**
  * Grava, e transforma a recusa da Cloudez em erro deste comando.
  *
- * O `saveToken` da biblioteca não lança: devolve o veredito com o arquivo já
- * restaurado. Que isso seja fatal, com que código, e o que se imprime — é
- * política, e política fica em quem tem interface com gente.
+ * `saveToken` não lança: devolve o veredito com o arquivo já restaurado.
+ * Decidir se isso é fatal é política, e fica aqui, não na biblioteca.
  */
 async function gravarOuMorrer(token) {
   const { verdict, restored } = await saveToken(token)
@@ -126,16 +66,14 @@ async function gravarOuMorrer(token) {
   await statusJson("authenticated", verdict === "valid")
 }
 
-// Espaço no meio não é token: é uma linha inteira copiada por engano, ou o
-// clipboard com outra coisa. Recusar aqui evita gastar uma chamada de API para
+// Espaço no meio não é token: é uma linha copiada por engano, ou o
+// clipboard com outra coisa. Recusar evita uma chamada de API para
 // descobrir o óbvio.
 function recusarSeNaoParecerToken(token, origem, hint) {
-  if (/\s/.test(token)) die("invalid_token", `${origem} tem espaços — não parece um token.`, { hint })
+  if (/\s/.test(token)) die("invalid_token", `${origem} tem espaços, não parece um token.`, { hint })
 }
 
-// ──────────────────────────────────────────────────────────────────── prompt ──
-
-// As três teclas que o modo raw entrega cruas, e que por isso precisam de nome.
+// As três teclas que o modo raw entrega cruas.
 const ETX = "\u0003" // Ctrl-C
 const EOT = "\u0004" // Ctrl-D, fim de entrada
 const DEL = "\u007f" // backspace, como o terminal o manda
@@ -143,12 +81,9 @@ const DEL = "\u007f" // backspace, como o terminal o manda
 /**
  * Lê o token do terminal, sem eco.
  *
- * Modo raw em vez de readline: readline só esconde o que é digitado mexendo num
- * método privado (`_writeToOutput`), e um segredo não é lugar para depender de
- * API interna. O preço do raw é tratar backspace e Ctrl-C na mão — sem isso o
- * Ctrl-C não chega ao processo e o terminal fica preso.
- *
- * O prompt e a moldura vão para stderr: stdout é do payload.
+ * Modo raw em vez de readline, que só esconde a digitação mexendo num
+ * método privado. O preço é tratar backspace e Ctrl-C na mão. O prompt e a
+ * moldura vão para stderr; stdout é reservado para o payload.
  */
 function pedirToken(terminal) {
   terminal.setRawMode(true)
@@ -179,9 +114,9 @@ function pedirToken(terminal) {
 /**
  * O terminal de controle, ou `null` se não houver.
  *
- * `/dev/tty` é o terminal de controle no POSIX, e é ele que precisa existir —
- * stdin pode estar redirecionado sem que o terminal tenha sumido. No Windows ele
- * não existe: ali o console é o próprio stdin.
+ * `/dev/tty` é o terminal de controle no POSIX; stdin pode estar
+ * redirecionado sem que ele tenha sumido. No Windows não existe: ali o
+ * console é o próprio stdin.
  */
 function abrirTerminal() {
   try {
@@ -191,13 +126,10 @@ function abrirTerminal() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────── entrada ──
-
 const modo = process.argv[2] ?? ""
 
 if (modo === "--stdin") {
-  // Sem pipe isso travaria esperando entrada que nunca vem, e o usuário não
-  // teria como saber por quê. O modo interativo é o default, sem flag.
+  // Sem pipe isso travaria esperando entrada que nunca vem.
   if (process.stdin.isTTY) {
     die("usage", "--stdin espera o token num pipe, não num terminal.", {
       hint: "Ex.: pbpaste | cloudez-login --stdin. Para digitar o token, rode cloudez-login sem argumento.",
@@ -220,11 +152,8 @@ if (modo === "--stdin") {
   await gravarOuMorrer(token)
 }
 
-// Única lápide que sobrou. Existiu uma segunda, para o `--check`, e ela saiu:
-// aquele modo virou tool há muito tempo, e o erro genérico de argumento
-// desconhecido já cita a `cloudez_auth_status`. Esta fica porque o que mudou não
-// foi ONDE, foi O QUE: login por senha não existe mais em lugar nenhum, e um
-// "argumento desconhecido" mandaria a pessoa procurar a flag certa.
+// Login por senha não existe mais em lugar nenhum; um erro genérico de
+// argumento desconhecido não deixaria isso claro.
 if (modo === "--password") {
   die("password_login_disabled", "Login por e-mail e senha foi descontinuado.", {
     hint: "Gere um token no painel da Cloudez e rode cloudez-login sem argumento.",
@@ -239,15 +168,11 @@ if (modo) {
   })
 }
 
-// ────────────────────────────────────────────────────────── token do painel ──
-
 const terminal = process.stdin.isTTY ? abrirTerminal() : null
 
 if (!terminal) {
-  // O caminho absoluto porque bin/ só está no PATH da tool Bash, não no terminal
-  // do usuário. Aqui ele é o próprio arquivo — não há detecção de clipboard:
-  // essa parte da dica vive no `cloudez_auth_status`, que responde antes de
-  // alguém chegar a executar este script.
+  // Caminho absoluto porque bin/ só está no PATH da tool Bash, não no
+  // terminal do usuário.
   const self = fileURLToPath(import.meta.url)
   die("no_tty", "cloudez-login exige um terminal interativo.", {
     claude_code_command: `! ${self}`,
@@ -270,8 +195,8 @@ process.stderr.write(
 )
 
 if (existenteValido) {
-  // Sem esta saída não havia como trocar um token válido por outro sem apagar o
-  // arquivo na mão — e rotacionar token no painel é rotina, não exceção.
+  // Rotacionar o token no painel é rotina; sem este aviso não haveria como
+  // trocar um token válido por outro sem apagar o arquivo na mão.
   process.stderr.write("  Já existe um token válido aqui. Enter mantém o atual.\n")
 }
 process.stderr.write("  ───────────────────────────────────────────────\n\n")

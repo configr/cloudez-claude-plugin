@@ -1,17 +1,13 @@
 #!/usr/bin/env node
-// Extrai um campo de um JSON, no formato do `jq -r`. JSON pelo stdin, caminho no
-// argumento.
+// Extrai um campo de um JSON, no formato do `jq -r`. JSON pelo stdin,
+// caminho no argumento. Existe para tirar o `jq` da suíte.
 //
-// Existe para tirar o `jq` da suíte. Ele era a última dependência que o CI
-// instalava além do runtime, e a única razão de ainda estar aqui era esta função —
-// o runtime do plugin deixou de usá-lo quando os adaptadores viraram Node.
-//
-// Não é uma reimplementação do jq, e não deve virar uma: aceita caminho com ponto e
-// índice de array, que é tudo o que a suíte usa. Qualquer coisa além disso é sinal
+// Não é uma reimplementação do jq, e não deve virar uma: aceita caminho com
+// ponto e índice de array, que é tudo o que a suíte usa. Além disso é sinal
 // de que o teste quer afirmar algo mais complicado do que deveria.
 //
-// O formato de saída é o do `-r`: string sai crua (sem aspas), null e campo ausente
-// saem como `null` — que é o que os testes comparam.
+// Saída no formato do `-r`: string crua, sem aspas; null e campo ausente
+// saem como `null`.
 
 const caminho = process.argv[2] ?? "."
 

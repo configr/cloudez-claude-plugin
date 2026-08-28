@@ -1,33 +1,23 @@
 #!/usr/bin/env node
-// Relatório de cobertura de `bin/`, juntando o que os DOIS layers de teste
+// Relatório de cobertura de `bin/`, juntando o que os dois layers de teste
 // executaram.
 //
 // Uso: test/run.sh --coverage  (ou: node test/coverage.mjs <dir-do-NODE_V8_COVERAGE>)
 //
-// Existe porque nenhuma ferramenta embutida cobre o caso desta suíte. O
-// `node --test --experimental-test-coverage` só enxerga o que o próprio processo
-// de teste carrega — aqui, só o `_payload.mjs`. Os adaptadores são exercitados
-// pelo bats, que os roda como SUBPROCESSO, e para esses o que existe é o
-// `NODE_V8_COVERAGE`: cada processo Node despeja o coverage bruto do V8 num
-// diretório ao sair. Falta só juntar, e é isso que este arquivo faz.
+// `node --test --experimental-test-coverage` só enxerga o que o próprio
+// processo de teste carrega; os adaptadores rodam como subprocesso do bats,
+// e para esses o que existe é `NODE_V8_COVERAGE`, que despeja o coverage
+// bruto do V8 num diretório ao sair. Este arquivo só junta os dois.
 //
-// A alternativa era o `c8`, que faz tudo isso numa linha — e traria `node_modules`
-// e um `npm install` de volta para um repositório que acabou de eliminar toda
-// etapa de instalação. Noventa linhas custam menos que essa regressão.
+// Duas decisões de medição:
 //
-// ── Duas decisões de medição, e as duas já morderam ──
+// 1. Não conta "range aninhado com count > 0" como cobertura de bloco: o V8
+//    só emite sub-range quando a contagem difere do range que o contém, ou
+//    seja, os aninhados são os buracos. O certo é resolver byte a byte, com
+//    o range mais interno mandando.
 //
-// 1. NÃO conte "ranges aninhados com count > 0" como cobertura de bloco. O V8 só
-//    emite sub-range quando a contagem DIFERE do range que o contém, ou seja: os
-//    aninhados são os BURACOS. Aquela métrica mede a fração de buracos que não são
-//    buracos e tende a zero por construção — na primeira versão deste relatório o
-//    `cloudez-sync` apareceu com 100% de funções e 0% de blocos ao mesmo tempo, o
-//    que é o sintoma exato. O certo é resolver byte a byte, com o range mais
-//    interno mandando.
-//
-// 2. Comentário NÃO conta como linha coberta. Este repositório é densamente
-//    comentado — há arquivos com mais comentário que código — e contá-los faria a
-//    cobertura subir sozinha ao escrever documentação.
+// 2. Comentário não conta como linha coberta, para a cobertura não subir
+//    sozinha ao escrever documentação.
 
 import { readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
@@ -82,8 +72,8 @@ for (const [url, execucoes] of [...porArquivo].sort()) {
   const fonte = readFileSync(caminho, "utf8")
   const nome = caminho.split("/").slice(-2).join("/")
 
-  // conhecido[i]: o byte está dentro de alguma função. contagem[i]: maior count
-  // visto entre os processos — um caminho exercitado por QUALQUER teste conta.
+  // conhecido[i]: o byte está dentro de alguma função. contagem[i]: maior
+  // count visto entre os processos, então qualquer teste que exercite conta.
   const conhecido = new Uint8Array(fonte.length)
   const contagem = new Int32Array(fonte.length)
 
@@ -178,8 +168,5 @@ console.log(
 
 if (lacunas.length) console.log("\nlinhas nunca executadas:\n" + lacunas.join("\n"))
 
-// Sai 0 mesmo com cobertura baixa, de propósito: isto é um relatório, não um
-// portão. Um número de cobertura como critério de aprovação produz teste escrito
-// para o número — e as lacunas que este relatório apontou até agora eram todas
-// caminhos de erro que valem uma decisão humana, não um teste automático de
-// fachada.
+// Sai 0 mesmo com cobertura baixa, de propósito: isto é um relatório, não
+// um portão de CI.

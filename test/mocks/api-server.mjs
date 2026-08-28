@@ -1,26 +1,21 @@
-// API da Cloudez, falsa, para os testes de autenticacao.
-//
-// Substitui o antigo `test/mocks/curl`, um shim no PATH. Ele deixou de servir
-// quando o `cloudez-login` virou Node e passou a usar `fetch`: nao ha mais
-// processo externo para interceptar. Um servidor de verdade em porta efemera
-// resolve o mesmo problema — nenhum teste toca a rede — e ainda melhora a
-// afirmacao: o que se observa e a REQUISICAO que chegou, e nao os argumentos que
-// alguem montou para um comando.
+// API da Cloudez, falsa, para os testes de autenticacao. Um servidor real em
+// porta efemera: nenhum teste toca a rede, e o que se observa e a requisicao
+// que chegou, nao os argumentos montados para um comando.
 //
 // Uso: api-server.mjs <diretorio-de-controle>
 //
-//   <dir>/status   codigo HTTP a devolver (default 200). Lido a CADA requisicao,
-//                  para o teste poder muda-lo depois que o servidor ja subiu.
-//   <dir>/port     escrito por este processo quando esta ouvindo. E o sinal de
+//   <dir>/status   codigo HTTP a devolver (default 200). Lido a cada
+//                  requisicao, para o teste mudar depois que o servidor subiu.
+//   <dir>/port     escrito quando o servidor esta ouvindo: o sinal de
 //                  "pronto" que o bats espera, em vez de dormir um tempo fixo.
 //
-// O que ele registra no MOCK_LOG e o que os testes precisam afirmar:
+// Registrado no MOCK_LOG, para os testes afirmarem:
 //
-//   api <metodo> <path>          a rota, para conferir o endpoint
-//   Authorization: <valor>       o header cru, para conferir o esquema `Token`
-//   token_file_at_call=<...>     o conteudo do arquivo de token NO MOMENTO da
-//                                chamada. E o que permite provar que o login
-//                                grava ANTES de validar, sem precisar de um pty.
+//   api <metodo> <path>          a rota
+//   Authorization: <valor>       o header cru, para o esquema `Token`
+//   token_file_at_call=<...>     o conteudo do arquivo de token no momento da
+//                                chamada, para provar que o login grava antes
+//                                de validar, sem precisar de um pty.
 
 import { createServer } from "node:http"
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs"

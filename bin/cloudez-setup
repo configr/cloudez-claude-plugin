@@ -3,75 +3,43 @@
 //
 // Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
 // ainda não existe um. Não é erro rodar duas vezes: com config presente ele
-// reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os outros
-// environments — o root é a decisão mais destrutiva do deploy, e quem o ajustou
-// à mão não vai reescrever o mesmo valor de memória.
+// reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os
+// outros environments, que é o dado mais destrutivo do deploy.
 //
-// ─── Por que Node, e não shell ──────────────────────────────────────────────
+// Sem extensão de propósito: `cloudez-setup` é o nome que o usuário digita e
+// que o allowlist autoriza. `bin/package.json` (`{"type": "module"}`) é quem
+// informa ao Node que este arquivo é ESM.
 //
-// Este era o último adaptador em bash, e sustentava sozinho três arquivos de
-// apoio que só existiam por causa dele: `_lib.sh` (construir JSON, validar
-// FQDN), `_json.mjs` (o Node que o shell chamava para escrever JSON, com uma
-// minilinguagem de prefixos `:` e `+`) e `_yaml.sh` (achar o arquivo de config).
-// Eram 174 linhas de andaime para 95 de conteúdo.
+// Não exige token nem confirma que o domínio existe na conta: quem confirma
+// é a tool `cloudez_get_site`, chamada por `/cloudez:setup` antes de chegar
+// aqui. Rodado direto, este script escreve config para qualquer FQDN bem
+// formado, exista ou não: a ordem certa é garantida por commands/setup.md.
 //
-// Com Node 20+ como pré-requisito declarado do plugin, o andaime todo sai: o
-// objeto é escrito como objeto, e o resto é `fs`. Some junto a última limitação
-// de Windows que o README registrava — este arquivo não precisa de bash, e por
-// isso também não precisa de um par `.cmd` para ser alcançável pelo cmd.
-//
-// O arquivo NÃO tem extensão de propósito: `cloudez-setup` é o nome que o
-// usuário digita e que o allowlist autoriza. Quem informa ao Node que isto é um
-// módulo ES é o `bin/package.json` — ver a nota no cloudez-login.
-//
-// ─── O que este adaptador não faz ───────────────────────────────────────────
-//
-// Não exige token, e não confirma que o domínio existe na conta. Quem confirma é
-// a tool `cloudez_get_site` do MCP, chamada pelo /cloudez:setup antes de chegar
-// aqui — este adaptador não fala com a Cloudez, por desenho: o control plane é
-// do MCP.
-//
-// Isso significa que a checagem NÃO é invariante deste script. Rodado direto,
-// ele escreve config para qualquer FQDN bem formado, exista ou não. É uma
-// consequência aceita: a confirmação depende de rede e credencial, que são
-// justamente o que este adaptador não tem. Quem garante a ordem é o
-// commands/setup.md.
-//
-// Ele continua fora do MCP porque **escreve no projeto do usuário**. Ler a
-// máquina local nunca foi razão para ficar de fora — o servidor roda na mesma
-// máquina —, mas gravar é decisão de outra ordem, e merece a discussão de onde
-// o servidor tem permissão para escrever antes de migrar.
+// Continua fora do MCP porque escreve no projeto do usuário; ler a máquina
+// local não é motivo para isso, mas gravar nela é decisão de outra ordem.
 
 import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 
 import { die, ok } from "./_out.mjs"
 
-// ─────────────────────────────────────────────────────────────────── domínio ──
-
 /**
  * FQDN e nada mais: protocolo, caminho, querystring ou porta reprovam.
  *
- * O domínio identifica o site E vira caminho no servidor, então um valor solto
- * aqui reaparece longe da causa — como um diretório sem sentido em `~/`.
+ * O domínio identifica o site e vira caminho no servidor, então um valor
+ * solto aqui reaparece longe da causa, como um diretório sem sentido em `~/`.
  */
 function isFqdn(valor) {
   return valor.length <= 253 && /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(valor)
 }
 
-// ────────────────────────────────────────────────────────────────── config ──
-
 /**
- * Onde mora a config do projeto: o arquivo existente, ou `.cloudez.yaml` como
- * destino padrão quando não há nenhum. Serve para as duas metades da decisão.
+ * Onde mora a config do projeto: o arquivo existente, ou `.cloudez.yaml`
+ * como destino padrão quando não há nenhum.
  *
- * Houve aqui um conversor YAML→JSON com quatro parsers alternativos (yq nas duas
- * implementações incompatíveis, python3 com PyYAML, ruby). Ele saiu junto com os
- * adaptadores de deploy, e o comentário que ficou dizia que "quem lê a config
- * agora é o servidor MCP" — o que nunca foi verdade. **Ninguém** parseia este
- * arquivo em código: as tools de deploy recebem `domain` e `root` como
- * argumento, e quem lê o YAML é o modelo, com a tool Read. O que sobra aqui é
- * saber ONDE ele fica, e só.
+ * Ninguém parseia este arquivo em código: as tools de deploy recebem
+ * `domain` e `root` como argumento, e quem lê o YAML é o modelo, pela tool
+ * Read. O que sobra aqui é saber onde ele fica, e só.
  */
 function resolveConfig() {
   if (process.env.CLOUDEZ_CONFIG) return process.env.CLOUDEZ_CONFIG
@@ -82,24 +50,20 @@ function resolveConfig() {
   return ".cloudez.yaml"
 }
 
-// ─────────────────────────────────────────────────────────────────── database ──
-
 /**
- * Escreve `database:` no bloco do environment, num arquivo que JÁ EXISTE.
+ * Escreve `database:` no bloco do environment, num arquivo que já existe.
  *
- * Linha a linha, e não parse-e-reserialize. Um round-trip de YAML reescreveria o
- * arquivo inteiro — comentários, ordem das chaves, aspas, os outros environments —
- * e este arquivo guarda o `root`, que é o valor mais destrutivo do plugin. Trocar
- * uma linha é o que se pede; reescrever tudo é o que se paga.
+ * Linha a linha, e não parse-e-reserialize: um round-trip de YAML
+ * reescreveria comentários, ordem das chaves e aspas do usuário para trocar
+ * uma linha só.
  *
  * Devolve `{ status }`: "added", "updated" ou "unchanged".
  */
 function gravarDatabase(caminho, environment, valor) {
   const linhas = readFileSync(caminho, "utf8").split("\n")
 
-  // O bloco do environment: uma chave de segundo nível sob `cloudez:`. A
-  // indentação é a do arquivo, e não a que este programa gera — quem editou à mão
-  // pode ter usado outra, e reindentar seria reescrever o que não foi pedido.
+  // Indentação do arquivo, não a que este programa gera: reindentar
+  // reescreveria o que não foi pedido.
   const iEnv = linhas.findIndex((l) => new RegExp(`^\\s+${environment}:\\s*$`).test(l))
   if (iEnv === -1) {
     die("environment_not_found", `O environment '${environment}' nao esta em ${caminho}.`, {
@@ -108,8 +72,7 @@ function gravarDatabase(caminho, environment, valor) {
   }
 
   const recuo = /^(\s+)/.exec(linhas[iEnv])[1]
-  // Fim do bloco: a primeira linha com conteúdo cujo recuo não é MAIOR que o da
-  // chave do environment. Sem isso, a chave iria parar no bloco do vizinho.
+  // Fim do bloco: primeira linha cujo recuo não é maior que o da chave.
   let fim = iEnv + 1
   while (fim < linhas.length) {
     const l = linhas[fim]
@@ -119,9 +82,9 @@ function gravarDatabase(caminho, environment, valor) {
 
   const iDb = linhas.slice(iEnv + 1, fim).findIndex((l) => /^\s+database:/.test(l))
 
-  // O recuo dos IRMÃOS, e não `recuo + 2`: um arquivo escrito à mão com quatro
-  // espaços receberia a chave com seis, e o YAML sairia quebrado. Medido. O
-  // fallback só vale para um bloco sem nenhum filho, que o setup nunca gera.
+  // Recuo dos irmãos, não `recuo + 2`: um arquivo com quatro espaços
+  // receberia a chave com seis. O fallback só vale sem nenhum filho, que o
+  // setup nunca gera.
   const irmao = linhas.slice(iEnv + 1, fim).find((l) => l.trim() !== "")
   const recuoFilho = irmao ? /^(\s*)/.exec(irmao)[1] : `${recuo}  `
 
@@ -134,8 +97,7 @@ function gravarDatabase(caminho, environment, valor) {
     return { status: "updated", previous: atual }
   }
 
-  // Entra no FIM do bloco, e não logo abaixo da chave: assim ele fica ao lado de
-  // `domain` e `root` em vez de na frente deles.
+  // Entra no fim do bloco, ao lado de `domain` e `root`, não à frente deles.
   let ultima = fim
   while (ultima > iEnv + 1 && linhas[ultima - 1].trim() === "") ultima--
   linhas.splice(ultima, 0, `${recuoFilho}database: ${valor}`)
@@ -143,19 +105,13 @@ function gravarDatabase(caminho, environment, valor) {
   return { status: "added" }
 }
 
-// ────────────────────────────────────────────────────────────────── gitignore ──
-
 /**
  * Garante `.cloudez/` no .gitignore: "updated" | "already" | "skipped".
  *
- * O estado dos deploys mora em `.cloudez/` e não deveria ir para o repositório.
- * É feito aqui porque é o passo que todo mundo esquece, e esquecer significa
- * commitar estado de servidor.
- *
- * Quem responde se há repositório é o próprio git, e não uma busca por `.git`
- * subindo os diretórios: em worktree e submódulo o `.git` é um arquivo, e
- * `GIT_DIR` no ambiente muda a resposta. Fora de um repositório o comando falha,
- * e "skipped" é resultado, não erro.
+ * Quem responde se há repositório é o próprio git, não uma busca por `.git`
+ * subindo diretórios: em worktree e submódulo `.git` é um arquivo, e
+ * `GIT_DIR` muda a resposta. Fora de um repositório, "skipped" é resultado,
+ * não erro.
  */
 function garantirGitignore() {
   try {
@@ -178,16 +134,12 @@ function garantirGitignore() {
   return "updated"
 }
 
-// ───────────────────────────────────────────────────────────────── entrada ──
-
 const argv = process.argv.slice(2)
 
 /**
- * Onde o banco de produção mora. Fica no `.cloudez.yaml` porque é uma decisão do
- * PROJETO, tomada uma vez com o usuário, e relida por todo passo que vem depois —
- * o backup, um deploy futuro, outra sessão. Derivar do docker-compose seria
- * inferência: `profiles: ["dev"]` no `db` SUGERE banco gerenciado, e sugestão não
- * é registro.
+ * Onde o banco de produção mora. Fica no `.cloudez.yaml`, decisão do
+ * projeto relida por todo passo seguinte, em vez de inferida do
+ * docker-compose (`profiles: ["dev"]` sugere, mas sugestão não é registro).
  */
 const BANCOS = ["cloudez", "docker"]
 
@@ -246,25 +198,13 @@ if (existsSync(target)) {
   ok({ ...gravarDatabase(target, environment, database), path: target, domain, environment, database })
 }
 
-// Só o domínio (e o `database`, quando informado). Duas coisas saíram daqui pela
-// MESMA razão, e ela é a regra deste arquivo: cópia de dado derivável num arquivo
-// versionado envelhece.
+// Só o domínio e o database: root e ssh são deriváveis pelas tools a cada
+// deploy, e cópia de dado derivável num arquivo versionado envelhece (a
+// Cloudez renomeia o diretório quando o domínio muda). Config antiga que já
+// tem `root` segue valendo, e vence o derivado.
 //
-// O destino ssh vem do `cloudez_get_site` a cada deploy — a Cloudez pode mover o
-// site de servidor, e um host escrito continuaria apontando para o antigo.
-//
-// O `root` é sempre `~/<domain>/www/claude`, e as tools o derivam do domínio. Ele
-// envelhecia de um jeito ainda mais concreto: a Cloudez RENOMEIA o diretório
-// quando o domínio do site muda, e o valor escrito passaria a apontar para um
-// caminho que deixou de existir. Config que já o tem segue valendo — as tools o
-// aceitam, e ele vence o derivado.
-//
-// O arquivo gerado não leva comentário nenhum: é config de projeto, versionada e
-// lida por quem já sabe o que está fazendo. O que os comentários explicavam —
-// para onde o deploy publica, e que o document root no painel precisa apontar
-// para <root>/current — é trabalho do /cloudez:setup dizer na conversa, onde o
-// usuário ainda pode perguntar. No arquivo, viravam texto que ninguém relê e que
-// envelhece sozinho.
+// O arquivo gerado não leva comentário: é config de projeto lida por quem já
+// sabe o que está fazendo, e o /cloudez:setup explica o resto na conversa.
 const linhaDb = database ? `    database: ${database}\n` : ""
 writeFileSync(
   target,

@@ -4,28 +4,17 @@
 //
 // Envia o build para o diretório de release criado pelo cloudez_begin_deploy.
 //
-// Este arquivo já foi duas coisas antes de ser um adaptador: um binário em Go
-// (`cmd/sync`) e, aqui, o launcher POSIX que escolhia o binário da plataforma. O
-// Go existia por uma razão que deixou de valer — distribuir um executável que não
-// depende de runtime — no dia em que o Node 20+ virou pré-requisito assumido do
-// plugin. O servidor MCP é um bundle Node que sobe em toda invocação: sem Node
-// não há plugin, e um transporte nativo não salvava nada.
+// Já foi um binário em Go, e antes disso o launcher POSIX que escolhia o
+// binário da plataforma; os dois saíram quando Node 20+ virou pré-requisito
+// do plugin, eliminando 15 MB de binários versionados.
 //
-// O que a troca fechou, além de 15 MB de binários versionados: o arquivo de estado
-// tem dois escritores, e enquanto este lado foi Go cada um mantinha o schema por
-// conta própria. Um round-trip pela struct apagava em silêncio o campo que ela não
-// conhecia — foi assim que o `domain` gravado pelo begin sumia aqui e o
-// `compose_up` falhava depois, longe da causa. Agora os dois lados importam as
-// MESMAS funções de `mcp/cloudez-state.mjs`, e o round-trip é de objeto JSON
-// inteiro.
-//
-// O par deste arquivo é o `.cmd` ao lado, para quem chama pelo cmd ou PowerShell,
-// onde o shebang não vale nada.
+// O par deste arquivo é o `.cmd` ao lado, para quem chama pelo cmd ou
+// PowerShell, onde o shebang não vale nada.
 
 import { readdirSync, statSync } from "node:fs"
 
-// O import é do BUNDLE de biblioteca, não do servidor: `mcp/cloudez-mcp.mjs` sobe
-// um transporte stdio ao ser importado, e penduraria este processo.
+// Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
+// subiria um transporte stdio e penduraria este processo.
 import { loadState, saveState } from "../mcp/cloudez-state.mjs"
 
 import { die, ok } from "./_out.mjs"
@@ -35,16 +24,15 @@ import { transferir } from "./_transfer.mjs"
 const args = process.argv.slice(2)
 
 if (args.length < 2) {
-  // Uso vai em texto puro, e não no envelope JSON de erro: quem chega aqui errou a
-  // linha de comando, e ainda não há contrato nenhum estabelecido para ele ler.
+  // Uso em texto puro, não no envelope JSON: erro de linha de comando ainda
+  // não tem contrato estabelecido para ler.
   process.stderr.write("uso: cloudez-sync <deploy_id> <diretorio_local>\n")
   process.stderr.write("     cloudez-sync --hash-only <diretorio_local>\n")
   process.exit(2)
 }
 
-// --hash-only roda ANTES do begin_deploy, e por isso não recebe deploy_id: quem o
-// chama está justamente formando o release_id que ainda não existe. Não toca a
-// rede nem o estado — lê o diretório e imprime o resumo.
+// Roda antes do begin_deploy, formando o release_id que ainda não existe;
+// não toca rede nem estado, só lê o diretório e imprime o resumo.
 if (args[0] === "--hash-only") {
   apenasHash(args[1])
 } else {
@@ -52,11 +40,8 @@ if (args[0] === "--hash-only") {
 }
 
 /**
- * As duas recusas sobre o diretório publicado, aplicadas nos DOIS modos.
- *
- * Valem tanto para o envio quanto para o hash: hashear um diretório vazio
- * devolveria um sha válido para conteúdo nenhum, e o deploy só descobriria isso
- * depois de registrar a release.
+ * As duas recusas sobre o diretório publicado, aplicadas nos dois modos:
+ * hashear um diretório vazio devolveria um sha válido para conteúdo nenhum.
  */
 function conferirDiretorio(dir) {
   let info = null
@@ -88,20 +73,14 @@ function apenasHash(dir) {
   try {
     h = hashPayload(dir)
   } catch (e) {
-    // Nome que o transporte não sabe carregar é recusa própria, e não falha de
-    // leitura: o arquivo foi lido sem problema — ele é que não chegaria do outro
-    // lado. Dizer `hash_failed` mandaria procurar defeito de disco.
+    // Nome que o transporte não sabe carregar é recusa própria, não falha de
+    // leitura: dizer `hash_failed` mandaria procurar defeito de disco.
     if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
     die("hash_failed", `Não foi possível ler '${dir}' por inteiro: ${e.message}`)
   }
 
-  // Um diretório sem nada publicável passa pelo conferirDiretorio (não está
-  // vazio) e chega aqui com zero arquivos. Enviar isso criaria uma release vazia
-  // com identificador de aparência normal.
-  //
-  // A causa mudou de uma para duas quando o sync passou a ler `.gitignore` e
-  // `.cloudezignore`: pode ser um diretório só com `.git`, ou um padrão amplo
-  // demais. Dizer qual das duas é o que evita procurar no lugar errado.
+  // conferirDiretorio só garante que o diretório não está vazio; um dir só
+  // com .git ou com um .gitignore amplo demais chega aqui com zero arquivos.
   if (h.files === 0) {
     const fontes = h.ignored?.sources ?? []
     const porque = fontes.length > 0
@@ -118,10 +97,8 @@ async function sincronizar(deployId, dir) {
   try {
     dep = loadState(deployId)
   } catch (e) {
-    // O `loadState` levanta o erro do MCP (ToolError), que carrega o corpo já no
-    // formato do contrato. Reaproveitar a mensagem dele evita as duas pontas
-    // divergirem sobre o que dizer — e a de lá é a atualizada: o `begin` virou
-    // tool, não é mais um adaptador que se "roda".
+    // loadState levanta o erro do MCP (ToolError), já no formato do
+    // contrato; reaproveitar a mensagem evita as duas pontas divergirem.
     const doMcp = e?.body?.error?.message
     die("deploy_not_found", doMcp ?? `deploy_id '${deployId}' desconhecido. Chame cloudez_begin_deploy primeiro.`)
   }
@@ -132,17 +109,15 @@ async function sincronizar(deployId, dir) {
   try {
     resultado = await transferir(dep, dir)
   } catch (e) {
-    // As duas recusas acontecem ANTES de o tar existir, então nada foi enviado e o
-    // deploy fica exatamente onde estava.
+    // As duas recusas acontecem antes de o tar existir: nada foi enviado.
     if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
     if (e.code === "build_output_empty") die("build_output_empty", e.message)
     throw e
   }
   const { stats, logs, erro } = resultado
   if (erro) {
-    // retryable porque a causa mais comum é rede ou chave recém-autorizada, e o
-    // deploy fica exatamente onde estava: o estado só avança quando o transporte
-    // confirma. Sem isso o finalize ativaria uma release incompleta.
+    // retryable porque a causa mais comum é rede ou chave recém-autorizada;
+    // o estado só avança quando o transporte confirma.
     die("transfer_failed", `Falha ao enviar '${dir}' para ${dep.ssh.host}.`, { logs, retryable: true })
   }
 

@@ -1,21 +1,13 @@
-// A decisão do guard-rail de escrita, separada do processo que a aplica.
-//
-// Separada para poder ser testada como função: o entrypoint lê stdin e chama
-// `process.exit`, e um teste que passasse por ele estaria exercitando o adaptador
-// para verificar a regra. É a mesma divisão de `bin/_payload.mjs` e
-// `bin/cloudez-sync`.
+// Decisão do guard-rail de escrita, separada do processo que a aplica, para
+// poder ser testada como função em vez de exercitar o adaptador.
 
 import { createHash } from "node:crypto"
 
 /**
- * Os hosts REMOTOS que este comando escreveria. Vazio significa "pode passar".
+ * Os hosts remotos que este comando escreveria. Vazio significa "pode passar".
  *
- * O critério é o VERBO, não o conteúdo: num `curl`, `-d` já implica POST e `-F`
- * é upload. Procurar por "parece dado de teste" seria adivinhação — a regra é
- * mecânica de propósito, porque o que falhou antes foi justamente o julgamento.
- *
- * Leitura passa. `GET` e `HEAD` não mudam nada do outro lado, e conferir um
- * status ou ler uma listagem é passo legítimo e frequente do deploy.
+ * O critério é o verbo, não o conteúdo: num `curl`, `-d` já implica POST e
+ * `-F` é upload. Leitura (GET, HEAD) passa sempre.
  */
 export function escritaRemota(cmd) {
   if (typeof cmd !== "string") return []
@@ -32,20 +24,15 @@ export function escritaRemota(cmd) {
 /**
  * Quebra a linha nos operadores do shell.
  *
- * Sem isto, a análise varria o comando INTEIRO e qualquer flag terminada em d, F
- * ou T contava como intenção de escrita — mesmo vindo de outro programa do
- * pipeline. `curl -s <url> | grep -F erro` era bloqueado, e `cut -d` e `xargs -d`
- * também: leitura seguida de filtro comum, que é metade do uso legítimo de curl.
- *
- * A quebra é textual e não entende aspas, então um `|` dentro de string vira
- * fronteira. Isso só pode PARTIR um trecho, nunca juntar dois — e um trecho
- * partido que ainda contenha `curl` e verbo de escrita continua sendo bloqueado.
+ * Sem isto, uma flag `-d` de `cut` ou `xargs` no mesmo pipeline de um `curl`
+ * de leitura contava como intenção de escrita. A quebra é textual e não
+ * entende aspas, mas só pode partir um trecho em dois, nunca juntar dois.
  */
 function segmentos(cmd) {
   return cmd.split(/\|\||&&|[|;\n]/)
 }
 
-/** Verbo de escrita NESTE trecho. `-d` já é POST no curl, `-F` é upload. */
+/** Verbo de escrita neste trecho. `-d` já é POST no curl, `-F` é upload. */
 function escreve(t) {
   return (
     /(^|\s)-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(t) ||
@@ -70,11 +57,8 @@ function hosts(t) {
 }
 
 /**
- * Endereço da própria máquina.
- *
- * O `/cloudez:dev` sobe a aplicação em `localhost` justamente para ser
- * exercitada à vontade — barrar ali tiraria o valor daquele comando sem proteger
- * nada.
+ * Endereço da própria máquina. O `/cloudez:dev` sobe a aplicação em
+ * `localhost` para ser exercitada à vontade; barrar ali não protegeria nada.
  */
 export function local(host) {
   return (
@@ -89,10 +73,8 @@ export function local(host) {
 }
 
 /**
- * O comando INTEIRO, e não só o host.
- *
- * A aprovação é por comando: aprovar um `POST /api/uploads` não pode liberar um
- * `DELETE /api/uploads/tudo` para o mesmo domínio.
+ * Hash do comando inteiro, não só do host: aprovar um `POST /api/uploads`
+ * não pode liberar um `DELETE /api/uploads/tudo` do mesmo domínio.
  */
 export function hash(cmd) {
   return createHash("sha256").update(cmd, "utf8").digest("hex")
