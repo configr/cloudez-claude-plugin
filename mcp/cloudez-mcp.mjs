@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cloudez-mcp 0.2.18 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.19 — gerado por 'npm run bundle'. Nao edite.
 import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27022,6 +27022,10 @@ function companyThemePath(host) {
   const template = process.env.CLOUDEZ_API_COMPANY_THEME_PATH || "/v3/company/theme/{host}/";
   return template.replace("{host}", encodeURIComponent(host));
 }
+function cloudSetupPath() {
+  return process.env.CLOUDEZ_API_CLOUD_SETUP_PATH || "/v3/cloud/setup/";
+}
+var TRIAL_LIFESPAN_MONTHS = 1;
 function signupPath() {
   return process.env.CLOUDEZ_API_SIGNUP_PATH || "/auth/signup/";
 }
@@ -28997,11 +29001,13 @@ async function panelInfo(panelHost) {
       hint: "Sem o c\xF3digo da empresa n\xE3o h\xE1 onde criar a conta. Confira o endere\xE7o com o usu\xE1rio."
     });
   }
+  const planId = Number(tema?.trial_ia_plan_id);
   return {
     panel_host: host,
     company_name: typeof tema?.name === "string" ? tema.name : host,
     company_code: code,
-    register_enabled: tema?.has_disabled_register !== true
+    register_enabled: tema?.has_disabled_register !== true,
+    ...Number.isInteger(planId) && planId > 0 ? { trial_ia_plan_id: planId } : {}
   };
 }
 function normalizeEmail(entrada) {
@@ -29212,6 +29218,26 @@ async function mandarEmailDeSenha() {
       warning: "O telefone foi verificado, mas o e-mail para definir a senha n\xE3o saiu. Pe\xE7a ao usu\xE1rio para usar 'esqueci minha senha' no painel: a conta foi criada com uma senha que ningu\xE9m conhece."
     };
   }
+}
+
+// src/cloud.ts
+async function setupTrialCloud(panelHost) {
+  const painel = await panelInfo(panelHost);
+  if (!painel.trial_ia_plan_id) {
+    throw new ToolError(
+      "trial_plan_unavailable",
+      `${painel.company_name} n\xE3o tem plano trial configurado (\`trial_ia_plan_id\` ausente).`,
+      { hint: "Diga ao usu\xE1rio para contratar o teste manualmente pelo painel; esta tool n\xE3o tem o que provisionar." }
+    );
+  }
+  const criado = await apiPost(cloudSetupPath(), {
+    plan_type: painel.trial_ia_plan_id,
+    lifespan_months: TRIAL_LIFESPAN_MONTHS
+  });
+  return {
+    cloud_created: true,
+    ...criado && typeof criado === "object" ? { cloud: criado } : {}
+  };
 }
 
 // src/index.ts
@@ -29729,6 +29755,24 @@ server.registerTool(
   async ({ phone_id, code }) => {
     try {
       return okResult({ ...await confirmPhone(phone_id, code) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_setup_trial_cloud",
+  {
+    title: "Provisionar o cloud trial gratuito da conta",
+    description: "Contrata o cloud de teste gratuito da conta rec\xE9m-cadastrada, o mesmo que o usu\xE1rio contrataria manualmente no painel em 'iniciar o teste'. Chame uma vez, logo depois de cloudez_signup (ou de cloudez_confirm_phone, quando o cadastro tiver pedido SMS): uma conta nova n\xE3o tem cloud nenhuma, e sem isso o /cloudez:setup falharia num ponto bem menos claro que aqui. O plano trial \xE9 lido do MESMO panel_host do cadastro \u2014 \xE9 por empresa, e pode faltar se a revenda n\xE3o tiver um configurado (trial_plan_unavailable). N\xC3O chame se a conta j\xE1 puder ter uma cloud \u2014 esta tool n\xE3o confere isso antes de provisionar, e chamar de novo cria uma SEGUNDA. N\xE3o \xE9 idempotente.",
+    inputSchema: object({
+      panel_host: string2().describe("Host do painel, o mesmo passado a cloudez_signup (cloud.configr.com)")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+  },
+  async ({ panel_host }) => {
+    try {
+      return okResult({ ...await setupTrialCloud(panel_host) });
     } catch (err) {
       return errorResult(err);
     }

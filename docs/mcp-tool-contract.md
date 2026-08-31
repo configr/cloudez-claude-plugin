@@ -4,7 +4,7 @@ Especificação da interface que o servidor MCP (repositório separado) deve exp
 para este plugin. Este documento é a fonte da verdade do contrato: o plugin é
 escrito contra ele, e o servidor MCP o implementa.
 
-Status: **implementado**. As treze tools descritas existem no servidor e são
+Status: **implementado**. As dezenove tools descritas existem no servidor e são
 chamadas pelos comandos do plugin; o que segue em aberto está na seção 7.
 
 Boa parte do que está escrito aqui foi aprendido apanhando — endpoints
@@ -1120,7 +1120,8 @@ contra a API da Cloudez.
   "panel_host": "cloud.configr.com",
   "company_name": "Configr",
   "company_code": "cfg",
-  "register_enabled": true
+  "register_enabled": true,
+  "trial_ia_plan_id": 51799   // ausente quando a revenda não tem plano trial configurado
 }
 ```
 
@@ -1132,6 +1133,12 @@ os sites fora de quem atendeu o usuário.
 
 `register_enabled: false` é a revenda que desligou o cadastro self-service. Não é
 erro: é a resposta, e o caminho passa a ser procurar a revenda.
+
+**`trial_ia_plan_id` é o plano que `cloudez_setup_trial_cloud` (§3.19) usa.**
+Confirmado contra a API real, no mesmo endpoint `company/theme`. É por empresa —
+a mesma chamada que resolve `company_code` também resolve o plano —, então não
+existe versão fixa dele: uma revenda pode não ter plano trial nenhum, e aí o
+campo simplesmente não vem.
 
 ---
 
@@ -1267,7 +1274,63 @@ desfaz; virar erro apagaria um fato observado. O retorno traz
 
 ---
 
-### 3.19 Fora do escopo, por enquanto
+### 3.19 `cloudez_setup_trial_cloud` — **mutating**
+
+Contrata o cloud de teste gratuito da conta autenticada — o que antes era um
+passo manual no painel ("iniciar o teste"). Chamada uma vez, logo depois de
+`cloudez_confirm_phone`, para a conta recém-criada não ficar sem onde hospedar:
+sem nenhuma cloud, o `/cloudez:setup` falharia num ponto bem menos claro que
+este.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "panel_host": { "type": "string", "description": "O mesmo panel_host passado a cloudez_signup" }
+  },
+  "required": ["panel_host"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "cloud_created": true,
+  "cloud": { "id": 12, "fqdn": "srv-12.cloudez.io" }   // forma não confirmada, ver abaixo
+}
+```
+
+**Endpoint:**
+
+```
+POST /v3/cloud/setup/
+{ "plan_type": 51799, "lifespan_months": 1 }
+```
+
+Autenticado como o resto da API v3, com `Authorization: Token <token>` — **não**
+o `jwt` do exemplo original desta rota, que era da troca de credencial do
+cadastro. Confirmado contra a API real: o Token persistido funciona.
+
+**`plan_type` vem de `cloudez_panel_info` (§3.15), lido de novo a cada
+chamada** — a tool chama `panelInfo(panel_host)` internamente e usa o
+`trial_ia_plan_id` que ele devolver. Não é fixo nem sobreponível por ambiente:
+é POR EMPRESA, a mesma chamada que resolve `company_code`. Sem esse campo no
+painel — revenda sem plano trial configurado — a tool falha com
+`trial_plan_unavailable` **antes** de tentar o POST.
+
+**O corpo de retorno não foi observado além do plano trial confirmado**, então
+a tool não extrai campos nomeados — o que a API devolver sai inteiro em
+`cloud`, e a tool não afirma que `id` ou `fqdn` vão sempre estar lá.
+
+**Não é idempotente, e a tool não confere se a conta já tem cloud antes de
+provisionar.** Chamar duas vezes cria duas clouds. A descrição da tool instrui
+quem chama a rodá-la uma vez só, logo após o cadastro.
+
+---
+
+### 3.20 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:
@@ -1335,6 +1398,7 @@ Códigos previstos:
 | `already_authenticated` | não | já há token válido no disco; cadastrar sobrescreveria a conta atual |
 | `sms_code_invalid` | não | os seis dígitos não batem com o que foi enviado |
 | `phone_not_verified` | não | a API aceitou o código e a releitura diz que o telefone segue sem verificação |
+| `trial_plan_unavailable` | não | o painel não tem `trial_ia_plan_id`; a revenda não configurou plano trial |
 
 O campo `retryable` importa: sem ele o modelo ou desiste de erro transitório ou
 insiste em erro permanente.

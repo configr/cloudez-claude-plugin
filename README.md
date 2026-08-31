@@ -345,13 +345,19 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
       `cloudez_compose_build` + `cloudez_compose_up` e fecha com
       `cloudez_health_check`
 - [x] Cadastro pelo Claude: `cloudez_panel_info`, `cloudez_signup`,
-      `cloudez_resend_phone_code` e `cloudez_confirm_phone`. Quem não tem conta
-      cria uma sem sair da conversa, com confirmação por SMS, e o token nasce
+      `cloudez_resend_phone_code` e `cloudez_confirm_phone`. A conta nasce sempre
+      na Configr, sem perguntar por revenda; quem tem conta numa revenda entra
+      pelo caminho de quem já tem conta. Confirmação por SMS, e o token nasce
       dentro do MCP — a senha do cadastro é aleatória e descartada, e o usuário
       define a dele pelo e-mail de recuperação. **Não foi exercitado contra a API
       real:** os endpoints e o formato dos erros foram lidos no código da API
       (`ApiRegisterSerializer`, `UserPhoneViewSet`, `CompanyThemeViewSet`), e a
       suíte cobre o fluxo contra uma API falsa
+- [x] `cloudez_setup_trial_cloud` contrata o cloud de teste grátis da conta logo
+      após o cadastro, no lugar do antigo passo manual de "iniciar o teste" no
+      painel. **Este endpoint foi confirmado contra a API real** (autenticação
+      por `Token`, igual ao resto da v3) — diferente do restante do cadastro
+      acima
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
       `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).
@@ -384,13 +390,15 @@ O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
 o domínio em vez de presumir um, e confere com `cloudez_panel_info` antes de
 mandar o usuário para lá.
 
-**Quem não tem conta cria pelo próprio Claude.** O `/cloudez:login` pergunta
-nome, e-mail e telefone, chama `cloudez_signup`, confirma o SMS de ativação e
-grava o token — sem passar pelo `cloudez-login`, porque o token nasce dentro do
-MCP e nunca entra na conversa. A senha da conta é aleatória e descartada; quem
-define a dele é o usuário, pelo e-mail que chega ao fim da validação. O contrato
-dessas tools está em [`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md),
-seções 3.15 a 3.18.
+**Quem não tem conta cria pelo próprio Claude, sempre na Configr.** O
+`/cloudez:login` não pergunta por revenda — pergunta nome, e-mail e telefone,
+chama `cloudez_signup`, confirma o SMS de ativação e grava o token — sem passar
+pelo `cloudez-login`, porque o token nasce dentro do MCP e nunca entra na
+conversa. A senha da conta é aleatória e descartada; quem define a dele é o
+usuário, pelo e-mail que chega ao fim da validação. Em seguida, o
+`cloudez_setup_trial_cloud` contrata o cloud de teste grátis da conta — sem
+isso ela nasceria sem onde hospedar. O contrato dessas tools está em
+[`docs/mcp-tool-contract.md`](docs/mcp-tool-contract.md), seções 3.15 a 3.19.
 
 O `cloudez-login` só **coleta e grava**. Quem responde se você está autenticado é
 a tool `cloudez_auth_status` do MCP, porque é o MCP que usa o token contra a API —

@@ -1,6 +1,6 @@
 ---
 description: Verifica se há um token da Cloudez salvo e, se não houver, cria a conta ou conduz o usuário até o token no painel
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_setup_trial_cloud, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
 ---
 
 Chame a tool `cloudez_auth_status`. Ela é quem responde pelo estado da
@@ -67,27 +67,10 @@ ainda falta rodar alguma coisa.
 
 ## Se não tem conta
 
-**Pergunte se ele chegou por alguma revenda** — e deixe claro que "não" e "não
-sei" são respostas válidas. Não insista: quem não sabe, não sabe, e o padrão
-resolve.
-
-Isso não é formalidade. A Cloudez é white-label, e cadastrar na Configr quem foi
-atendido por uma revenda cria a conta **na empresa errada**: os sites nasceriam
-fora de quem o trouxe, e o token de um painel não vale no outro.
-
-| A resposta | O painel |
-|---|---|
-| veio por uma revenda | **peça o domínio dela** |
-| não veio, ou não sabe | `cloud.configr.com` — a Configr é o padrão |
-
-Com o host decidido, chame `cloudez_panel_info`. Ela resolve a empresa e diz se
-o cadastro está aberto:
-
-- **`register_enabled: false`** — essa revenda não abre cadastro self-service.
-  Pare aqui e diga para ele procurar a revenda. Não tente outro painel: criar a
-  conta na Configr seria criá-la na empresa errada;
-- **`panel_not_found`** — o endereço está errado. Peça de novo;
-- **`register_enabled: true`** — siga.
+**A conta nasce sempre na Configr**, em `cloud.configr.com`. Não pergunte se
+ele veio por alguma revenda, e não peça o domínio de painel nenhum aqui: quem
+precisar de conta numa revenda entra pelo ramo "Se tem conta", com o painel
+dela.
 
 ### Colete os dados, um por vez
 
@@ -98,8 +81,8 @@ falta justo o que trava o cadastro.
 **Não use `AskUserQuestion` para esses três.** Ela exige de 2 a 4 opções por
 pergunta, e nome, e-mail e telefone são texto livre: a chamada é recusada pelo
 schema com `Invalid tool parameters`, e você perde um turno até cair na pergunta
-em texto. Ela serve nas escolhas de verdade deste comando — "já tem conta?", "veio
-por revenda?", "os dados estão certos?" —, e só nelas.
+em texto. Ela serve nas escolhas de verdade deste comando — "já tem conta?", "os
+dados estão certos?" —, e só nelas.
 
 Não peça senha, e não aceite se ele oferecer. O cadastro não tem esse campo: a
 conta nasce com uma senha aleatória que ninguém conhece, e ele define a dele pelo
@@ -117,20 +100,21 @@ Se ele corrigir alguma coisa, refaça a confirmação com o valor novo.
 
 ### Cadastre
 
-Chame `cloudez_signup` com `panel_host`, `full_name`, `email` e `phone`. Ela cria
-a conta, guarda o token desta máquina e dispara o SMS. **Não rode
-`cloudez-login`, e não vá para o passo 2**: o token já foi salvo pela tool, e não
-passou por aqui em momento nenhum.
+Chame `cloudez_signup` com `panel_host: "cloud.configr.com"`, `full_name`,
+`email` e `phone`. Ela cria a conta, guarda o token desta máquina e dispara o
+SMS. **Não rode `cloudez-login`, e não vá para o passo 2**: o token já foi
+salvo pela tool, e não passou por aqui em momento nenhum.
 
 Quando falhar, o código diz o que fazer:
 
 | `code` | O que fazer |
 |---|---|
-| `email_already_registered` | Ele tinha conta e não sabia. Volte ao ramo "Se tem conta". **Não diga que a conta foi criada agora** — ela é anterior, e nenhum SMS saiu desta tentativa |
+| `email_already_registered` | Ele tinha conta e não sabia. Volte ao ramo "Se tem conta", com `cloud.configr.com`. **Não diga que a conta foi criada agora** — ela é anterior, e nenhum SMS saiu desta tentativa |
 | `phone_already_used` | A Cloudez aceita um telefone por conta. Peça outro número |
 | `signup_rejected` | Mostre a recusa, corrija o campo apontado e chame de novo. A conta **não** foi criada |
 | `signup_incomplete` | A conta **foi** criada. **Não chame de novo** — leia abaixo |
 | `already_authenticated` | Apareceu um token válido no meio do caminho. Pare e confirme com o usuário antes de trocar de conta |
+| `panel_not_found` ou `register_disabled` | Inesperado para `cloud.configr.com` — não é a revenda errada, é falha da própria Configr. Mostre o erro ao usuário em vez de tentar outro painel |
 
 O `signup_incomplete` é o único que engana. Ele parece um erro de "não deu
 certo", mas significa que a conta existe e uma etapa posterior falhou. Repetir só
@@ -152,22 +136,28 @@ Cloudez aceitou enviar, e a entrega ela não vê.
 
 ### Feche
 
-Com `phone_verified: true`, a conta está ativa e o token já está salvo. Diga, nesta
-ordem:
+Com `phone_verified: true`, a conta está ativa e o token já está salvo. Chame
+`cloudez_setup_trial_cloud` com `panel_host: "cloud.configr.com"` — o mesmo do
+cadastro — para contratar o cloud de teste grátis da conta, o que antes era
+"iniciar o teste" no painel.
+
+**Não repita a chamada se ela falhar.** Não é idempotente: se o provisionamento
+tiver ocorrido apesar do erro reportado, uma segunda chamada cria um SEGUNDO
+cloud. `trial_plan_unavailable` é diferente — não chegou a provisionar nada,
+porque a Configr não tem plano trial configurado — mas o tratamento é o mesmo:
+siga em frente, o item 3 abaixo cobre os dois casos.
+
+Diga, nesta ordem:
 
 1. a conta foi criada na empresa que veio em `company_name`;
 2. um e-mail para **definir a senha** foi enviado — é assim que ele entra no
    painel, porque a senha do cadastro é aleatória e ninguém a conhece. Se
    `password_email_sent` vier `false`, diga que falta esse passo e que ele usa o
    "esqueci minha senha" no painel;
-3. **ao entrar no painel ele vai receber um segundo código, por e-mail.** Toda
-   conta nova nasce com 2FA de e-mail ligado, e o login pede esse código. Avise
-   junto com o item anterior: são dois e-mails diferentes, no mesmo endereço, e
-   quem não espera o segundo acha que a senha nova não funcionou. Isso não afeta
-   o token que já está salvo aqui — o cadastro não passa pelo login;
-4. **ainda falta um servidor.** A conta é nova e não tem cloud nenhuma; deploy
-   agora falharia num ponto bem menos claro que aqui. Mande-o iniciar o teste no
-   painel, em `https://<panel_host>`.
+3. se `cloudez_setup_trial_cloud` teve sucesso, **a conta já tem um servidor de
+   teste grátis** — ele não precisa contratar nada no painel. Se falhou, diga
+   que falta esse passo e que ele contrata o teste em
+   `https://cloud.configr.com`.
 
 # 2. Capturar o token
 
