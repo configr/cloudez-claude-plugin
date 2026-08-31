@@ -1,7 +1,7 @@
 ---
 description: Volta o site para uma release anterior, com verificação de que ele voltou ao ar
 argument-hint: "[environment] [release_id]"
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_health_check, Read, Grep, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_health_check, Read, Grep, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, a release

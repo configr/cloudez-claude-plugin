@@ -1,7 +1,7 @@
 ---
 description: Faz deploy de um site para a Cloudez, com ativação atômica da release e rollback
 argument-hint: "[environment] [diretório]"
-allowed-tools: mcp__Claude_Browser__preview_start, mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_check_dns, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
+allowed-tools: mcp__Claude_Browser__preview_start, mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_health_check, mcp__cloudez__cloudez_check_dns, mcp__cloudez__cloudez_begin_deploy, mcp__cloudez__cloudez_finalize_deploy, mcp__cloudez__cloudez_compose_build, mcp__cloudez__cloudez_compose_up, mcp__cloudez__cloudez_list_releases, mcp__cloudez__cloudez_rollback, Bash(cloudez-sync:*), Bash(git:*), Bash(npm:*), Bash(pnpm:*), Bash(yarn:*), Read, AskUserQuestion
 ---
 
 Argumentos recebidos: `$ARGUMENTS` — o environment e, opcionalmente, o diretório
@@ -35,14 +35,29 @@ e eles não são seus para inventar.
 Nada aqui muda nada — são as três leituras que dizem o que publicar, para onde, e
 como o site estava antes. Se alguma falhar, o deploy não começou.
 
-## 1. O alvo: quem, qual environment, qual site
+## 0. Autenticação, antes de qualquer coisa
 
-### Autenticação
+Chame `cloudez_auth_status`. É a primeira coisa que este comando faz, antes de ler
+o `.cloudez.yaml`, antes de escolher environment, antes de qualquer pergunta.
 
-Chame `cloudez_auth_status`. Se vier `authenticated: false`, **pare** e mande o
-usuário rodar `/cloudez:login`. Nunca peça o token na conversa, e não conduza o
-login daqui: o procedimento dele mora em um lugar só, e é lá que estão as
-permissões que ele precisa — este comando não roda o `cloudez-login`.
+**`authenticated: false`** — **pare aqui, de verdade.** Não pergunte o
+environment, não peça confirmação de produção, não adiante nenhum passo da
+seção 1 "para ganhar tempo". Já aconteceu de o comando anunciar que ia parar,
+seguir perguntando, arrancar um "sim, produção" do usuário e só então repetir que
+faltava autenticar — duas perguntas para nada, e uma confirmação de produção dada
+antes de existir deploy possível.
+
+Conduza o `/cloudez:login` e só volte quando `cloudez_auth_status` responder
+`authenticated: true`. Ele pergunta se o usuário tem conta e ramifica: quem **não**
+tem é cadastrado por aqui mesmo, pelas tools de cadastro, sem nada para rodar no
+terminal; quem **tem** precisa pegar o token no painel, e aí o comando é dele —
+peça para rodar `/cloudez:login`, porque a captura do token exige o
+`cloudez-login` e o clipboard, que este comando não tem permissão para tocar.
+
+Nunca peça o token na conversa. O procedimento completo mora em `commands/login.md`
+e é lá que ele deve ser lido ou alterado — não o reescreva aqui.
+
+## 1. O alvo: qual environment, qual site
 
 ### Environment
 
