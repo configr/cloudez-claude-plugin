@@ -91,9 +91,15 @@ o cadastro está aberto:
 
 ### Colete os dados, um por vez
 
-Use `AskUserQuestion`, **uma pergunta por caixa**, nesta ordem: nome completo,
+Pergunte **em texto, uma pergunta por mensagem**, nesta ordem: nome completo,
 e-mail, telefone com DDD. Três campos numa mensagem só voltam pela metade, e aí
 falta justo o que trava o cadastro.
+
+**Não use `AskUserQuestion` para esses três.** Ela exige de 2 a 4 opções por
+pergunta, e nome, e-mail e telefone são texto livre: a chamada é recusada pelo
+schema com `Invalid tool parameters`, e você perde um turno até cair na pergunta
+em texto. Ela serve nas escolhas de verdade deste comando — "já tem conta?", "veio
+por revenda?", "os dados estão certos?" —, e só nelas.
 
 Não peça senha, e não aceite se ele oferecer. O cadastro não tem esse campo: a
 conta nasce com uma senha aleatória que ninguém conhece, e ele define a dele pelo
