@@ -4,8 +4,8 @@ Especificação da interface que o servidor MCP (repositório separado) deve exp
 para este plugin. Este documento é a fonte da verdade do contrato: o plugin é
 escrito contra ele, e o servidor MCP o implementa.
 
-Status: **implementado**. As dezenove tools descritas existem no servidor e são
-chamadas pelos comandos do plugin; o que segue em aberto está na seção 7.
+Status: **implementado**. As vinte e uma tools descritas existem no servidor e
+são chamadas pelos comandos do plugin; o que segue em aberto está na seção 7.
 
 Boa parte do que está escrito aqui foi aprendido apanhando — endpoints
 confirmados por tentativa, semânticas de escrita que diferem entre si, modos de
@@ -1120,8 +1120,7 @@ contra a API da Cloudez.
   "panel_host": "cloud.configr.com",
   "company_name": "Configr",
   "company_code": "cfg",
-  "register_enabled": true,
-  "trial_ia_plan_id": 51799   // ausente quando a revenda não tem plano trial configurado
+  "register_enabled": true
 }
 ```
 
@@ -1134,11 +1133,15 @@ os sites fora de quem atendeu o usuário.
 `register_enabled: false` é a revenda que desligou o cadastro self-service. Não é
 erro: é a resposta, e o caminho passa a ser procurar a revenda.
 
-**`trial_ia_plan_id` é o plano que `cloudez_setup_trial_cloud` (§3.19) usa.**
-Confirmado contra a API real, no mesmo endpoint `company/theme`. É por empresa —
-a mesma chamada que resolve `company_code` também resolve o plano —, então não
-existe versão fixa dele: uma revenda pode não ter plano trial nenhum, e aí o
-campo simplesmente não vem.
+**Esta tool nunca traz `trial_ia_plan_id`, mesmo quando a revenda tem plano
+trial configurado.** Confirmado contra a API real: `company/theme` só devolve
+esse campo para quem consulta **autenticado**, e `cloudez_panel_info` é
+propositalmente anônimo — é a única tool que responde antes de existir conta.
+Quem lê `trial_ia_plan_id` é `cloudez_get_trial_plan` (§3.19), que chama o
+mesmo endpoint com o token da conta já autenticada. Foi exatamente essa
+diferença que causou `trial_plan_unavailable` numa conta que tinha o plano
+configurado: a primeira versão desta tool reaproveitava a consulta anônima do
+cadastro para isso, e o campo nunca aparecia.
 
 ---
 
@@ -1274,13 +1277,13 @@ desfaz; virar erro apagaria um fato observado. O retorno traz
 
 ---
 
-### 3.19 `cloudez_setup_trial_cloud` — **mutating**
+### 3.19 `cloudez_get_trial_plan` — read-only
 
-Contrata o cloud de teste gratuito da conta autenticada — o que antes era um
-passo manual no painel ("iniciar o teste"). Chamada uma vez, logo depois de
-`cloudez_confirm_phone`, para a conta recém-criada não ficar sem onde hospedar:
-sem nenhuma cloud, o `/cloudez:setup` falharia num ponto bem menos claro que
-este.
+Diz se o painel informado tem um plano de teste grátis configurado, e devolve
+o `trial_ia_plan_id` que `cloudez_setup_trial_cloud` (§3.20) exige como
+entrada — **chame sempre antes dela**, nunca depois. Existe separada porque o
+primeiro bug real do provisionamento (ver abaixo) só era diagnosticável lendo
+código, quando a consulta ainda ficava embutida dentro da tool que provisiona.
 
 ```jsonc
 // input
@@ -1290,6 +1293,55 @@ este.
     "panel_host": { "type": "string", "description": "O mesmo panel_host passado a cloudez_signup" }
   },
   "required": ["panel_host"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output
+{
+  "panel_host": "cloud.configr.com",
+  "company_name": "Configr",
+  "trial_ia_plan_id": 51799   // ausente quando a revenda não tem plano trial configurado
+}
+```
+
+**Endpoint:** `GET /v3/company/theme/<panel_host>/`, o MESMO que
+`cloudez_panel_info` (§3.15) usa, mas consultado **autenticado** — com
+`Authorization: Token <token>`, não anônimo. Essa diferença é contrato, não
+detalhe: `company/theme` só devolve `trial_ia_plan_id` para quem consulta com
+token; a versão pública (`cloudez_panel_info`) nunca traz este campo.
+
+**Bug real, encontrado testando contra a API de produção:** a primeira versão
+de `cloudez_setup_trial_cloud` reaproveitava a consulta ANÔNIMA do cadastro (a
+mesma que `cloudez_panel_info` faz) e por isso falhava com
+`trial_plan_unavailable` mesmo em empresas com o plano configurado. Corrigido
+passando o token da conta autenticada nessa chamada específica — e extraído
+para esta tool própria depois, para o próximo diagnóstico não depender de ler
+código de novo.
+
+Não é fixo nem sobreponível por ambiente: é POR EMPRESA, lido de novo a cada
+chamada.
+
+---
+
+### 3.20 `cloudez_setup_trial_cloud` — **mutating**
+
+Contrata o cloud de teste gratuito da conta autenticada — o que antes era um
+passo manual no painel ("iniciar o teste"). Só provisiona: não descobre nada
+sozinha, nem sobre o painel nem sobre o plano. Chamada uma vez, logo depois de
+`cloudez_get_trial_plan` (§3.19) devolver um `trial_ia_plan_id`, para a conta
+recém-criada não ficar sem onde hospedar: sem nenhuma cloud, o
+`/cloudez:setup` falharia num ponto bem menos claro que este.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "trial_ia_plan_id": { "type": "number", "description": "Id devolvido por cloudez_get_trial_plan" }
+  },
+  "required": ["trial_ia_plan_id"],
   "additionalProperties": false
 }
 ```
@@ -1313,12 +1365,21 @@ Autenticado como o resto da API v3, com `Authorization: Token <token>` — **nã
 o `jwt` do exemplo original desta rota, que era da troca de credencial do
 cadastro. Confirmado contra a API real: o Token persistido funciona.
 
-**`plan_type` vem de `cloudez_panel_info` (§3.15), lido de novo a cada
-chamada** — a tool chama `panelInfo(panel_host)` internamente e usa o
-`trial_ia_plan_id` que ele devolver. Não é fixo nem sobreponível por ambiente:
-é POR EMPRESA, a mesma chamada que resolve `company_code`. Sem esse campo no
-painel — revenda sem plano trial configurado — a tool falha com
-`trial_plan_unavailable` **antes** de tentar o POST.
+**`trial_ia_plan_id` PRECISA vir de `cloudez_get_trial_plan` (§3.19), nunca de
+um número lembrado ou inventado por quem chama.** Não é só rigor: em
+`cloudsetup.py` da API, `plan_type` aceita QUALQUER `PlanType` ativo da
+empresa — pago inclusive, sem filtro nenhum de trial — e só vira trial porque
+o id específico que `cloudez_get_trial_plan` devolve aponta para o
+`cloud_size.is_trial=true` daquela empresa. Um id errado aqui não falha
+bonito: contrata outra coisa, com fatura de verdade. Por isso esta tool não
+resolve o id sozinha (evitaria repassar o valor por quem chama, mas abriria
+essa mesma brecha) — só valida que é um inteiro positivo antes do POST, com
+`invalid_argument` se não for.
+
+A ausência de `trial_ia_plan_id` no retorno de `cloudez_get_trial_plan` — a
+revenda não tem plano trial configurado — **não é algo que esta tool
+detecta**: quem chama confere isso ANTES, olhando o retorno da §3.19, e nem
+tenta o provisionamento se o campo não vier.
 
 **O corpo de retorno não foi observado além do plano trial confirmado**, então
 a tool não extrai campos nomeados — o que a API devolver sai inteiro em
@@ -1328,9 +1389,155 @@ a tool não extrai campos nomeados — o que a API devolver sai inteiro em
 provisionar.** Chamar duas vezes cria duas clouds. A descrição da tool instrui
 quem chama a rodá-la uma vez só, logo após o cadastro.
 
+**Provisionar demora — visto na prática, mais que os 10s padrão de qualquer
+outra chamada.** Por isso o POST usa um timeout próprio, de 120s
+(`CLOUDEZ_CLOUD_SETUP_TIMEOUT`, em segundos, se precisar mudar). Confirmado
+contra a API de produção: um teste real abortou por timeout em 10s e a
+Cloudez **criou o cloud mesmo assim** — o cliente só não recebeu a resposta a
+tempo.
+
+**Por isso uma falha DEPOIS do POST não é `upstream_unavailable` genérico.** O
+resto do contrato marca timeout como `retryable: true` (seção 4), e aqui isso
+seria perigoso: reportar retryable incentivaria repetir uma chamada que talvez
+já tenha criado o cloud, resultando numa SEGUNDA. Qualquer falha depois de
+enviado o POST vira `cloud_setup_unconfirmed`, com `retryable: false` e o
+`hint` mandando conferir `cloudez_list_clouds` (§3.22) antes de decidir se
+repete.
+
+**Dois motivos de recusa (400) são reconhecidos por nome, em vez de virarem
+`invalid_argument` cru.** Confirmado contra a API real — os dois vieram
+**juntos**, num único 400, contra uma conta que já tinha cloud trial:
+
+```jsonc
+// corpo real observado
+{
+  "user": ["Limite de cloud alcançado, por favor contate o suporte"],
+  "plan_type": ["user already has a free trial"]
+}
+```
+
+| Campo do 400 | Vira | Por quê |
+|---|---|---|
+| `plan_type` contendo "already has a free trial" | `trial_already_exists` | a conta já tem o cloud; não é dado errado, é estado. Confira `cloudez_list_clouds` antes de qualquer coisa |
+| `user` (sem o `plan_type` acima) | `cloud_limit_reached` | limite de clouds da conta; a própria Cloudez pede para contatar o suporte, não é algo que o plugin resolve |
+
+`plan_type` é conferido primeiro — é o motivo mais específico dos dois, e é o
+que apareceu junto com `user` no caso real. Sem casar nenhum dos dois padrões,
+cai no `invalid_argument` genérico da seção 4, com o corpo inteiro no
+`message` — não trava o reconhecimento, só deixa de nomear o motivo.
+
 ---
 
-### 3.20 Fora do escopo, por enquanto
+### 3.21 `cloudez_create_site` — **mutating**
+
+Cria um site novo, sempre do tipo `claude` — o único que este plugin publica.
+Existe porque, até esta tool, o `/cloudez:setup` só encontrava e configurava um
+site que já existia; um domínio ausente da conta encerrava o comando com a
+instrução de criar pelo painel primeiro. Verificado contra o código real da API
+(`WebsiteCreateSerializer`), não contra um servidor de produção.
+
+```jsonc
+// input
+{
+  "type": "object",
+  "properties": {
+    "cloud": { "type": "number", "description": "Id da cloud onde criar o site" },
+    "domain": { "type": "string", "description": "FQDN da aplicação" },
+    "name": { "type": "string", "description": "Opcional — a Cloudez gera um se omitido" }
+  },
+  "required": ["cloud", "domain"],
+  "additionalProperties": false
+}
+```
+
+```jsonc
+// output — o mesmo shape de cloudez_get_site
+{
+  "domain": "meusite.com.br",
+  "stack": "claude",
+  "ssh": { "host": "srv-24923.cloudez.io", "port": 22, "user": "deploy" }
+}
+```
+
+**Endpoint:**
+
+```
+POST /v3/website/
+{ "cloud": 24923, "type": "claude", "values": [{ "slug": "domain", "value": "meusite.com.br" }] }
+```
+
+**`cloud` é o id inteiro de um `Node`** (o que `cloudez_list_clouds`, §3.22,
+devolve), não um objeto. **`type` aceita o slug diretamente** — `"claude"` — a
+API resolve pelo slug quando o valor não é numérico.
+
+**O `domain` é único por CLOUD, não por conta.** O mesmo domínio pode existir
+em duas clouds diferentes sem conflito — a checagem de unicidade da API é
+contra os outros sites da mesma cloud. Um `invalid_argument` no domínio
+significa "já existe um site com esse domínio NAQUELA cloud".
+
+**A conta precisa ter o tipo `claude` habilitado.** A tool confere isso antes
+do POST, no mesmo padrão que `cloudez_create_database` já usa para o engine do
+banco (nem toda revenda habilita todos): lista os tipos da empresa e recusa
+com `invalid_argument` antes de gastar a chamada de criação, listando os
+tipos disponíveis no `hint`.
+
+**A Cloudez cria um usuário ssh automaticamente**, a menos que um `user` seja
+passado no corpo — esta tool nunca passa. O site criado já sai com
+`user.has_ssh: true`, então `cloudez_authorize_ssh_key` (§3.5) funciona nele
+sem passo extra.
+
+**`app_root_path` e `custom_port` não são passados na criação.** Ficam para o
+`/cloudez:setup` configurar depois com `cloudez_configure_site` (§3.4), como já
+faz para um site que já existia — não há necessidade de duplicar essa lógica
+aqui.
+
+**A tool relê pela mesma busca do `cloudez_get_site` depois do POST**, em vez
+de confiar cegamente no 201: se o site criado não aparecer na busca pelo
+domínio enviado, falha com `upstream_unavailable` em vez de afirmar sucesso.
+
+**Não é idempotente.** Chamar de novo com o mesmo domínio na mesma cloud falha
+(domínio já existe); chamar com o mesmo domínio em OUTRA cloud cria um
+segundo site. A tool não confere se já existe um site equivalente antes de
+criar — quem chama confirma com o usuário antes de repetir.
+
+---
+
+### 3.22 `cloudez_list_clouds` — read-only
+
+Lista as clouds (servidores, model `Node` na API) da conta autenticada, para
+escolher o `cloud` de `cloudez_create_site` (§3.21).
+
+```jsonc
+// input
+{ "type": "object", "properties": {}, "additionalProperties": false }
+```
+
+```jsonc
+// output
+{
+  "clouds": [
+    { "id": 24923, "name": "meu-servidor", "fqdn": "srv-24923.cloudez.io",
+      "is_default": true, "websites_count": 2 }
+  ],
+  "truncated": "…"   // só quando há mais clouds do que a primeira página trouxe
+}
+```
+
+**Endpoint:** `GET /v3/cloud/?page_size=20` — já escopado pela API ao usuário
+autenticado (ou à empresa/time dele), sem precisar de `company_id`.
+
+**Sem loop de paginação, ao contrário do `cloudez_list_sites` (§3.2).** Uma
+conta tem tipicamente poucas clouds — o trial cria uma só —, então a página
+máxima (20) cobre o caso comum. Havendo mais, `truncated` avisa em vez de
+afirmar que a lista é completa.
+
+**`name` é `nickname`, ou `name`, ou um placeholder** — a API pode não trazer
+nenhum dos dois preenchido. Item sem `id` válido é descartado, pela mesma razão
+de `cloudez_get_site`: não haveria como ser escolhido pelo usuário.
+
+---
+
+### 3.23 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:
@@ -1375,10 +1582,22 @@ Uma rota errada precisa virar `upstream_unavailable` com um `hint` dizendo que
 nada foi concluído sobre o domínio. Sem isso, um path errado no servidor reporta
 que todos os sites do usuário sumiram da conta.
 
+**Todo `400` de toda tool autenticada carrega o campo que a Cloudez recusou na
+própria `message`.** A API segue o formato do DRF — `{"campo": ["mensagem"]}`
+ou `{"non_field_errors": [...]}` —, e o cliente HTTP (`src/api.ts`) lê isso e
+compõe `"A API da Cloudez respondeu 400 — campo: mensagem."` em vez do genérico
+`"A API da Cloudez respondeu 400."` de antes. Encontrado testando
+`cloudez_setup_trial_cloud` contra produção: uma conta que já tinha cloud trial
+recebia `invalid_argument` sem dizer por quê, e a causa real (`plan_type: já
+existe uma cloud trial nesta conta`, ou o que a API disser) ficava presa no
+corpo, nunca chegando ao `message`. Vale para qualquer tool que escreva via
+`apiPost`/`apiPatch`/`apiGet` — não é específico do cloud.
+
 Códigos previstos:
 
 | `code` | `retryable` | Significado |
 |---|---|---|
+| `invalid_argument` | não | a Cloudez recusou o corpo enviado; `message` traz o campo e a razão quando o 400 os nomeia |
 | `site_not_found` | não | domínio não existe na conta |
 | `not_authenticated` | não | nenhum token configurado na máquina |
 | `token_invalid` | não | a Cloudez recusou o token (expirado ou revogado) |
@@ -1398,7 +1617,9 @@ Códigos previstos:
 | `already_authenticated` | não | já há token válido no disco; cadastrar sobrescreveria a conta atual |
 | `sms_code_invalid` | não | os seis dígitos não batem com o que foi enviado |
 | `phone_not_verified` | não | a API aceitou o código e a releitura diz que o telefone segue sem verificação |
-| `trial_plan_unavailable` | não | o painel não tem `trial_ia_plan_id`; a revenda não configurou plano trial |
+| `cloud_setup_unconfirmed` | não | o POST de `cloudez_setup_trial_cloud` falhou depois de enviado; o cloud pode ter sido criado mesmo assim — confira `cloudez_list_clouds` antes de repetir |
+| `trial_already_exists` | não | a conta já tem um cloud trial; confira `cloudez_list_clouds` em vez de criar outro |
+| `cloud_limit_reached` | não | limite de clouds da conta; a Cloudez pede para contatar o suporte |
 
 O campo `retryable` importa: sem ele o modelo ou desiste de erro transitório ou
 insiste em erro permanente.

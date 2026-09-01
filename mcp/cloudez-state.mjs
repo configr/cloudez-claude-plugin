@@ -8,6 +8,9 @@ import { dirname, join } from "node:path";
 // src/errors.ts
 var ToolError = class extends Error {
   body;
+  // Corpo cru do 400, só para quem lançou poder reconhecer um campo específico (ver cloud.ts).
+  // Nunca sai daqui: errorResult() só serializa `body`, então isto não vaza para o modelo.
+  rawBody;
   constructor(code, message, opts = {}) {
     super(message);
     this.name = "ToolError";
@@ -19,6 +22,7 @@ var ToolError = class extends Error {
         ...opts.hint ? { hint: opts.hint } : {}
       }
     };
+    this.rawBody = opts.rawBody;
   }
 };
 

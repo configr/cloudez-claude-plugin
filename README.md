@@ -358,6 +358,12 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
       painel. **Este endpoint foi confirmado contra a API real** (autenticação
       por `Token`, igual ao resto da v3) — diferente do restante do cadastro
       acima
+- [x] `/cloudez:setup` cria o site quando o domínio não existe na conta —
+      `cloudez_list_clouds` escolhe onde, `cloudez_create_site` cria sempre do
+      tipo `claude`. Antes disso, um domínio ausente encerrava o comando com a
+      instrução de criar pelo painel primeiro. **Não foi exercitado contra a API
+      real:** verificado contra o código-fonte da API (`WebsiteCreateSerializer`,
+      `CloudViewSet`), não contra um servidor de produção
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
       `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).

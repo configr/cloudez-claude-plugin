@@ -1,6 +1,6 @@
 ---
 description: Verifica se há um token da Cloudez salvo e, se não houver, cria a conta ou conduz o usuário até o token no painel
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_setup_trial_cloud, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_trial_plan, mcp__cloudez__cloudez_setup_trial_cloud, mcp__cloudez__cloudez_list_clouds, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
 ---
 
 Chame a tool `cloudez_auth_status`. Ela é quem responde pelo estado da
@@ -137,27 +137,44 @@ Cloudez aceitou enviar, e a entrega ela não vê.
 ### Feche
 
 Com `phone_verified: true`, a conta está ativa e o token já está salvo. Chame
-`cloudez_setup_trial_cloud` com `panel_host: "cloud.configr.com"` — o mesmo do
-cadastro — para contratar o cloud de teste grátis da conta, o que antes era
+`cloudez_get_trial_plan` com `panel_host: "cloud.configr.com"` — o mesmo do
+cadastro. Sem `trial_ia_plan_id` no retorno, a Configr não tem plano trial
+configurado: **não chame `cloudez_setup_trial_cloud`**, siga direto para a
+frase de fechamento abaixo, que já cobre esse caso.
+
+Com o `trial_ia_plan_id`, chame `cloudez_setup_trial_cloud` passando esse
+mesmo id, para contratar o cloud de teste grátis da conta — o que antes era
 "iniciar o teste" no painel.
 
 **Não repita a chamada se ela falhar.** Não é idempotente: se o provisionamento
 tiver ocorrido apesar do erro reportado, uma segunda chamada cria um SEGUNDO
-cloud. `trial_plan_unavailable` é diferente — não chegou a provisionar nada,
-porque a Configr não tem plano trial configurado — mas o tratamento é o mesmo:
-siga em frente, o item 3 abaixo cobre os dois casos.
+cloud.
 
-Diga, nesta ordem:
+- **`cloud_setup_unconfirmed`** — a chamada falhou DEPOIS de enviada (visto na
+  prática: provisionar demora, e um timeout não significa que nada foi criado).
+  Chame `cloudez_list_clouds` antes de dizer qualquer coisa ao usuário: se o
+  cloud já aparecer lá, trate como sucesso; só diga que falta contratar se ele
+  realmente não existir.
+- **`trial_already_exists`** — a conta já tem um cloud. Chame `cloudez_list_clouds`
+  e trate como sucesso: não é erro, é a conta já pronta para o próximo passo.
+- **`cloud_limit_reached`** — limite de clouds da conta. Não é algo que se
+  resolve por aqui: diga ao usuário para contatar o suporte da Cloudez.
 
-1. a conta foi criada na empresa que veio em `company_name`;
-2. um e-mail para **definir a senha** foi enviado — é assim que ele entra no
-   painel, porque a senha do cadastro é aleatória e ninguém a conhece. Se
-   `password_email_sent` vier `false`, diga que falta esse passo e que ele usa o
-   "esqueci minha senha" no painel;
-3. se `cloudez_setup_trial_cloud` teve sucesso, **a conta já tem um servidor de
-   teste grátis** — ele não precisa contratar nada no painel. Se falhou, diga
-   que falta esse passo e que ele contrata o teste em
-   `https://cloud.configr.com`.
+**Feche em uma ou duas frases curtas, não numeradas.** O usuário não precisa do
+passo a passo interno — só do que muda para ele. No caminho feliz:
+
+> Sua conta foi criada com sucesso. Acesse seu e-mail para definir sua senha —
+> é assim que você entra no painel.
+
+Não é preciso mencionar `company_name` nem o cloud/servidor separadamente
+quando os dois passos deram certo: "conta criada com sucesso" já cobre.
+
+Só acrescente algo além disso quando um dos dois **não** deu certo:
+
+- `password_email_sent: false` — troque a frase do e-mail: diga que falta
+  esse passo e que ele usa "esqueci minha senha" no painel;
+- `cloudez_setup_trial_cloud` falhou — acrescente uma frase dizendo que falta
+  contratar o teste em `https://cloud.configr.com`.
 
 # 2. Capturar o token
 

@@ -27014,6 +27014,15 @@ function sitePatchPath(id) {
   const template = process.env.CLOUDEZ_API_SITE_PATCH_PATH || "/v3/website/{id}/";
   return template.replace("{id}", encodeURIComponent(String(id)));
 }
+function websiteCreatePath() {
+  return process.env.CLOUDEZ_API_WEBSITE_CREATE_PATH || "/v3/website/";
+}
+function websiteTypePath() {
+  return process.env.CLOUDEZ_API_WEBSITE_TYPE_PATH || "/v3/website-type/";
+}
+function cloudListPath() {
+  return process.env.CLOUDEZ_API_CLOUD_LIST_PATH || "/v3/cloud/";
+}
 function cloudUserPatchPath(id) {
   const template = process.env.CLOUDEZ_API_CLOUD_USER_PATCH_PATH || "/v3/cloud-user/{id}/";
   return template.replace("{id}", encodeURIComponent(String(id)));
@@ -27026,6 +27035,10 @@ function cloudSetupPath() {
   return process.env.CLOUDEZ_API_CLOUD_SETUP_PATH || "/v3/cloud/setup/";
 }
 var TRIAL_LIFESPAN_MONTHS = 1;
+function cloudSetupTimeoutMs() {
+  const raw = Number(process.env.CLOUDEZ_CLOUD_SETUP_TIMEOUT);
+  return Number.isFinite(raw) && raw > 0 ? raw * 1e3 : 12e4;
+}
 function signupPath() {
   return process.env.CLOUDEZ_API_SIGNUP_PATH || "/auth/signup/";
 }
@@ -27071,6 +27084,9 @@ import { readFile } from "node:fs/promises";
 // src/errors.ts
 var ToolError = class extends Error {
   body;
+  // Corpo cru do 400, só para quem lançou poder reconhecer um campo específico (ver cloud.ts).
+  // Nunca sai daqui: errorResult() só serializa `body`, então isto não vaza para o modelo.
+  rawBody;
   constructor(code, message, opts = {}) {
     super(message);
     this.name = "ToolError";
@@ -27082,6 +27098,7 @@ var ToolError = class extends Error {
         ...opts.hint ? { hint: opts.hint } : {}
       }
     };
+    this.rawBody = opts.rawBody;
   }
 };
 function errorResult(err) {
@@ -27155,12 +27172,21 @@ async function requireToken() {
 }
 
 // src/api.ts
+function detalhe400(body) {
+  const campos = body ?? {};
+  const partes = Object.entries(campos).map(([campo, valor]) => {
+    const texto = Array.isArray(valor) ? valor.map(String).join(" ") : typeof valor === "string" ? valor : "";
+    return texto ? `${campo}: ${texto}` : "";
+  }).filter((linha) => linha !== "");
+  return partes.length > 0 ? partes.join("; ") : void 0;
+}
 function classify(status, body) {
   if (status === 400) {
     return {
       code: "invalid_argument",
       retryable: false,
-      hint: "A Cloudez recusou o que foi enviado. Corrija o dado antes de chamar de novo."
+      hint: "Corrija o dado antes de chamar de novo.",
+      detail: detalhe400(body)
     };
   }
   if (status === 401) {
@@ -27189,7 +27215,7 @@ function classify(status, body) {
   }
   return { code: "upstream_unavailable", retryable: true, hint: "A API da Cloudez respondeu com erro. Tente novamente em alguns instantes." };
 }
-async function request(method, path, body) {
+async function request(method, path, body, timeoutMs) {
   const token = await requireToken();
   let response;
   try {
@@ -27201,7 +27227,7 @@ async function request(method, path, body) {
         ...body === void 0 ? {} : { "Content-Type": "application/json" }
       },
       ...body === void 0 ? {} : { body: JSON.stringify(body) },
-      signal: AbortSignal.timeout(apiTimeoutMs())
+      signal: AbortSignal.timeout(timeoutMs ?? apiTimeoutMs())
     });
   } catch (cause) {
     throw new ToolError("upstream_unavailable", "N\xE3o foi poss\xEDvel falar com a API da Cloudez.", {
@@ -27211,13 +27237,14 @@ async function request(method, path, body) {
   }
   if (!response.ok) {
     const body2 = await response.json().catch(() => null);
-    const { code, retryable, hint } = classify(response.status, body2);
-    throw new ToolError(code, `A API da Cloudez respondeu ${response.status}.`, { retryable, hint });
+    const { code, retryable, hint, detail } = classify(response.status, body2);
+    const message = detail ? `A API da Cloudez respondeu ${response.status} \u2014 ${detail}.` : `A API da Cloudez respondeu ${response.status}.`;
+    throw new ToolError(code, message, { retryable, hint, rawBody: body2 });
   }
   return await response.json();
 }
 var apiGet = (path) => request("GET", path);
-var apiPost = (path, body) => request("POST", path, body);
+var apiPost = (path, body, timeoutMs) => request("POST", path, body, timeoutMs);
 var apiPatch = (path, body) => request("PATCH", path, body);
 async function apiPublic(method, path, body, authorization) {
   let response;
@@ -27241,13 +27268,14 @@ async function apiPublic(method, path, body, authorization) {
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
-// src/sites.ts
-var EXPECTED_APP_ROOT_PATH = "claude/current";
-var APP_SUBDIR = EXPECTED_APP_ROOT_PATH.split("/")[0];
-function siteRoot(domain) {
-  return `~/${String(domain).toLowerCase()}/www/${APP_SUBDIR}`;
+// src/domain.ts
+function normalizeHost(entrada) {
+  const bruto = String(entrada ?? "").trim();
+  const host = bruto.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0].replace(/\.$/, "").toLowerCase();
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) ? host : void 0;
 }
-var DEFAULT_CUSTOM_PORT = "3000";
+
+// src/pagination.ts
 function toList(payload) {
   if (Array.isArray(payload)) return payload;
   const results = payload?.results;
@@ -27255,6 +27283,25 @@ function toList(payload) {
   if (payload && typeof payload === "object") return [payload];
   return [];
 }
+function nextPath(payload) {
+  const next = payload?.next;
+  if (typeof next !== "string" || next === "") return void 0;
+  try {
+    const url2 = new URL(next);
+    return `${url2.pathname}${url2.search}`;
+  } catch {
+    return next.startsWith("/") ? next : void 0;
+  }
+}
+
+// src/sites.ts
+var EXPECTED_APP_ROOT_PATH = "claude/current";
+var APP_SUBDIR = EXPECTED_APP_ROOT_PATH.split("/")[0];
+function siteRoot(domain) {
+  return `~/${String(domain).toLowerCase()}/www/${APP_SUBDIR}`;
+}
+var DEFAULT_CUSTOM_PORT = "3000";
+var APP_STACK = "claude";
 function valueOf(item, slug) {
   const values = item.values;
   if (Array.isArray(values)) {
@@ -27328,7 +27375,7 @@ async function getSite(domain) {
   });
   if (identified.length === 0) {
     throw new ToolError("site_not_found", `Nenhum site com o dom\xEDnio '${normalized}' nesta conta.`, {
-      hint: "Confira a grafia do dom\xEDnio. Se o site ainda n\xE3o existe na Cloudez, ele precisa ser criado no painel antes do deploy \u2014 isso n\xE3o \xE9 feito por aqui."
+      hint: "Confira a grafia do dom\xEDnio. Se o site ainda n\xE3o existe na Cloudez, cloudez_create_site cria um, do tipo claude, numa cloud da conta."
     });
   }
   const exact = identified.find((entry) => entry.domains.includes(normalized));
@@ -27408,16 +27455,6 @@ async function configureSite(domain, desejado) {
   }
   return resultado;
 }
-function nextPath(payload) {
-  const next = payload?.next;
-  if (typeof next !== "string" || next === "") return void 0;
-  try {
-    const url2 = new URL(next);
-    return `${url2.pathname}${url2.search}`;
-  } catch {
-    return next.startsWith("/") ? next : void 0;
-  }
-}
 async function listSites(query) {
   const termo = query.trim().toLowerCase();
   if (termo === "") {
@@ -27446,6 +27483,56 @@ async function listSites(query) {
     result.truncated = `A busca parou em ${MAX_SITE_PAGES} p\xE1ginas e h\xE1 mais resultados. N\xC3O conclua que um dom\xEDnio ausente daqui n\xE3o existe na conta \u2014 use cloudez_get_site com o dom\xEDnio exato para verificar.`;
   }
   return result;
+}
+async function listWebsiteTypes() {
+  const lista = toList(await apiGet(websiteTypePath()));
+  return lista.filter((t) => typeof t?.slug === "string").map((t) => ({ id: Number(t.id), slug: String(t.slug), ...t.name ? { name: String(t.name) } : {} }));
+}
+async function createSite(args) {
+  const domain = normalizeHost(args.domain);
+  if (!domain) {
+    throw new ToolError("invalid_argument", `'${args.domain}' n\xE3o \xE9 um dom\xEDnio.`, {
+      hint: "Pe\xE7a o dom\xEDnio da aplica\xE7\xE3o, sem 'https://' na frente \u2014 ex.: meusite.com.br."
+    });
+  }
+  const cloud = Number(args.cloud);
+  if (!Number.isInteger(cloud) || cloud <= 0) {
+    throw new ToolError("invalid_argument", `'${args.cloud}' n\xE3o \xE9 um id de cloud.`, {
+      hint: "O id vem de cloudez_list_clouds, ou do campo cloud.id de cloudez_setup_trial_cloud."
+    });
+  }
+  const tipos = await listWebsiteTypes();
+  if (tipos.length > 0 && !tipos.some((t) => t.slug === APP_STACK)) {
+    throw new ToolError("invalid_argument", `A conta n\xE3o tem o tipo '${APP_STACK}' habilitado.`, {
+      hint: `Tipos dispon\xEDveis: ${tipos.map((t) => t.slug).join(", ") || "nenhum"}.`
+    });
+  }
+  const criado = await apiPost(websiteCreatePath(), {
+    cloud,
+    type: APP_STACK,
+    values: [{ slug: "domain", value: domain }],
+    ...args.name ? { name: args.name } : {}
+  });
+  const dominioCriado = valueOf(criado, "domain") ?? domain;
+  let confirmado;
+  try {
+    confirmado = await getSite(dominioCriado);
+  } catch (err) {
+    if (err instanceof ToolError && err.body.error.code === "site_not_found") {
+      throw new ToolError("upstream_unavailable", "A Cloudez criou o site, mas ele n\xE3o aparece na busca pelo dom\xEDnio.", {
+        retryable: false,
+        hint: "Confira no painel: o site pode ter nascido com outro dom\xEDnio. N\xE3o repita a cria\xE7\xE3o."
+      });
+    }
+    throw err;
+  }
+  if (confirmado.match !== "exact") {
+    throw new ToolError("upstream_unavailable", "A Cloudez criou o site, mas ele n\xE3o aparece na busca pelo dom\xEDnio.", {
+      retryable: false,
+      hint: "Confira no painel: o site pode ter nascido com outro dom\xEDnio. N\xE3o repita a cria\xE7\xE3o."
+    });
+  }
+  return confirmado.site;
 }
 
 // src/databases.ts
@@ -28972,18 +29059,17 @@ async function saveToken(token) {
 
 // src/signup.ts
 function normalizePanelHost(entrada) {
-  const bruto = String(entrada ?? "").trim();
-  const host = bruto.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0].replace(/\.$/, "").toLowerCase();
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)) {
+  const host = normalizeHost(entrada);
+  if (!host) {
     throw new ToolError("invalid_argument", `'${entrada}' n\xE3o \xE9 um dom\xEDnio de painel.`, {
       hint: "Pe\xE7a ao usu\xE1rio o endere\xE7o que ele usa para entrar na Cloudez, como painel.exemplo.com."
     });
   }
   return host;
 }
-async function panelInfo(panelHost) {
+async function panelInfo(panelHost, authorization) {
   const host = normalizePanelHost(panelHost);
-  const { status, body } = await apiPublic("GET", companyThemePath(host));
+  const { status, body } = await apiPublic("GET", companyThemePath(host), void 0, authorization);
   if (status === 404) {
     throw new ToolError("panel_not_found", `'${host}' n\xE3o responde como painel da Cloudez.`, {
       hint: "Confira o endere\xE7o com o usu\xE1rio: \xE9 o mesmo que ele usa para entrar todo dia."
@@ -29221,22 +29307,79 @@ async function mandarEmailDeSenha() {
 }
 
 // src/cloud.ts
-async function setupTrialCloud(panelHost) {
-  const painel = await panelInfo(panelHost);
-  if (!painel.trial_ia_plan_id) {
-    throw new ToolError(
-      "trial_plan_unavailable",
-      `${painel.company_name} n\xE3o tem plano trial configurado (\`trial_ia_plan_id\` ausente).`,
-      { hint: "Diga ao usu\xE1rio para contratar o teste manualmente pelo painel; esta tool n\xE3o tem o que provisionar." }
-    );
+async function getTrialPlan(panelHost) {
+  const token = await requireToken();
+  const painel = await panelInfo(panelHost, `Token ${token}`);
+  return {
+    panel_host: painel.panel_host,
+    company_name: painel.company_name,
+    ...painel.trial_ia_plan_id ? { trial_ia_plan_id: painel.trial_ia_plan_id } : {}
+  };
+}
+async function setupTrialCloud(trialIaPlanId) {
+  if (!Number.isInteger(trialIaPlanId) || trialIaPlanId <= 0) {
+    throw new ToolError("invalid_argument", `'${trialIaPlanId}' n\xE3o \xE9 um id de plano trial v\xE1lido.`, {
+      hint: "Use o trial_ia_plan_id que cloudez_get_trial_plan devolveu, n\xE3o um n\xFAmero digitado \xE0 m\xE3o."
+    });
   }
-  const criado = await apiPost(cloudSetupPath(), {
-    plan_type: painel.trial_ia_plan_id,
-    lifespan_months: TRIAL_LIFESPAN_MONTHS
-  });
+  let criado;
+  try {
+    criado = await apiPost(
+      cloudSetupPath(),
+      { plan_type: trialIaPlanId, lifespan_months: TRIAL_LIFESPAN_MONTHS },
+      cloudSetupTimeoutMs()
+    );
+  } catch (err) {
+    if (err instanceof ToolError && err.body.error.code === "invalid_argument") {
+      throw reconhecerRecusaDoCloud(err);
+    }
+    if (err instanceof ToolError && err.body.error.code === "upstream_unavailable") {
+      throw new ToolError(
+        "cloud_setup_unconfirmed",
+        "A chamada para criar o cloud falhou depois de enviada, e a Cloudez pode ter criado mesmo assim.",
+        {
+          retryable: false,
+          hint: "N\xC3O chame cloudez_setup_trial_cloud de novo agora. Confira cloudez_list_clouds primeiro: se o cloud j\xE1 existir l\xE1, siga em frente; se n\xE3o existir, a\xED sim repita."
+        }
+      );
+    }
+    throw err;
+  }
   return {
     cloud_created: true,
     ...criado && typeof criado === "object" ? { cloud: criado } : {}
+  };
+}
+function reconhecerRecusaDoCloud(err) {
+  const campos = err.rawBody ?? {};
+  const texto = (chave) => {
+    const valor = campos[chave];
+    return Array.isArray(valor) ? valor.map(String).join(" ") : typeof valor === "string" ? valor : "";
+  };
+  if (/already has a free trial/i.test(texto("plan_type"))) {
+    return new ToolError("trial_already_exists", "Esta conta j\xE1 tem um cloud trial.", {
+      hint: "Chame cloudez_list_clouds para achar o cloud existente. N\xE3o crie outro nem repita esta tool."
+    });
+  }
+  if (texto("user")) {
+    return new ToolError("cloud_limit_reached", `A Cloudez recusou: ${texto("user")}`, {
+      hint: "\xC9 um limite da conta, n\xE3o um dado errado. Avise o usu\xE1rio para contatar o suporte da Cloudez."
+    });
+  }
+  return err;
+}
+async function listClouds() {
+  const payload = await apiGet(`${cloudListPath()}?page_size=20`);
+  const clouds = toList(payload).filter((c) => Number.isInteger(Number(c.id)) && Number(c.id) > 0).map((c) => ({
+    id: Number(c.id),
+    name: typeof c.nickname === "string" && c.nickname || typeof c.name === "string" && c.name || `cloud ${c.id}`,
+    ...typeof c.fqdn === "string" && c.fqdn ? { fqdn: c.fqdn } : {},
+    ...typeof c.is_default === "boolean" ? { is_default: c.is_default } : {},
+    ...Array.isArray(c.websites) ? { websites_count: c.websites.length } : {}
+  }));
+  return {
+    clouds,
+    ...nextPath(payload) ? { truncated: "H\xE1 mais clouds do que esta p\xE1gina trouxe. Pe\xE7a um nome mais espec\xEDfico ou confira no painel." } : {}
   };
 }
 
@@ -29319,6 +29462,26 @@ server.registerTool(
   async ({ domain }) => {
     try {
       return okResult({ ...await getSite(domain) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_create_site",
+  {
+    title: "Criar um site novo (tipo Claude) numa cloud",
+    description: "Cria um site novo na conta Cloudez, sempre do tipo claude \u2014 n\xE3o pergunte o tipo, \xE9 sempre esse. Chame quando cloudez_get_site n\xE3o encontrar o dom\xEDnio e o usu\xE1rio confirmar que quer criar um site ali, ou logo depois de cloudez_setup_trial_cloud numa conta que ainda n\xE3o tem nenhum site. Use cloudez_list_clouds para escolher o `cloud`, ou o cloud.id que cloudez_setup_trial_cloud devolveu. N\xC3O chame de novo se falhar: o dom\xEDnio pode j\xE1 existir NAQUELA cloud, e repetir sem confirmar o dado com o usu\xE1rio s\xF3 produz o mesmo erro.",
+    inputSchema: object({
+      cloud: number2().describe("Id da cloud onde criar o site. Vem de cloudez_list_clouds ou cloudez_setup_trial_cloud."),
+      domain: string2().describe("FQDN da aplica\xE7\xE3o, sem protocolo nem caminho. Ex.: meusite.com.br"),
+      name: string2().optional().describe("Nome do site no painel. Opcional; a Cloudez gera um se omitido.")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+  },
+  async ({ cloud, domain, name }) => {
+    try {
+      return okResult({ ...await createSite({ cloud, domain, name }) });
     } catch (err) {
       return errorResult(err);
     }
@@ -29761,18 +29924,52 @@ server.registerTool(
   }
 );
 server.registerTool(
-  "cloudez_setup_trial_cloud",
+  "cloudez_get_trial_plan",
   {
-    title: "Provisionar o cloud trial gratuito da conta",
-    description: "Contrata o cloud de teste gratuito da conta rec\xE9m-cadastrada, o mesmo que o usu\xE1rio contrataria manualmente no painel em 'iniciar o teste'. Chame uma vez, logo depois de cloudez_signup (ou de cloudez_confirm_phone, quando o cadastro tiver pedido SMS): uma conta nova n\xE3o tem cloud nenhuma, e sem isso o /cloudez:setup falharia num ponto bem menos claro que aqui. O plano trial \xE9 lido do MESMO panel_host do cadastro \u2014 \xE9 por empresa, e pode faltar se a revenda n\xE3o tiver um configurado (trial_plan_unavailable). N\xC3O chame se a conta j\xE1 puder ter uma cloud \u2014 esta tool n\xE3o confere isso antes de provisionar, e chamar de novo cria uma SEGUNDA. N\xE3o \xE9 idempotente.",
+    title: "Consultar o plano trial configurado para um painel",
+    description: "Diz se o painel informado tem um plano de teste gr\xE1tis configurado, e devolve o `trial_ia_plan_id` que cloudez_setup_trial_cloud precisa para provisionar. Chame SEMPRE antes dela \u2014 ela n\xE3o resolve esse id sozinha. A consulta \xE9 AUTENTICADA \u2014 precisa de token \u2014 porque a Cloudez s\xF3 devolve esse campo para quem j\xE1 tem conta; a vers\xE3o an\xF4nima \xE9 cloudez_panel_info, e ela nunca traz este campo. Aus\xEAncia de `trial_ia_plan_id` no retorno significa que a revenda n\xE3o tem plano trial configurado: n\xE3o h\xE1 o que provisionar, avise o usu\xE1rio para contratar manualmente pelo painel.",
     inputSchema: object({
       panel_host: string2().describe("Host do painel, o mesmo passado a cloudez_signup (cloud.configr.com)")
     }),
-    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+    annotations: { readOnlyHint: true, openWorldHint: true }
   },
   async ({ panel_host }) => {
     try {
-      return okResult({ ...await setupTrialCloud(panel_host) });
+      return okResult({ ...await getTrialPlan(panel_host) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_setup_trial_cloud",
+  {
+    title: "Provisionar o cloud trial gratuito da conta",
+    description: "Contrata o cloud de teste gratuito da conta autenticada, o mesmo que o usu\xE1rio contrataria manualmente no painel em 'iniciar o teste'. Chame SEMPRE depois de cloudez_get_trial_plan, com o `trial_ia_plan_id` que ela devolveu \u2014 esta tool n\xE3o descobre esse id sozinha, e n\xE3o aceita um n\xFAmero que n\xE3o venha de l\xE1: `plan_type` no endpoint da Cloudez aceita QUALQUER plano ativo da empresa, pago inclusive, ent\xE3o um id errado contrataria outra coisa, n\xE3o um trial. Chame uma vez, logo depois de cloudez_signup (ou de cloudez_confirm_phone, quando o cadastro tiver pedido SMS): uma conta nova n\xE3o tem cloud nenhuma, e sem isso o /cloudez:setup falharia num ponto bem menos claro que aqui. N\xC3O chame se a conta j\xE1 puder ter uma cloud \u2014 esta tool n\xE3o confere isso antes de provisionar, e chamar de novo cria uma SEGUNDA. N\xE3o \xE9 idempotente.",
+    inputSchema: object({
+      trial_ia_plan_id: number2().describe("Id do plano trial, devolvido por cloudez_get_trial_plan")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
+  },
+  async ({ trial_ia_plan_id }) => {
+    try {
+      return okResult({ ...await setupTrialCloud(trial_ia_plan_id) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_list_clouds",
+  {
+    title: "Listar as clouds (servidores) da conta",
+    description: "Lista as clouds da conta autenticada, para escolher onde criar um site com cloudez_create_site. Chame quando a conta puder ter mais de uma \u2014 uma conta com cloud s\xF3 n\xE3o precisa perguntar, use o `id` dela direto.",
+    inputSchema: object({}),
+    annotations: { readOnlyHint: true, openWorldHint: true }
+  },
+  async () => {
+    try {
+      return okResult({ ...await listClouds() });
     } catch (err) {
       return errorResult(err);
     }
