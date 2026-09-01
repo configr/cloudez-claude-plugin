@@ -27017,9 +27017,6 @@ function sitePatchPath(id) {
 function websiteCreatePath() {
   return process.env.CLOUDEZ_API_WEBSITE_CREATE_PATH || "/v3/website/";
 }
-function websiteTypePath() {
-  return process.env.CLOUDEZ_API_WEBSITE_TYPE_PATH || "/v3/website-type/";
-}
 function cloudListPath() {
   return process.env.CLOUDEZ_API_CLOUD_LIST_PATH || "/v3/cloud/";
 }
@@ -27484,10 +27481,6 @@ async function listSites(query) {
   }
   return result;
 }
-async function listWebsiteTypes() {
-  const lista = toList(await apiGet(websiteTypePath()));
-  return lista.filter((t) => typeof t?.slug === "string").map((t) => ({ id: Number(t.id), slug: String(t.slug), ...t.name ? { name: String(t.name) } : {} }));
-}
 async function createSite(args) {
   const domain = normalizeHost(args.domain);
   if (!domain) {
@@ -27499,12 +27492,6 @@ async function createSite(args) {
   if (!Number.isInteger(cloud) || cloud <= 0) {
     throw new ToolError("invalid_argument", `'${args.cloud}' n\xE3o \xE9 um id de cloud.`, {
       hint: "O id vem de cloudez_list_clouds, ou do campo cloud.id de cloudez_setup_trial_cloud."
-    });
-  }
-  const tipos = await listWebsiteTypes();
-  if (tipos.length > 0 && !tipos.some((t) => t.slug === APP_STACK)) {
-    throw new ToolError("invalid_argument", `A conta n\xE3o tem o tipo '${APP_STACK}' habilitado.`, {
-      hint: `Tipos dispon\xEDveis: ${tipos.map((t) => t.slug).join(", ") || "nenhum"}.`
     });
   }
   const criado = await apiPost(websiteCreatePath(), {

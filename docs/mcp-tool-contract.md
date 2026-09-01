@@ -1475,11 +1475,18 @@ em duas clouds diferentes sem conflito — a checagem de unicidade da API é
 contra os outros sites da mesma cloud. Um `invalid_argument` no domínio
 significa "já existe um site com esse domínio NAQUELA cloud".
 
-**A conta precisa ter o tipo `claude` habilitado.** A tool confere isso antes
-do POST, no mesmo padrão que `cloudez_create_database` já usa para o engine do
-banco (nem toda revenda habilita todos): lista os tipos da empresa e recusa
-com `invalid_argument` antes de gastar a chamada de criação, listando os
-tipos disponíveis no `hint`.
+**Não há pré-checagem de tipo habilitado, ao contrário do engine de banco em
+`cloudez_create_database`.** Uma versão anterior listava `GET /v3/website-type/`
+antes do POST, no mesmo padrão do banco. Removida: essa rota pode OCULTAR um
+tipo habilitado (campo `is_company_owner_only` da API, para tipos que não
+devem aparecer na lista de escolha do painel mas continuam criáveis) sem que
+isso signifique que a conta não pode criá-lo — `WebsiteCreateSerializer` nunca
+aplica esse filtro, só a listagem aplica. Um pré-check contra a listagem dava
+falso negativo justamente no caso de uso deste plugin: `claude` é candidato a
+ficar oculto do painel de propósito, exatamente para não aparecer como opção
+manual ali. Sem o pré-check, um tipo genuinamente não habilitado na empresa
+chega como `invalid_argument` vindo direto da API (seção 4), só que depois do
+POST em vez de antes.
 
 **A Cloudez cria um usuário ssh automaticamente**, a menos que um `user` seja
 passado no corpo — esta tool nunca passa. O site criado já sai com
