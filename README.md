@@ -361,9 +361,22 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
 - [x] `/cloudez:setup` cria o site quando o domínio não existe na conta —
       `cloudez_list_clouds` escolhe onde, `cloudez_create_site` cria sempre do
       tipo `claude`. Antes disso, um domínio ausente encerrava o comando com a
-      instrução de criar pelo painel primeiro. **Não foi exercitado contra a API
-      real:** verificado contra o código-fonte da API (`WebsiteCreateSerializer`,
-      `CloudViewSet`), não contra um servidor de produção
+      instrução de criar pelo painel primeiro. **Confirmado contra a API real**:
+      encontrou e corrigiu dois bugs de produção — o pré-check de tipo habilitado
+      contra `GET /v3/website-type/` dava falso negativo (a rota pode ocultar um
+      tipo criável via `is_company_owner_only` sem que isso signifique
+      indisponibilidade) e foi removido; e o POST de criação demorava mais que o
+      timeout padrão de 10s, reportando `upstream_unavailable`/`retryable: true`
+      quando o site já tinha sido criado — corrigido com timeout próprio de 120s
+      e `site_creation_unconfirmed`, no mesmo padrão do `cloud_setup_unconfirmed`
+- [x] `/cloudez:setup` contrata uma cloud paga pelo painel quando a conta
+      (antiga, sem trial nenhum) não tem onde criar o site, ou quando o usuário
+      prefere uma cloud nova a uma das existentes. Não existe tool para
+      contratar: é dinheiro de verdade e escolha de plano, então o comando manda
+      o usuário para `https://<panel_host>/clouds/create` e espera ele confirmar
+      — não há polling, a confirmação é sempre do usuário — antes de comparar
+      `cloudez_list_clouds` de antes e depois para achar a cloud nova. **Não foi
+      exercitado contra a API real**
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
       `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).

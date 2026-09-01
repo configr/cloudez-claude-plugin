@@ -113,14 +113,17 @@ passo 1 — não algo que ele precise fazer no painel primeiro.
 cloudez_list_clouds()
 ```
 
-- **Nenhuma cloud** — **encerre.** Não há onde criar um site. Ele precisa de
-  uma cloud antes: `/cloudez:login` termina contratando um trial gratuito para
-  conta nova (`cloudez_setup_trial_cloud`), ou ele contrata uma pelo painel;
+- **Nenhuma cloud** — vá direto para "Contratar uma cloud nova", abaixo. Isto é
+  conta antiga sem trial nenhum contratado; não confunda com conta nova, que já
+  sai do `/cloudez:login` com uma (`cloudez_setup_trial_cloud`);
 - **Uma cloud só** — use o `id` dela direto, sem perguntar: não há entre o quê
   escolher;
-- **Mais de uma** — pergunte qual, mostrando `name` e `fqdn` de cada uma.
+- **Mais de uma** — pergunte qual com AskUserQuestion, mostrando `name` e
+  `fqdn` de cada uma, e acrescente "contratar uma nova" como opção — o usuário
+  pode querer uma cloud separada mesmo já tendo outras.
 
-Com o `id` escolhido:
+Se ele escolher "contratar uma nova", vá para "Contratar uma cloud nova",
+abaixo. Do contrário, com o `id` escolhido:
 
 ```
 cloudez_create_site(cloud: <id>, domain: "<domain do passo 1>")
@@ -147,6 +150,43 @@ onde os passos 4 a 6 disserem "o `cloudez_get_site` do passo 2", leia-se
 "a confirmação do passo 2, seja ela `cloudez_get_site` ou `cloudez_create_site`".
 Os passos 5 a 7 seguem sem alteração: o site nasceu já do tipo `claude`, então
 a checagem de tipo do passo 5 passa direto.
+
+#### Contratar uma cloud nova
+
+Contratar é pago e passa pelo painel — não existe tool para isso, de propósito:
+é dinheiro de verdade saindo da conta do usuário, e a escolha de plano e o
+pagamento não são algo que se decida por ele.
+
+Precisa do `panel_host`. Se ele ainda não apareceu nesta conversa, pergunte o
+endereço do painel do usuário e confirme com `cloudez_panel_info` — mesmo
+cuidado do `/cloudez:login`: não presuma nenhum domínio, a Cloudez é
+white-label.
+
+Guarde os `id` das clouds que `cloudez_list_clouds()` já devolveu (vazio, se
+caiu aqui pelo caso "nenhuma cloud") — é o retrato de antes, contra o qual vai
+comparar depois.
+
+Mande:
+
+```
+Abra: https://<panel_host>/clouds/create
+Contrate o plano que preferir. Quando terminar, me avise.
+```
+
+**Espere a confirmação dele antes de conferir.** Contratar e provisionar levam
+um tempo que este comando não controla — não há como saber daqui quando
+terminou, e não existe polling automático: quem avisa é o usuário.
+
+Confirmado, chame `cloudez_list_clouds()` de novo e compare com o retrato de
+antes:
+
+- **Uma cloud nova** (o caso comum) — use o `id` dela direto, sem perguntar;
+- **Nenhuma nova ainda** — diga que a contratação pode ainda estar
+  processando, e pergunte se ele quer que confira de novo. Não repita sozinho
+  em loop;
+- **Mais de uma nova** — pergunte qual, mostrando `name` e `fqdn` de cada uma.
+
+Com o `id` da cloud nova, volte para `cloudez_create_site`, acima.
 
 ## 3. Environment
 
