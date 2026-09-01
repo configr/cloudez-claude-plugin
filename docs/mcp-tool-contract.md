@@ -1442,8 +1442,7 @@ instrução de criar pelo painel primeiro. Verificado contra o código real da A
   "type": "object",
   "properties": {
     "cloud": { "type": "number", "description": "Id da cloud onde criar o site" },
-    "domain": { "type": "string", "description": "FQDN da aplicação" },
-    "name": { "type": "string", "description": "Opcional — a Cloudez gera um se omitido" }
+    "domain": { "type": "string", "description": "FQDN da aplicação" }
   },
   "required": ["cloud", "domain"],
   "additionalProperties": false
@@ -1501,6 +1500,16 @@ aqui.
 **A tool relê pela mesma busca do `cloudez_get_site` depois do POST**, em vez
 de confiar cegamente no 201: se o site criado não aparecer na busca pelo
 domínio enviado, falha com `upstream_unavailable` em vez de afirmar sucesso.
+
+**Criar o site demora mais que o timeout padrão (10s) — visto na prática, o
+mesmo problema do `cloudez_setup_trial_cloud` (§3.20).** Por isso o POST usa o
+mesmo timeout de 120s (`CLOUDEZ_WEBSITE_CREATE_TIMEOUT`, em segundos, se
+precisar mudar), e uma falha DEPOIS de enviado o POST não vira
+`upstream_unavailable` genérico: vira `site_creation_unconfirmed`, com
+`retryable: false` e o `hint` mandando conferir `cloudez_get_site` com o
+mesmo domínio antes de repetir — reportar retryable incentivaria uma segunda
+tentativa que esbarraria no domínio já existir, um 400 confuso sem essa
+distinção.
 
 **Não é idempotente.** Chamar de novo com o mesmo domínio na mesma cloud falha
 (domínio já existe); chamar com o mesmo domínio em OUTRA cloud cria um
@@ -1627,6 +1636,7 @@ Códigos previstos:
 | `cloud_setup_unconfirmed` | não | o POST de `cloudez_setup_trial_cloud` falhou depois de enviado; o cloud pode ter sido criado mesmo assim — confira `cloudez_list_clouds` antes de repetir |
 | `trial_already_exists` | não | a conta já tem um cloud trial; confira `cloudez_list_clouds` em vez de criar outro |
 | `cloud_limit_reached` | não | limite de clouds da conta; a Cloudez pede para contatar o suporte |
+| `site_creation_unconfirmed` | não | o POST de `cloudez_create_site` falhou depois de enviado; o site pode ter sido criado mesmo assim — confira `cloudez_get_site` com o mesmo domínio antes de repetir |
 
 O campo `retryable` importa: sem ele o modelo ou desiste de erro transitório ou
 insiste em erro permanente.

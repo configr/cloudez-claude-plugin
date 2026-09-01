@@ -27036,6 +27036,10 @@ function cloudSetupTimeoutMs() {
   const raw = Number(process.env.CLOUDEZ_CLOUD_SETUP_TIMEOUT);
   return Number.isFinite(raw) && raw > 0 ? raw * 1e3 : 12e4;
 }
+function websiteCreateTimeoutMs() {
+  const raw = Number(process.env.CLOUDEZ_WEBSITE_CREATE_TIMEOUT);
+  return Number.isFinite(raw) && raw > 0 ? raw * 1e3 : 12e4;
+}
 function signupPath() {
   return process.env.CLOUDEZ_API_SIGNUP_PATH || "/auth/signup/";
 }
@@ -27494,12 +27498,26 @@ async function createSite(args) {
       hint: "O id vem de cloudez_list_clouds, ou do campo cloud.id de cloudez_setup_trial_cloud."
     });
   }
-  const criado = await apiPost(websiteCreatePath(), {
-    cloud,
-    type: APP_STACK,
-    values: [{ slug: "domain", value: domain }],
-    ...args.name ? { name: args.name } : {}
-  });
+  let criado;
+  try {
+    criado = await apiPost(
+      websiteCreatePath(),
+      { cloud, type: APP_STACK, values: [{ slug: "domain", value: domain }] },
+      websiteCreateTimeoutMs()
+    );
+  } catch (err) {
+    if (err instanceof ToolError && err.body.error.code === "upstream_unavailable") {
+      throw new ToolError(
+        "site_creation_unconfirmed",
+        "A chamada para criar o site falhou depois de enviada, e a Cloudez pode ter criado mesmo assim.",
+        {
+          retryable: false,
+          hint: "N\xC3O chame cloudez_create_site de novo agora. Confira cloudez_get_site com o mesmo dom\xEDnio primeiro: se o site j\xE1 existir l\xE1, siga em frente; se n\xE3o existir, a\xED sim repita."
+        }
+      );
+    }
+    throw err;
+  }
   const dominioCriado = valueOf(criado, "domain") ?? domain;
   let confirmado;
   try {
@@ -29461,14 +29479,13 @@ server.registerTool(
     description: "Cria um site novo na conta Cloudez, sempre do tipo claude \u2014 n\xE3o pergunte o tipo, \xE9 sempre esse. Chame quando cloudez_get_site n\xE3o encontrar o dom\xEDnio e o usu\xE1rio confirmar que quer criar um site ali, ou logo depois de cloudez_setup_trial_cloud numa conta que ainda n\xE3o tem nenhum site. Use cloudez_list_clouds para escolher o `cloud`, ou o cloud.id que cloudez_setup_trial_cloud devolveu. N\xC3O chame de novo se falhar: o dom\xEDnio pode j\xE1 existir NAQUELA cloud, e repetir sem confirmar o dado com o usu\xE1rio s\xF3 produz o mesmo erro.",
     inputSchema: object({
       cloud: number2().describe("Id da cloud onde criar o site. Vem de cloudez_list_clouds ou cloudez_setup_trial_cloud."),
-      domain: string2().describe("FQDN da aplica\xE7\xE3o, sem protocolo nem caminho. Ex.: meusite.com.br"),
-      name: string2().optional().describe("Nome do site no painel. Opcional; a Cloudez gera um se omitido.")
+      domain: string2().describe("FQDN da aplica\xE7\xE3o, sem protocolo nem caminho. Ex.: meusite.com.br")
     }),
     annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true }
   },
-  async ({ cloud, domain, name }) => {
+  async ({ cloud, domain }) => {
     try {
-      return okResult({ ...await createSite({ cloud, domain, name }) });
+      return okResult({ ...await createSite({ cloud, domain }) });
     } catch (err) {
       return errorResult(err);
     }

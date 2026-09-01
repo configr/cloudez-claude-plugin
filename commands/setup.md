@@ -134,6 +134,12 @@ dizendo que o domínio já existe, é porque já há um site com ele **naquela
 cloud especificamente**. Confirme o domínio com o usuário antes de tentar de
 novo — repetir sem mudar nada dá o mesmo erro.
 
+**`site_creation_unconfirmed`** — a chamada falhou DEPOIS de enviada (visto na
+prática: criar o site demora, e um timeout não significa que nada foi criado).
+**Não chame `cloudez_create_site` de novo agora.** Chame `cloudez_get_site`
+com o mesmo domínio primeiro: se o site já aparecer lá, trate como sucesso e
+siga para o passo 3; só repita a criação se ele realmente não existir.
+
 Com o site criado, siga para o passo 3 com o `domain` que a tool devolveu. O
 retorno de `cloudez_create_site` tem a MESMA forma do `cloudez_get_site` —
 `stack`, `ssh` ou `ssh_unavailable`, `app_root_path`, `custom_port` —, então
