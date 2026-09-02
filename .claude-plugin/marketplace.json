@@ -2,8 +2,8 @@
   "name": "cloudez",
   "description": "Ferramentas de deploy para hospedagem Cloudez.",
   "owner": {
-    "name": "Arthur Furlan",
-    "email": "arthur.furlan@gmail.com"
+    "name": "Cloudez",
+    "email": "hello@cloudez.io"
   },
   "plugins": [
     {
