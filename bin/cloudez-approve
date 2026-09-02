@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Uso: cloudez-approve
-//
-// Libera uma escrita remota que o hook `hooks/guard-write.mjs` bloqueou.
-//
-// Exige terminal de propósito: rodado pela tool Bash de um agente não há
-// terminal de controle, e o comando falha. É isso que distingue "um humano
-// decidiu" de "o modelo decidiu por si": mesmo mecanismo do prompt de
-// `cloudez-login`.
-//
-// Exibe o comando que o hook bloqueou (`~/.cloudez/pending-write.json`) em
-// vez de pedir que o usuário o redigite, para ele não aprovar uma coisa e o
-// agente rodar outra. A aprovação vale para o comando exato, uma única vez,
-// e expira em minutos.
+/**
+ * Uso: cloudez-approve
+ *
+ * Libera uma escrita remota que o hook `hooks/guard-write.mjs` bloqueou.
+ *
+ * Exige terminal de propósito: rodado pela tool Bash de um agente não há
+ * terminal de controle, e o comando falha. É isso que distingue "um humano
+ * decidiu" de "o modelo decidiu por si": mesmo mecanismo do prompt de
+ * `cloudez-login`.
+ *
+ * Exibe o comando que o hook bloqueou (`~/.cloudez/pending-write.json`) em
+ * vez de pedir que o usuário o redigite, para ele não aprovar uma coisa e o
+ * agente rodar outra. A aprovação vale para o comando exato, uma única vez,
+ * e expira em minutos.
+ */
 
 import { mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { ReadStream } from "node:tty"
@@ -22,7 +24,7 @@ import { createInterface } from "node:readline"
 import { die, ok } from "./_out.mjs"
 
 const TTL_MIN = 10
-/** Ver a nota em `hooks/guard-write.mjs`: isola a suíte do `~/.cloudez` real. */
+// Ver a nota em `hooks/guard-write.mjs`: isola a suíte do `~/.cloudez` real.
 const DIR = process.env.CLOUDEZ_GUARD_DIR || join(homedir(), ".cloudez")
 const PENDENTE = join(DIR, "pending-write.json")
 const APROVADO = join(DIR, "approved-write.json")

@@ -1,10 +1,12 @@
-// Envelope de saída compartilhado pelos adaptadores de bin/.
-//
-// Sucesso em stdout, erro em stderr, os dois em JSON, exit code não-zero em
-// qualquer falha. É contrato, não estilo: um adaptador com formato próprio
-// faria o modelo ver dois contratos de erro onde a doc promete um.
+/**
+ * Envelope de saída compartilhado pelos adaptadores de bin/.
+ *
+ * Sucesso em stdout, erro em stderr, os dois em JSON, exit code não-zero em
+ * qualquer falha. É contrato, não estilo: um adaptador com formato próprio
+ * faria o modelo ver dois contratos de erro onde a doc promete um.
+ */
 
-/** Payload de sucesso. Encerra o processo com 0. */
+// Payload de sucesso. Encerra o processo com 0.
 export function ok(payload) {
   process.stdout.write(JSON.stringify(payload, null, 2) + "\n")
   process.exit(0)

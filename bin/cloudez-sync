@@ -1,20 +1,24 @@
 #!/usr/bin/env node
-// Uso: cloudez-sync <deploy_id> <diretorio_local>
-//      cloudez-sync --hash-only <diretorio_local>
-//
-// Envia o build para o diretório de release criado pelo cloudez_begin_deploy.
-//
-// Já foi um binário em Go, e antes disso o launcher POSIX que escolhia o
-// binário da plataforma; os dois saíram quando Node 20+ virou pré-requisito
-// do plugin, eliminando 15 MB de binários versionados.
-//
-// O par deste arquivo é o `.cmd` ao lado, para quem chama pelo cmd ou
-// PowerShell, onde o shebang não vale nada.
+/**
+ * Uso: cloudez-sync <deploy_id> <diretorio_local>
+ *      cloudez-sync --hash-only <diretorio_local>
+ *
+ * Envia o build para o diretório de release criado pelo cloudez_begin_deploy.
+ *
+ * Já foi um binário em Go, e antes disso o launcher POSIX que escolhia o
+ * binário da plataforma; os dois saíram quando Node 20+ virou pré-requisito
+ * do plugin, eliminando 15 MB de binários versionados.
+ *
+ * O par deste arquivo é o `.cmd` ao lado, para quem chama pelo cmd ou
+ * PowerShell, onde o shebang não vale nada.
+ */
 
 import { readdirSync, statSync } from "node:fs"
 
-// Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
-// subiria um transporte stdio e penduraria este processo.
+/**
+ * Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
+ * subiria um transporte stdio e penduraria este processo.
+ */
 import { loadState, saveState } from "../mcp/cloudez-state.mjs"
 
 import { die, ok } from "./_out.mjs"
@@ -24,15 +28,19 @@ import { transferir } from "./_transfer.mjs"
 const args = process.argv.slice(2)
 
 if (args.length < 2) {
-  // Uso em texto puro, não no envelope JSON: erro de linha de comando ainda
-  // não tem contrato estabelecido para ler.
+  /**
+   * Uso em texto puro, não no envelope JSON: erro de linha de comando ainda
+   * não tem contrato estabelecido para ler.
+   */
   process.stderr.write("uso: cloudez-sync <deploy_id> <diretorio_local>\n")
   process.stderr.write("     cloudez-sync --hash-only <diretorio_local>\n")
   process.exit(2)
 }
 
-// Roda antes do begin_deploy, formando o release_id que ainda não existe;
-// não toca rede nem estado, só lê o diretório e imprime o resumo.
+/**
+ * Roda antes do begin_deploy, formando o release_id que ainda não existe;
+ * não toca rede nem estado, só lê o diretório e imprime o resumo.
+ */
 if (args[0] === "--hash-only") {
   apenasHash(args[1])
 } else {
@@ -65,7 +73,7 @@ function conferirDiretorio(dir) {
   }
 }
 
-/** Imprime o identificador de conteúdo do que seria enviado. */
+// Imprime o identificador de conteúdo do que seria enviado.
 function apenasHash(dir) {
   conferirDiretorio(dir)
 
@@ -73,14 +81,18 @@ function apenasHash(dir) {
   try {
     h = hashPayload(dir)
   } catch (e) {
-    // Nome que o transporte não sabe carregar é recusa própria, não falha de
-    // leitura: dizer `hash_failed` mandaria procurar defeito de disco.
+    /**
+     * Nome que o transporte não sabe carregar é recusa própria, não falha de
+     * leitura: dizer `hash_failed` mandaria procurar defeito de disco.
+     */
     if (e.code === "filename_unsupported") die("filename_unsupported", e.message)
     die("hash_failed", `Não foi possível ler '${dir}' por inteiro: ${e.message}`)
   }
 
-  // conferirDiretorio só garante que o diretório não está vazio; um dir só
-  // com .git ou com um .gitignore amplo demais chega aqui com zero arquivos.
+  /**
+   * conferirDiretorio só garante que o diretório não está vazio; um dir só
+   * com .git ou com um .gitignore amplo demais chega aqui com zero arquivos.
+   */
   if (h.files === 0) {
     const fontes = h.ignored?.sources ?? []
     const porque = fontes.length > 0
@@ -97,8 +109,10 @@ async function sincronizar(deployId, dir) {
   try {
     dep = loadState(deployId)
   } catch (e) {
-    // loadState levanta o erro do MCP (ToolError), já no formato do
-    // contrato; reaproveitar a mensagem evita as duas pontas divergirem.
+    /**
+     * loadState levanta o erro do MCP (ToolError), já no formato do
+     * contrato; reaproveitar a mensagem evita as duas pontas divergirem.
+     */
     const doMcp = e?.body?.error?.message
     die("deploy_not_found", doMcp ?? `deploy_id '${deployId}' desconhecido. Chame cloudez_begin_deploy primeiro.`)
   }
@@ -116,8 +130,10 @@ async function sincronizar(deployId, dir) {
   }
   const { stats, logs, erro } = resultado
   if (erro) {
-    // retryable porque a causa mais comum é rede ou chave recém-autorizada;
-    // o estado só avança quando o transporte confirma.
+    /**
+     * retryable porque a causa mais comum é rede ou chave recém-autorizada;
+     * o estado só avança quando o transporte confirma.
+     */
     die("transfer_failed", `Falha ao enviar '${dir}' para ${dep.ssh.host}.`, { logs, retryable: true })
   }
 

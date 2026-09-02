@@ -1,23 +1,25 @@
 #!/usr/bin/env node
-// Relatório de cobertura de `bin/`, juntando o que os dois layers de teste
-// executaram.
-//
-// Uso: test/run.sh --coverage  (ou: node test/coverage.mjs <dir-do-NODE_V8_COVERAGE>)
-//
-// `node --test --experimental-test-coverage` só enxerga o que o próprio
-// processo de teste carrega; os adaptadores rodam como subprocesso do bats,
-// e para esses o que existe é `NODE_V8_COVERAGE`, que despeja o coverage
-// bruto do V8 num diretório ao sair. Este arquivo só junta os dois.
-//
-// Duas decisões de medição:
-//
-// 1. Não conta "range aninhado com count > 0" como cobertura de bloco: o V8
-//    só emite sub-range quando a contagem difere do range que o contém, ou
-//    seja, os aninhados são os buracos. O certo é resolver byte a byte, com
-//    o range mais interno mandando.
-//
-// 2. Comentário não conta como linha coberta, para a cobertura não subir
-//    sozinha ao escrever documentação.
+/**
+ * Relatório de cobertura de `bin/`, juntando o que os dois layers de teste
+ * executaram.
+ *
+ * Uso: test/run.sh --coverage  (ou: node test/coverage.mjs <dir-do-NODE_V8_COVERAGE>)
+ *
+ * `node --test --experimental-test-coverage` só enxerga o que o próprio
+ * processo de teste carrega; os adaptadores rodam como subprocesso do bats,
+ * e para esses o que existe é `NODE_V8_COVERAGE`, que despeja o coverage
+ * bruto do V8 num diretório ao sair. Este arquivo só junta os dois.
+ *
+ * Duas decisões de medição:
+ *
+ * 1. Não conta "range aninhado com count > 0" como cobertura de bloco: o V8
+ *    só emite sub-range quando a contagem difere do range que o contém, ou
+ *    seja, os aninhados são os buracos. O certo é resolver byte a byte, com
+ *    o range mais interno mandando.
+ *
+ * 2. Comentário não conta como linha coberta, para a cobertura não subir
+ *    sozinha ao escrever documentação.
+ */
 
 import { readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
@@ -72,8 +74,10 @@ for (const [url, execucoes] of [...porArquivo].sort()) {
   const fonte = readFileSync(caminho, "utf8")
   const nome = caminho.split("/").slice(-2).join("/")
 
-  // conhecido[i]: o byte está dentro de alguma função. contagem[i]: maior
-  // count visto entre os processos, então qualquer teste que exercite conta.
+  /**
+   * conhecido[i]: o byte está dentro de alguma função. contagem[i]: maior
+   * count visto entre os processos, então qualquer teste que exercite conta.
+   */
   const conhecido = new Uint8Array(fonte.length)
   const contagem = new Int32Array(fonte.length)
 
@@ -143,7 +147,7 @@ for (const [url, execucoes] of [...porArquivo].sort()) {
   if (semCobertura.length) lacunas.push(`  ${nome}: ${faixas(semCobertura)}`)
 }
 
-/** 1,2,3,7,8 -> "1-3, 7-8". Uma lista crua de 60 números não se lê. */
+// 1,2,3,7,8 -> "1-3, 7-8". Uma lista crua de 60 números não se lê.
 function faixas(ns) {
   const saida = []
   let ini = ns[0]
@@ -168,5 +172,7 @@ console.log(
 
 if (lacunas.length) console.log("\nlinhas nunca executadas:\n" + lacunas.join("\n"))
 
-// Sai 0 mesmo com cobertura baixa, de propósito: isto é um relatório, não
-// um portão de CI.
+/**
+ * Sai 0 mesmo com cobertura baixa, de propósito: isto é um relatório, não
+ * um portão de CI.
+ */

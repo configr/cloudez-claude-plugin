@@ -1,10 +1,12 @@
-// O identificador de conteúdo do payload (bin/_payload.mjs).
-//
-// Roda em `node --test`, não em bats: aqui o que se afirma é sobre uma
-// função, não um comando. As propriedades relativas ("mudar X muda o hash")
-// precisam hashear duas árvores e comparar, o que por linha de comando
-// exercitaria o adaptador para testar a biblioteca. O comportamento do
-// `cloudez-sync` continua coberto em test/adapters.bats.
+/**
+ * O identificador de conteúdo do payload (bin/_payload.mjs).
+ *
+ * Roda em `node --test`, não em bats: aqui o que se afirma é sobre uma
+ * função, não um comando. As propriedades relativas ("mudar X muda o hash")
+ * precisam hashear duas árvores e comparar, o que por linha de comando
+ * exercitaria o adaptador para testar a biblioteca. O comportamento do
+ * `cloudez-sync` continua coberto em test/adapters.bats.
+ */
 
 import assert from "node:assert/strict"
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from "node:fs"
@@ -49,10 +51,12 @@ function tarReal(args, stdin) {
   })
 }
 
-// O contrato central: o hash cobre exatamente o conjunto que o transfer
-// envia, senão o release_id descreve algo que não foi ao ar. O transfer
-// passa ao tar a mesma lista que o hash percorre (por `-T -`); este teste
-// guarda que o tar empacota exatamente essa lista, nem mais nem menos.
+/**
+ * O contrato central: o hash cobre exatamente o conjunto que o transfer
+ * envia, senão o release_id descreve algo que não foi ao ar. O transfer
+ * passa ao tar a mesma lista que o hash percorre (por `-T -`); este teste
+ * guarda que o tar empacota exatamente essa lista, nem mais nem menos.
+ */
 test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS && "tar do Windows não confere aqui" }, () => {
   const dir = escrever({
     "index.html": "<h1>oi</h1>",
@@ -75,16 +79,20 @@ test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS &&
   const pacote = tarReal(["-cf", "-", "-C", dir, "-T", "-"], lista)
   assert.equal(pacote.status, 0, `tar -c falhou: ${pacote.stderr}`)
 
-  // A comparação é por EXTRAÇÃO, e não pela listagem do `tar -t`: o bsdtar
-  // escapa não-ASCII em octal ali, e o teste passaria a afirmar sobre o formato
-  // de exibição do tar em vez do conteúdo do pacote.
+  /**
+   * A comparação é por EXTRAÇÃO, e não pela listagem do `tar -t`: o bsdtar
+   * escapa não-ASCII em octal ali, e o teste passaria a afirmar sobre o formato
+   * de exibição do tar em vez do conteúdo do pacote.
+   */
   const destino = mkdtempSync(join(tmpdir(), "cloudez-extraido-"))
   const extracao = tarReal(["-xf", "-", "-C", destino], pacote.stdout)
   assert.equal(extracao.status, 0, `tar -x falhou: ${extracao.stderr}`)
 
-  // Normalizado dos dois lados: o bsdtar do macOS converte a forma Unicode do
-  // nome ao empacotar (NFC/NFD), e sem isto o teste afirmaria sobre a
-  // normalização da plataforma em vez de sobre o conjunto de arquivos.
+  /**
+   * Normalizado dos dois lados: o bsdtar do macOS converte a forma Unicode do
+   * nome ao empacotar (NFC/NFD), e sem isto o teste afirmaria sobre a
+   * normalização da plataforma em vez de sobre o conjunto de arquivos.
+   */
   const norm = (r) => r.normalize("NFC")
   const doTar = new Set(payloadEntries(destino).map((e) => norm(e.rel)))
   const doHash = new Set(entries.map((e) => norm(e.rel)))
@@ -94,9 +102,11 @@ test("o tar empacota exatamente a lista que o hash cobre", { skip: NO_WINDOWS &&
   assert.ok(doHash.size > 0, "nenhum arquivo considerado — o teste não verificou nada")
 })
 
-// `.gitignore` e `.github/` precisam sobreviver: a exclusão é por nome puro,
-// não por prefixo. O `.git` de um submódulo cai em qualquer profundidade,
-// porque o padrão do tar não é ancorado na raiz.
+/**
+ * `.gitignore` e `.github/` precisam sobreviver: a exclusão é por nome puro,
+ * não por prefixo. O `.git` de um submódulo cai em qualquer profundidade,
+ * porque o padrão do tar não é ancorado na raiz.
+ */
 test("a exclusão pega .git em qualquer nível, mas não os vizinhos", () => {
   const casos = [
     [".git", true],
@@ -115,17 +125,21 @@ test("a exclusão pega .git em qualquer nível, mas não os vizinhos", () => {
   }
 })
 
-// O identificador só serve se a mesma entrada der o mesmo hash em máquinas
-// diferentes. A ordem da caminhada depende do sistema de arquivos, então o mesmo
-// conteúdo criado em ordem diferente precisa colidir de propósito.
+/**
+ * O identificador só serve se a mesma entrada der o mesmo hash em máquinas
+ * diferentes. A ordem da caminhada depende do sistema de arquivos, então o mesmo
+ * conteúdo criado em ordem diferente precisa colidir de propósito.
+ */
 test("mesmo conteúdo, mesmo hash", () => {
   const a = escrever({ "a.txt": "um", "b/c.txt": "dois" })
   const b = escrever({ "b/c.txt": "dois", "a.txt": "um" })
   assert.equal(sha(a), sha(b))
 })
 
-// mtime muda a cada clone do repositório sem que uma linha do projeto mude. Se
-// entrasse no hash, o CI e a máquina do desenvolvedor nunca concordariam.
+/**
+ * mtime muda a cada clone do repositório sem que uma linha do projeto mude. Se
+ * entrasse no hash, o CI e a máquina do desenvolvedor nunca concordariam.
+ */
 test("mtime não entra no hash", () => {
   const dir = escrever({ "a.txt": "um" })
   const antes = sha(dir)
@@ -136,8 +150,10 @@ test("mtime não entra no hash", () => {
   assert.equal(sha(dir), antes, "mudar o mtime mudou o hash")
 })
 
-// O bit de execução muda o comportamento do que está no ar: um entrypoint
-// que perde o +x quebra o container, então precisa contar.
+/**
+ * O bit de execução muda o comportamento do que está no ar: um entrypoint
+ * que perde o +x quebra o container, então precisa contar.
+ */
 test("o bit de execução entra no hash", { skip: NO_WINDOWS && "modo de arquivo não é comparável no Windows" }, () => {
   const dir = escrever({ "entrypoint.sh": "#!/bin/sh\n" })
   const semExec = sha(dir)
@@ -147,9 +163,11 @@ test("o bit de execução entra no hash", { skip: NO_WINDOWS && "modo de arquivo
   assert.notEqual(sha(dir), semExec, "dar +x não mudou o hash")
 })
 
-// Sem um separador que não pode aparecer num caminho, dois conjuntos distintos de
-// arquivos concatenariam para os mesmos bytes. O caso clássico: o nome de um
-// invade o conteúdo do outro.
+/**
+ * Sem um separador que não pode aparecer num caminho, dois conjuntos distintos de
+ * arquivos concatenariam para os mesmos bytes. O caso clássico: o nome de um
+ * invade o conteúdo do outro.
+ */
 test("a fronteira entre nome e conteúdo é respeitada", () => {
   const a = escrever({ ab: "c" })
   const b = escrever({ a: "bc" })
@@ -162,9 +180,11 @@ test("conteúdo movido entre arquivos muda o hash", () => {
   assert.notEqual(sha(a), sha(b))
 })
 
-// O tar preserva symlinks em vez de segui-los. Seguir aqui hashearia bytes
-// que nunca viajam, e um link quebrado, que o tar transporta sem reclamar,
-// viraria erro de deploy.
+/**
+ * O tar preserva symlinks em vez de segui-los. Seguir aqui hashearia bytes
+ * que nunca viajam, e um link quebrado, que o tar transporta sem reclamar,
+ * viraria erro de deploy.
+ */
 test("o symlink é hasheado pelo alvo", { skip: NO_WINDOWS && "symlink exige privilégio no Windows" }, () => {
   const dir = escrever({ "real.txt": "conteudo" })
   symlinkSync("real.txt", join(dir, "link.txt"))
@@ -180,16 +200,20 @@ test("o symlink é hasheado pelo alvo", { skip: NO_WINDOWS && "symlink exige pri
   assert.doesNotThrow(() => hashPayload(quebrado), "link quebrado virou erro")
 })
 
-// Diretório cujo único conteúdo é `.git` não tem nada publicável. O
-// cloudez-sync usa `files === 0` para distinguir isso de um deploy legítimo
-// e recusar.
+/**
+ * Diretório cujo único conteúdo é `.git` não tem nada publicável. O
+ * cloudez-sync usa `files === 0` para distinguir isso de um deploy legítimo
+ * e recusar.
+ */
 test("só .git não tem arquivo publicável", () => {
   const dir = escrever({ ".git/HEAD": "ref: refs/heads/main\n" })
   assert.equal(hashPayload(dir).files, 0)
 })
 
-// files e bytes vão para o usuário junto do sha; se mentirem, mentem numa tela
-// onde alguém decide se o deploy parece certo.
+/**
+ * files e bytes vão para o usuário junto do sha; se mentirem, mentem numa tela
+ * onde alguém decide se o deploy parece certo.
+ */
 test("a contagem e os bytes conferem", () => {
   const dir = escrever({ "a.txt": "12345", "b/c.txt": "678", ".git/x": "ignorado" })
   const h = hashPayload(dir)
@@ -197,13 +221,15 @@ test("a contagem e os bytes conferem", () => {
   assert.equal(h.bytes, 8)
 })
 
-// Âncora entre plataformas. As outras propriedades daqui são relativas
-// ("mudar X muda o hash") e continuariam valendo mesmo se o Windows
-// produzisse uma família de hashes diferente da do Linux; sem esta, o
-// release_id do mesmo conteúdo divergiria conforme quem publicou.
-//
-// Este valor é o mesmo que a suíte em Go fixava antes do port, garantindo
-// que nenhuma release já publicada mudou de identificador.
+/**
+ * Âncora entre plataformas. As outras propriedades daqui são relativas
+ * ("mudar X muda o hash") e continuariam valendo mesmo se o Windows
+ * produzisse uma família de hashes diferente da do Linux; sem esta, o
+ * release_id do mesmo conteúdo divergiria conforme quem publicou.
+ *
+ * Este valor é o mesmo que a suíte em Go fixava antes do port, garantindo
+ * que nenhuma release já publicada mudou de identificador.
+ */
 test("o hash de uma árvore conhecida não mudou", () => {
   const esperado = "03ff8bfa4d33e6cad50a7101e974ef34d6e8ccd51a77fbaacf97b7355cef01fc"
 
@@ -227,8 +253,10 @@ test("os 7 primeiros dígitos servem de sufixo do release_id", () => {
   assert.ok(h.content_sha256.startsWith(curto))
 })
 
-// Diretórios vazios não contam: o tar os transporta, mas depois de extraídos num
-// diretório de release eles não se distinguem de ausência.
+/**
+ * Diretórios vazios não contam: o tar os transporta, mas depois de extraídos num
+ * diretório de release eles não se distinguem de ausência.
+ */
 test("diretório vazio não muda o hash", () => {
   const sem = escrever({ "a.txt": "um" })
   const com = escrever({ "a.txt": "um", "vazio/": "" })
@@ -240,8 +268,10 @@ test("diretório vazio não muda o hash", () => {
   assert.deepEqual(nomes, ordenados, `lista fora de ordem: ${nomes}`)
 })
 
-// .gitignore e .cloudezignore: sem eles, o tar excluía só o `.git`, e um
-// projeto Node levava `node_modules` e a saída do build inteiros.
+/**
+ * .gitignore e .cloudezignore: sem eles, o tar excluía só o `.git`, e um
+ * projeto Node levava `node_modules` e a saída do build inteiros.
+ */
 
 const rels = (dir) => listarPayload(dir).entries.map((e) => e.rel).sort()
 
@@ -257,8 +287,10 @@ test("o .gitignore poda, e não desce no que podou", () => {
   assert.deepEqual(rels(dir), [".gitignore", "index.js"])
 
   const { ignore } = listarPayload(dir)
-  // Conta os caminhos podados, não os arquivos dentro: node_modules custa
-  // uma comparação, não 38 mil.
+  /**
+   * Conta os caminhos podados, não os arquivos dentro: node_modules custa
+   * uma comparação, não 38 mil.
+   */
   assert.deepEqual(ignore.paths, [".next", "node_modules"])
   assert.deepEqual(ignore.sources, [".gitignore"])
 })
@@ -268,8 +300,10 @@ test("o .cloudezignore também poda", () => {
   assert.deepEqual(rels(dir), [".cloudezignore", "a.js"])
 })
 
-// A ordem de leitura dá ao .cloudezignore a palavra final: resolve o caso
-// do artefato ignorado pelo git que precisa ir ao ar.
+/**
+ * A ordem de leitura dá ao .cloudezignore a palavra final: resolve o caso
+ * do artefato ignorado pelo git que precisa ir ao ar.
+ */
 test("o .cloudezignore desfaz o .gitignore com !", () => {
   const dir = escrever({
     ".gitignore": "dist\n",
@@ -281,10 +315,12 @@ test("o .cloudezignore desfaz o .gitignore com !", () => {
   assert.ok(rels(dir).includes("dist/app.js"), "o ! do .cloudezignore devia ter reabilitado")
 })
 
-// O .dockerignore descreve o que não entra no contexto de build, e ali é
-// correto excluir o Dockerfile e o compose. Mas o deploy publica o
-// diretório para construir depois, no servidor: respeitá-lo aqui faria
-// todo site em container falhar com compose_missing.
+/**
+ * O .dockerignore descreve o que não entra no contexto de build, e ali é
+ * correto excluir o Dockerfile e o compose. Mas o deploy publica o
+ * diretório para construir depois, no servidor: respeitá-lo aqui faria
+ * todo site em container falhar com compose_missing.
+ */
 test("REGRESSÃO: o .dockerignore NÃO é lido", () => {
   const dir = escrever({
     ".dockerignore": "Dockerfile\ndocker-compose.yml\nnode_modules\n",
@@ -338,15 +374,19 @@ test("comentário e linha em branco não viram regra", () => {
   assert.deepEqual(rels(dir), [".gitignore", "a.js"])
 })
 
-// O `.git` sai por uma regra própria, avaliada antes dos padrões: um `!`
-// não o traz de volta.
+/**
+ * O `.git` sai por uma regra própria, avaliada antes dos padrões: um `!`
+ * não o traz de volta.
+ */
 test("nem um ! reabilita o .git", () => {
   const dir = escrever({ ".cloudezignore": "!.git\n", ".git/HEAD": "ref", "a.js": "1" })
   assert.deepEqual(rels(dir), [".cloudezignore", "a.js"])
 })
 
-// Igual ao git: negação não reabilita arquivo sob diretório excluído, porque o
-// diretório nem chega a ser percorrido.
+/**
+ * Igual ao git: negação não reabilita arquivo sob diretório excluído, porque o
+ * diretório nem chega a ser percorrido.
+ */
 test("o ! não reabilita arquivo dentro de diretório podado", () => {
   const dir = escrever({ ".gitignore": "dist\n!dist/importante.js\n", "dist/importante.js": "1", "a.js": "2" })
   assert.deepEqual(rels(dir), [".gitignore", "a.js"])
@@ -358,17 +398,21 @@ test("sem arquivo de padrão, o retorno não ganha campo", () => {
   assert.deepEqual(listarPayload(dir).ignore.sources, [])
 })
 
-// Um `.gitignore` que exclua tudo deixaria o deploy publicar uma release
-// vazia com identificador de aparência normal; o cloudez-sync recusa isso.
+/**
+ * Um `.gitignore` que exclua tudo deixaria o deploy publicar uma release
+ * vazia com identificador de aparência normal; o cloudez-sync recusa isso.
+ */
 test("padrão que exclui tudo deixa zero arquivos publicáveis", () => {
   const dir = escrever({ ".cloudezignore": "*\n", "a.js": "1", "b.js": "2" })
   assert.equal(listarPayload(dir).entries.length, 0)
 })
 
-// Nomes que o transporte não sabe carregar: a lista vai ao tar separada
-// por quebra de linha, não por NUL, porque o busybox (tar de qualquer
-// imagem Alpine) não conhece `--null`. O preço são três caracteres, e
-// recusá-los é a escolha certa.
+/**
+ * Nomes que o transporte não sabe carregar: a lista vai ao tar separada
+ * por quebra de linha, não por NUL, porque o busybox (tar de qualquer
+ * imagem Alpine) não conhece `--null`. O preço são três caracteres, e
+ * recusá-los é a escolha certa.
+ */
 
 const recusa = (dir) => {
   try {
@@ -380,8 +424,10 @@ const recusa = (dir) => {
 }
 
 test("barra invertida no nome é recusada", { skip: NO_WINDOWS && "nome com barra invertida não existe no Windows" }, () => {
-  // Medido no GNU tar: `com\tbarra.txt` numa lista sem --null vira uma busca por
-  // um nome com TAB, e devolve "Cannot stat".
+  /**
+   * Medido no GNU tar: `com\tbarra.txt` numa lista sem --null vira uma busca por
+   * um nome com TAB, e devolve "Cannot stat".
+   */
   const e = recusa(escrever({ "com\\tbarra.txt": "x", "ok.txt": "y" }))
   assert.ok(e, "devia recusar")
   assert.equal(e.code, "filename_unsupported")
@@ -395,8 +441,10 @@ test("quebra de linha no nome é recusada", { skip: NO_WINDOWS && "nome com \\n 
   assert.equal(e.code, "filename_unsupported")
 })
 
-// Só os três: espaço e aspas atravessam a lista sem escape (conferido no
-// GNU tar), e recusá-los seria barrar nome de arquivo perfeitamente comum.
+/**
+ * Só os três: espaço e aspas atravessam a lista sem escape (conferido no
+ * GNU tar), e recusá-los seria barrar nome de arquivo perfeitamente comum.
+ */
 test("espaço e aspas no nome PASSAM", () => {
   const dir = escrever({ "com espaço.txt": "x", 'com "aspas".txt': "y" })
   assert.equal(recusa(dir), null)

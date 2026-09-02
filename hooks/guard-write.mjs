@@ -1,22 +1,24 @@
 #!/usr/bin/env node
-// Barreira contra escrita em aplicação viva.
-//
-// Rodado pelo harness como hook `PreToolUse`, antes de a tool executar.
-// Recebe a chamada em JSON pelo stdin e decide pelo código de saída: 0
-// deixa passar, 2 bloqueia e devolve o stderr ao modelo como motivo.
-//
-// Existe por dois incidentes reais (um recado de teste gravado num mural
-// público, um PNG num site de uploads), nenhum por desobediência a uma
-// regra escrita: nos dois casos a escrita parecia parte do pedido. Por isso
-// o hook não interpreta a intenção, só vê verbo de escrita para host remoto
-// e barra.
-//
-// A aprovação exige terminal pelo mesmo motivo que o `cloudez-login`
-// interativo falha com `no_tty` pela tool Bash: sem terminal de controle,
-// "aprovado" significaria "o modelo decidiu por si".
-//
-// Fecha só as vias enumeráveis (`curl`, `wget` pela tool Bash), não
-// `python -c "requests.post(...)"` nem a tool de outro MCP.
+/**
+ * Barreira contra escrita em aplicação viva.
+ *
+ * Rodado pelo harness como hook `PreToolUse`, antes de a tool executar.
+ * Recebe a chamada em JSON pelo stdin e decide pelo código de saída: 0
+ * deixa passar, 2 bloqueia e devolve o stderr ao modelo como motivo.
+ *
+ * Existe por dois incidentes reais (um recado de teste gravado num mural
+ * público, um PNG num site de uploads), nenhum por desobediência a uma
+ * regra escrita: nos dois casos a escrita parecia parte do pedido. Por isso
+ * o hook não interpreta a intenção, só vê verbo de escrita para host remoto
+ * e barra.
+ *
+ * A aprovação exige terminal pelo mesmo motivo que o `cloudez-login`
+ * interativo falha com `no_tty` pela tool Bash: sem terminal de controle,
+ * "aprovado" significaria "o modelo decidiu por si".
+ *
+ * Fecha só as vias enumeráveis (`curl`, `wget` pela tool Bash), não
+ * `python -c "requests.post(...)"` nem a tool de outro MCP.
+ */
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -24,7 +26,7 @@ import { join } from "node:path"
 
 import { escritaRemota, hash } from "./_guard.mjs"
 
-/** Minutos de validade. Curto porque a aprovação vale para UM comando. */
+// Minutos de validade. Curto porque a aprovação vale para UM comando.
 export const TTL_MIN = 10
 
 /**
