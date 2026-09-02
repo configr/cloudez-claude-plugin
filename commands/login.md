@@ -1,6 +1,6 @@
 ---
 description: Verifica se há um token da Cloudez salvo e, se não houver, cria a conta ou conduz o usuário até o token no painel
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_trial_plan, mcp__cloudez__cloudez_setup_trial_cloud, mcp__cloudez__cloudez_list_clouds, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_remember_panel_host, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_trial_plan, mcp__cloudez__cloudez_setup_trial_cloud, mcp__cloudez__cloudez_list_clouds, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
 ---
 
 Chame a tool `cloudez_auth_status`. Ela é quem responde pelo estado da
@@ -24,9 +24,15 @@ ambiente.
 
 ## Se tem conta
 
-**Peça o endereço do painel dele.** Não presuma nenhum: a Cloudez é white-label, e
-cada revenda tem o seu domínio — `cloud.configr.com` é o da Configr, não é "o"
-painel. Inventar um manda o usuário para um site que não é o dele.
+**Se `cloudez_auth_status` já trouxe `panel_host`, use-o direto — não pergunte
+de novo.** É o mesmo painel que outro comando já confirmou nesta máquina
+antes, e reperguntar o que já se sabe é o tipo de atrito que faz o usuário
+achar que nada fica salvo.
+
+Sem `panel_host` na resposta, **peça o endereço do painel dele.** Não presuma
+nenhum: a Cloudez é white-label, e cada revenda tem o seu domínio —
+`cloud.configr.com` é o da Configr, não é "o" painel. Inventar um manda o
+usuário para um site que não é o dele.
 
 Se ele não souber qual é, o endereço está no e-mail de boas-vindas da revenda, ou
 é o que ele usa para entrar todo dia.
@@ -40,7 +46,19 @@ veio produz `.../sites/123/account?tab=token`, que não existe.
 Se vier `panel_not_found`, o endereço está errado. Diga isso e peça de novo, em
 vez de mandá-lo abrir uma página que não vai carregar.
 
-Então, com o `panel_host` da resposta:
+**Confirmado — seja porque veio de `cloudez_auth_status`, seja porque acabou
+de sair de `cloudez_panel_info` — grave antes de seguir, não pule este passo
+mesmo sem efeito visível na resposta de agora:**
+
+```
+cloudez_remember_panel_host(panel_host: "<panel_host>")
+```
+
+Gravar de novo o que já estava salvo não tem custo: a tool é idempotente. Sem
+essa chamada, a próxima conversa pergunta o painel de novo, como se nada
+tivesse sido salvo.
+
+Então, com o `panel_host`:
 
 ```
 Abra: https://<panel_host>/account?tab=token

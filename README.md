@@ -115,6 +115,12 @@ Com o plugin ativo:
   conduz o usuário até ele: pergunta se já tem conta, aponta a página certa do
   painel dele (ou o cadastro, se for o caso) e captura o token sem que ele passe
   pela conversa;
+- `/cloudez:hire-cloud` — contrata uma cloud paga na Cloudez, sempre pelo
+  painel (`<panel_host>/clouds/create`) — não existe tool para pagamento, de
+  propósito. **Nunca oferece o teste grátis**: o trial só existe
+  automaticamente no cadastro de conta nova, dentro do `/cloudez:login`. O
+  `/cloudez:setup` delega para este comando quando a conta não tem onde criar
+  um site, em vez de duplicar o procedimento;
 - `/cloudez:setup <domain> <environment>` — cria o `.cloudez.yaml` do projeto, se
   ainda não existir. Os dois argumentos são obrigatórios: o domínio identifica o
   site, o environment dá nome ao bloco gerado. Faltando algum, o comando pergunta.
@@ -147,10 +153,11 @@ Com o plugin ativo:
   reconstrói a imagem depois de trocar o symlink, sem o que o rollback não surte
   efeito nenhum.
 
-> **Cada comando tem uma skill, e nenhuma skill tem procedimento.** As seis
-> (`skills/login/`, `setup/`, `compose/`, `dev/`, `deploy/`, `rollback/`) existem
-> só para dar a porta de entrada em linguagem natural: elas encaminham para o
-> comando e mandam ler `commands/<nome>.md` em vez de reconstruir os passos.
+> **Cada comando tem uma skill, e nenhuma skill tem procedimento.** As sete
+> (`skills/login/`, `hire-cloud/`, `setup/`, `compose/`, `dev/`, `deploy/`,
+> `rollback/`) existem só para dar a porta de entrada em linguagem natural:
+> elas encaminham para o comando e mandam ler `commands/<nome>.md` em vez de
+> reconstruir os passos.
 >
 > Duas descrições do mesmo procedimento divergem, e a errada acaba sendo
 > justamente a que ninguém está lendo na hora.
@@ -369,14 +376,33 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
       timeout padrão de 10s, reportando `upstream_unavailable`/`retryable: true`
       quando o site já tinha sido criado — corrigido com timeout próprio de 120s
       e `site_creation_unconfirmed`, no mesmo padrão do `cloud_setup_unconfirmed`
-- [x] `/cloudez:setup` contrata uma cloud paga pelo painel quando a conta
-      (antiga, sem trial nenhum) não tem onde criar o site, ou quando o usuário
-      prefere uma cloud nova a uma das existentes. Não existe tool para
-      contratar: é dinheiro de verdade e escolha de plano, então o comando manda
-      o usuário para `https://<panel_host>/clouds/create` e espera ele confirmar
-      — não há polling, a confirmação é sempre do usuário — antes de comparar
-      `cloudez_list_clouds` de antes e depois para achar a cloud nova. **Não foi
-      exercitado contra a API real**
+- [x] `/cloudez:setup` contrata uma cloud paga quando a conta (antiga, sem
+      trial nenhum) não tem onde criar o site, ou quando o usuário prefere uma
+      cloud nova a uma das existentes — delegando para `/cloudez:hire-cloud`
+      em vez de duplicar o procedimento
+- [x] `/cloudez:hire-cloud`, comando próprio para contratar uma cloud paga
+      fora do `/cloudez:setup` — quem pede "quero contratar uma cloud" em
+      linguagem natural, sem estar no meio da criação de um site, caía antes
+      numa conversa improvisada, sem procedimento nenhum por trás. Não existe
+      tool para contratar: é dinheiro de verdade e escolha de plano, então o
+      comando manda o usuário para `https://<panel_host>/clouds/create` e
+      espera ele confirmar — não há polling — antes de comparar
+      `cloudez_list_clouds` de antes e depois para achar a cloud nova. **Nunca
+      oferece o teste grátis**: o trial só existe automaticamente no cadastro
+      de conta nova. **Não foi exercitado contra a API real**
+- [x] `panel_host` lembrado por máquina, em `~/.cloudez/panel_host` (irmão do
+      `token`, mas sem `chmod 0600` — não é segredo). `cloudez_remember_panel_host`
+      grava, `cloudez_auth_status` devolve o que estiver gravado. Antes disso,
+      todo comando que precisava do painel perguntava de novo, mesmo quando o
+      usuário já tinha informado um minutos antes, na mesma conversa ou numa
+      anterior
+- [x] `cloudez_auth_status` para de ser narrado ao usuário quando
+      `authenticated: true` — "seu token foi verificado, veio do arquivo tal"
+      é ruído quando checar login não é o pedido dele. Contrato explícito
+      agora na description da tool: só vale falar sobre autenticação quando
+      ela faltar, ou quando checar login for o próprio pedido (o
+      `/cloudez:login` continua narrando, porque aí é exatamente isso que o
+      usuário perguntou)
 - [ ] O rollback de container depende de estado LOCAL. O `cloudez_rollback` é
       chaveado por domínio + root (estado do servidor), mas o `compose_build` e o
       `compose_up` são chaveados por `deploy_id` (estado em `~/.cloudez/state/`).
@@ -408,6 +434,12 @@ O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
 `cloud.configr.com` é o da Configr, não é "o" painel. O `/cloudez:login` pergunta
 o domínio em vez de presumir um, e confere com `cloudez_panel_info` antes de
 mandar o usuário para lá.
+
+Confirmado, o `panel_host` fica lembrado em **`~/.cloudez/panel_host`** — irmão
+do `token`, mas sem `chmod 0600`: não é segredo, só o endereço do painel.
+`cloudez_auth_status` devolve o que estiver gravado, e todo comando que
+precisa do painel confere ali antes de perguntar de novo. `CLOUDEZ_PANEL_HOST_FILE`
+muda o caminho, pelo mesmo motivo do `CLOUDEZ_TOKEN_FILE`.
 
 **Quem não tem conta cria pelo próprio Claude, sempre na Configr.** O
 `/cloudez:login` não pergunta por revenda — pergunta nome, e-mail e telefone,

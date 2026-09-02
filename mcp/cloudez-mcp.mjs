@@ -27078,6 +27078,12 @@ function tokenFile() {
   const home = process.env.HOME || process.env.USERPROFILE || "";
   return `${home}/.cloudez/token`;
 }
+function panelHostFile() {
+  const override = process.env.CLOUDEZ_PANEL_HOST_FILE;
+  if (override) return override;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return `${home}/.cloudez/panel_host`;
+}
 
 // src/auth.ts
 import { readFile } from "node:fs/promises";
@@ -27925,11 +27931,11 @@ async function beginDeploy(args) {
   const deployId2 = deployId(releaseId, idempotencyKey);
   const root = stripHome(args.root);
   const releasePath = `${root}/releases/${releaseId}`;
-  const mkdir2 = await sshRun(ssh, `mkdir -p '${releasePath}' '${root}/releases' '${root}/shared'`);
-  if (mkdir2.code !== 0) {
+  const mkdir3 = await sshRun(ssh, `mkdir -p '${releasePath}' '${root}/releases' '${root}/shared'`);
+  if (mkdir3.code !== 0) {
     throw new ToolError("ssh_failed", `N\xE3o foi poss\xEDvel preparar o diret\xF3rio de release em ${ssh.host}.`, {
       retryable: true,
-      hint: (mkdir2.stderr || mkdir2.stdout).trim() || void 0
+      hint: (mkdir3.stderr || mkdir3.stdout).trim() || void 0
     });
   }
   const state = {
@@ -29388,6 +29394,25 @@ async function listClouds() {
   };
 }
 
+// src/panel-host-store.ts
+import { mkdir as mkdir2, readFile as readFile4, writeFile as writeFile2 } from "node:fs/promises";
+import { dirname as dirname4 } from "node:path";
+async function rememberedPanelHost() {
+  try {
+    const contents = (await readFile4(panelHostFile(), "utf8")).trim();
+    return contents || null;
+  } catch {
+    return null;
+  }
+}
+async function rememberPanelHost(entrada) {
+  const host = normalizePanelHost(entrada);
+  const arquivo = panelHostFile();
+  await mkdir2(dirname4(arquivo), { recursive: true, mode: 448 });
+  await writeFile2(arquivo, host + "\n");
+  return host;
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "Cloudez MCP",
@@ -29397,7 +29422,7 @@ server.registerTool(
   "cloudez_auth_status",
   {
     title: "Estado da autentica\xE7\xE3o na Cloudez",
-    description: "Informa se h\xE1 um token da Cloudez utiliz\xE1vel nesta m\xE1quina. Chame antes da primeira opera\xE7\xE3o que fale com a Cloudez numa sess\xE3o, e sempre que outra tool falhar com not_authenticated ou token_invalid, para saber se o problema \xE9 credencial. N\xE3o recebe nem devolve o token: se n\xE3o houver autentica\xE7\xE3o, o caminho \xE9 o `/cloudez:login`, que cadastra pelas tools quem n\xE3o tem conta \u2014 sem nada para rodar no terminal \u2014 e leva ao painel quem j\xE1 tem. Nunca pe\xE7a o token na conversa.",
+    description: "Informa se h\xE1 um token da Cloudez utiliz\xE1vel nesta m\xE1quina, e devolve tamb\xE9m o panel_host lembrado, se algum comando j\xE1 tiver gravado um nesta m\xE1quina (ver cloudez_remember_panel_host) \u2014 n\xE3o pergunte o painel ao usu\xE1rio antes de conferir aqui. Chame antes da primeira opera\xE7\xE3o que fale com a Cloudez numa sess\xE3o, e sempre que outra tool falhar com not_authenticated ou token_invalid, para saber se o problema \xE9 credencial. N\xE3o recebe nem devolve o token: se n\xE3o houver autentica\xE7\xE3o, o caminho \xE9 o `/cloudez:login`, que cadastra pelas tools quem n\xE3o tem conta \u2014 sem nada para rodar no terminal \u2014 e leva ao painel quem j\xE1 tem. `authenticated: true` N\xC3O \xE9 algo para relatar ao usu\xE1rio \u2014 \xE9 s\xF3 o sinal para seguir com o que ele pediu, em sil\xEAncio; s\xF3 vale falar sobre autentica\xE7\xE3o quando ela FALTAR, ou quando checar o login for o pr\xF3prio pedido dele. Nunca pe\xE7a o token na conversa.",
     inputSchema: object({}),
     // Sem efeito colateral, então pode entrar no allowlist do usuário e nunca gerar prompt.
     annotations: { readOnlyHint: true, openWorldHint: true }
@@ -29406,12 +29431,14 @@ server.registerTool(
     try {
       const token = await resolveToken();
       const source = await tokenSource();
+      const panelHost = await rememberedPanelHost();
       if (!token) {
         return okResult({
           authenticated: false,
           source,
           token_file: tokenFile(),
           verified: false,
+          ...panelHost ? { panel_host: panelHost } : {},
           ...loginHint(),
           warning: "N\xE3o pe\xE7a o token na conversa: colado aqui, ele fica no transcript da sess\xE3o."
         });
@@ -29422,6 +29449,7 @@ server.registerTool(
         source,
         token_file: tokenFile(),
         verified: verdict === "valid",
+        ...panelHost ? { panel_host: panelHost } : {},
         // Recusado dá no mesmo que não ter nenhum: a instrução para o usuário é a mesma.
         ...verdict === "invalid" && {
           ...loginHint(),
@@ -29431,6 +29459,24 @@ server.registerTool(
           warning: "N\xE3o foi poss\xEDvel confirmar o token com a API da Cloudez (offline ou API fora). O token existente foi aceito como est\xE1."
         }
       });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+server.registerTool(
+  "cloudez_remember_panel_host",
+  {
+    title: "Lembrar o painel desta m\xE1quina",
+    description: "Grava o panel_host localmente, para os pr\xF3ximos comandos nesta m\xE1quina n\xE3o perguntarem de novo \u2014 cloudez_auth_status devolve o que estiver gravado aqui. Chame s\xF3 depois de cloudez_panel_info confirmar um panel_host v\xE1lido, nunca com o que o usu\xE1rio colou sem confirmar antes: um endere\xE7o errado gravado aqui erraria todo comando seguinte at\xE9 algu\xE9m notar. N\xE3o \xE9 sobre autentica\xE7\xE3o \u2014 o token continua exigindo o fluxo do `/cloudez:login` \u2014 \xE9 s\xF3 para n\xE3o repetir a mesma pergunta a cada conversa.",
+    inputSchema: object({
+      panel_host: string2().describe("O panel_host que cloudez_panel_info devolveu, j\xE1 confirmado")
+    }),
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  async ({ panel_host }) => {
+    try {
+      return okResult({ remembered: true, panel_host: await rememberPanelHost(panel_host) });
     } catch (err) {
       return errorResult(err);
     }

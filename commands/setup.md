@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment> [--database cloudez|docker]
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_list_clouds, mcp__cloudez__cloudez_create_site, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_remember_panel_host, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_list_clouds, mcp__cloudez__cloudez_create_site, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -153,40 +153,14 @@ a checagem de tipo do passo 5 passa direto.
 
 #### Contratar uma cloud nova
 
-Contratar é pago e passa pelo painel — não existe tool para isso, de propósito:
-é dinheiro de verdade saindo da conta do usuário, e a escolha de plano e o
-pagamento não são algo que se decida por ele.
+Siga o procedimento de `/cloudez:hire-cloud` — é o mesmo comando que atende
+quem pede para contratar uma cloud fora deste fluxo, e o procedimento não é
+duplicado aqui: ele já cuida do painel (perguntando só se ainda não houver um
+lembrado nesta máquina), do aviso de que é sempre contratação paga, e do
+antes/depois de `cloudez_list_clouds` para achar a cloud nova.
 
-Precisa do `panel_host`. Se ele ainda não apareceu nesta conversa, pergunte o
-endereço do painel do usuário e confirme com `cloudez_panel_info` — mesmo
-cuidado do `/cloudez:login`: não presuma nenhum domínio, a Cloudez é
-white-label.
-
-Guarde os `id` das clouds que `cloudez_list_clouds()` já devolveu (vazio, se
-caiu aqui pelo caso "nenhuma cloud") — é o retrato de antes, contra o qual vai
-comparar depois.
-
-Mande:
-
-```
-Abra: https://<panel_host>/clouds/create
-Contrate o plano que preferir. Quando terminar, me avise.
-```
-
-**Espere a confirmação dele antes de conferir.** Contratar e provisionar levam
-um tempo que este comando não controla — não há como saber daqui quando
-terminou, e não existe polling automático: quem avisa é o usuário.
-
-Confirmado, chame `cloudez_list_clouds()` de novo e compare com o retrato de
-antes:
-
-- **Uma cloud nova** (o caso comum) — use o `id` dela direto, sem perguntar;
-- **Nenhuma nova ainda** — diga que a contratação pode ainda estar
-  processando, e pergunte se ele quer que confira de novo. Não repita sozinho
-  em loop;
-- **Mais de uma nova** — pergunte qual, mostrando `name` e `fqdn` de cada uma.
-
-Com o `id` da cloud nova, volte para `cloudez_create_site`, acima.
+Com a cloud nova identificada, volte para `cloudez_create_site`, acima, usando
+o `id` dela — sem perguntar, se veio uma só.
 
 ## 3. Environment
 
