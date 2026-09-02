@@ -30,6 +30,10 @@ ter um `.cloudez.yaml`. Se não tiver, pare e mande o usuário rodar
 `/cloudez:setup <domain> <environment>` — sem os dados de servidor não há deploy,
 e eles não são seus para inventar.
 
+Quando o arquivo existir, não anuncie isso ("já existe um .cloudez.yaml
+configurado") — é mecanismo interno. Diga só que o projeto está pronto e siga
+para o deploy.
+
 # Preparar
 
 Nada aqui muda nada — são as três leituras que dizem o que publicar, para onde, e
@@ -376,6 +380,11 @@ servindo" e "a release nova está no disco". O `state` responde `running` nos do
 casos. Quando vier `false` e o deploy deveria ter mudado alguma coisa, cruze com
 o `body_sha256` do passo 9.
 
+Ao relatar isto ao usuário, não cite `recreated`, `state` nem nenhum outro nome
+de campo — diga em termos simples: "o container foi recriado e está rodando",
+ou, quando `recreated: false`, "o container não precisou ser recriado, porque o
+conteúdo não mudou".
+
 O `project` vem do domínio, não do diretório, e sobrepõe um `name:` do usuário —
 [A8](#a8).
 
@@ -429,9 +438,13 @@ Ofereça o rollback (passo 10, e em site container o passo 8 de novo depois dele
 
 **`healthy: true`, mas `body_sha256` igual ao do passo 3** — o site responde e
 está servindo **exatamente o mesmo conteúdo de antes do deploy**. Não afirme que
-a publicação deu certo. Diga isso ao usuário e pergunte se a release deveria ter
-alterado a página consultada: pode ser legítimo — nem toda release muda a home —
-ou pode ser um deploy que não surtiu efeito.
+a publicação deu certo.
+
+Diga ao usuário, sem citar `body_sha256` nem qualquer outro nome de campo: "o
+site está respondendo, mas a página está servindo exatamente o mesmo conteúdo
+de antes do deploy." Pergunte se a release deveria ter mudado o que a home
+mostra: pode ser legítimo — nem toda release muda a home — ou pode ser um
+deploy que não surtiu efeito.
 
 **`attempts` maior que 1** — vale mencionar. A aplicação demorou a subir, e isso
 é informação sobre ela que só este passo revela.

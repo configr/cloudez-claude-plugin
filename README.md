@@ -391,11 +391,16 @@ Em linguagem natural: *"volta a versão anterior"*, *"desfaz o último deploy"*,
       oferece o teste grátis**: o trial só existe automaticamente no cadastro
       de conta nova. **Não foi exercitado contra a API real**
 - [x] `panel_host` lembrado por máquina, em `~/.cloudez/panel_host` (irmão do
-      `token`, mas sem `chmod 0600` — não é segredo). `cloudez_remember_panel_host`
-      grava, `cloudez_auth_status` devolve o que estiver gravado. Antes disso,
-      todo comando que precisava do painel perguntava de novo, mesmo quando o
-      usuário já tinha informado um minutos antes, na mesma conversa ou numa
-      anterior
+      `token`, mas sem `chmod 0600` — não é segredo). Antes disso, todo comando
+      que precisava do painel perguntava de novo, mesmo quando o usuário já
+      tinha informado um minutos antes, na mesma conversa ou numa anterior.
+      A gravação é efeito colateral de `cloudez_panel_info`, não uma tool à
+      parte: começou como uma tool separada (`cloudez_remember_panel_host`),
+      chamada explicitamente por quem confirmava o painel, mas na prática esse
+      passo — sem efeito visível na resposta do turno — ficava de fora com
+      frequência demais, mesmo com instrução explícita para não pular. Como
+      `cloudez_panel_info` já é chamada sempre que há um painel para confirmar,
+      dobrar a gravação nela elimina a chance de esquecê-la
 - [x] `cloudez_auth_status` para de ser narrado ao usuário quando
       `authenticated: true` — "seu token foi verificado, veio do arquivo tal"
       é ruído quando checar login não é o pedido dele. Contrato explícito
@@ -435,11 +440,12 @@ O domínio varia: a Cloudez é **white-label**, e cada revenda tem o seu —
 o domínio em vez de presumir um, e confere com `cloudez_panel_info` antes de
 mandar o usuário para lá.
 
-Confirmado, o `panel_host` fica lembrado em **`~/.cloudez/panel_host`** — irmão
-do `token`, mas sem `chmod 0600`: não é segredo, só o endereço do painel.
-`cloudez_auth_status` devolve o que estiver gravado, e todo comando que
-precisa do painel confere ali antes de perguntar de novo. `CLOUDEZ_PANEL_HOST_FILE`
-muda o caminho, pelo mesmo motivo do `CLOUDEZ_TOKEN_FILE`.
+Confirmado, o `cloudez_panel_info` já grava o `panel_host` sozinho em
+**`~/.cloudez/panel_host`** — irmão do `token`, mas sem `chmod 0600`: não é
+segredo, só o endereço do painel. `cloudez_auth_status` devolve o que estiver
+gravado, e todo comando que precisa do painel confere ali antes de perguntar
+de novo. `CLOUDEZ_PANEL_HOST_FILE` muda o caminho, pelo mesmo motivo do
+`CLOUDEZ_TOKEN_FILE`.
 
 **Quem não tem conta cria pelo próprio Claude, sempre na Configr.** O
 `/cloudez:login` não pergunta por revenda — pergunta nome, e-mail e telefone,

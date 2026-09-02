@@ -121,7 +121,7 @@ Não recebe nem devolve o token — veja a seção 5.
   "source": "file",                  // "env" | "file" | "none"
   "token_file": "/home/ana/.cloudez/token",
   "verified": true,                  // false quando a API não pôde confirmar
-  "panel_host": "cloud.configr.com"  // ausente se nenhum comando gravou um ainda (§3.23)
+  "panel_host": "cloud.configr.com"  // ausente se cloudez_panel_info nunca confirmou um aqui (§3.15)
 }
 ```
 
@@ -139,10 +139,11 @@ foi escrita — que é `/cloudez:login` sendo o próprio pedido do usuário. Con
 explícito agora: falar sobre autenticação só quando ela FALTAR (então o caminho
 é o `/cloudez:login`), ou quando checar login for o pedido em si.
 
-`panel_host`, quando presente, é o que `cloudez_remember_panel_host` (§3.23)
-gravou numa chamada anterior — de QUALQUER comando, não só do que gravou. Quem
-chama confere este campo antes de perguntar o painel ao usuário: um painel já
-confirmado nesta máquina não precisa ser perguntado de novo a cada conversa.
+`panel_host`, quando presente, é o que `cloudez_panel_info` (§3.15) confirmou
+numa chamada anterior — de QUALQUER comando, não só do que gravou; a gravação é
+efeito colateral daquela tool, não uma tool à parte. Quem chama confere este
+campo antes de perguntar o painel ao usuário: um painel já confirmado nesta
+máquina não precisa ser perguntado de novo a cada conversa.
 
 Quando não há token — ou quando a Cloudez o recusou —, o retorno traz **os
 comandos prontos desta máquina**, e não só um conselho genérico:
@@ -1111,7 +1112,7 @@ o deploy terminar em erro por causa de um DNS que ainda vai propagar.
 
 ---
 
-### 3.15 `cloudez_panel_info` — read-only
+### 3.15 `cloudez_panel_info` — **mutating**
 
 Diz de que empresa é um endereço de painel e se ela abre cadastro. **Única tool
 que responde antes de existir conta**, e a única que não manda token nenhum
@@ -1157,6 +1158,27 @@ mesmo endpoint com o token da conta já autenticada. Foi exatamente essa
 diferença que causou `trial_plan_unavailable` numa conta que tinha o plano
 configurado: a primeira versão desta tool reaproveitava a consulta anônima do
 cadastro para isso, e o campo nunca aparecia.
+
+**Confirmado com sucesso, o `panel_host` sai gravado localmente** (o mesmo
+arquivo que `cloudez_auth_status`, §3.1, devolve em `panel_host`), por isso a
+tool é `mutating` e não `read-only`. Isto era uma tool separada,
+`cloudez_remember_panel_host`, chamada explicitamente por quem invocava esta
+— e na prática ela ficava de fora com frequência: é um passo sem efeito
+visível na resposta do turno em que acontece, e esse é exatamente o tipo de
+passo que instrução em prosa não garante de forma confiável. Virou efeito
+colateral desta tool porque `cloudez_panel_info` já é chamada sempre que há um
+`panel_host` para confirmar — remover o segundo passo remove a chance de
+esquecê-lo. A gravação falhando não invalida a consulta: o `panel_host` já foi
+confirmado contra a API antes de a gravação ser tentada.
+
+**O arquivo é `~/.cloudez/panel_host`, irmão do `token`, mas sem `chmod 0600`**
+— não é segredo, só o endereço do painel; a permissão default do diretório do
+usuário já basta. Grava o host já normalizado (protocolo, caminho e
+maiúsculas fora), nunca o que o usuário colou. Idempotente: gravar de novo
+sobrescreve, nunca acumula — um `panel_host` novo (o usuário mudou de revenda,
+ou corrigiu o que informou antes) simplesmente substitui o anterior. Não tem
+relação com autenticação: o token continua exigindo o fluxo do
+`/cloudez:login` inteiro; isto só evita repetir a pergunta do painel.
 
 ---
 
@@ -1344,7 +1366,7 @@ ou `cloudez_confirm_phone` — nunca em resposta a um pedido solto de
 é o que uma conta nova ganha de graça, não uma opção para quem já tem conta.
 Ausência de `trial_ia_plan_id` (revenda sem plano trial configurado) e
 "contratar cloud numa conta existente" levam ao mesmo lugar — não há tool: a
-contratação é manual, em `<panel_host>/clouds/create` (ver §3.24).
+contratação é manual, em `<panel_host>/clouds/create` (ver §3.23).
 
 ---
 
@@ -1414,7 +1436,7 @@ quem chama a rodá-la uma vez só, logo após o cadastro.
 
 **Não é resposta para "contratar um cloud" fora do cadastro** — nem para uma
 conta antiga sem cloud nenhuma. Trial é benefício de conta nova; contratação
-paga não tem tool, de propósito (§3.24): é dinheiro de verdade e escolha de
+paga não tem tool, de propósito (§3.23): é dinheiro de verdade e escolha de
 plano do usuário, não algo que se decida por ele. A orientação nesse caso é
 sempre a mesma, manual: abrir `<panel_host>/clouds/create` no painel.
 
@@ -1582,54 +1604,7 @@ de `cloudez_get_site`: não haveria como ser escolhido pelo usuário.
 
 ---
 
-### 3.23 `cloudez_remember_panel_host` — **mutating**
-
-Grava o `panel_host` localmente (`~/.cloudez/panel_host`, irmão do `token`),
-para `cloudez_auth_status` (§3.1) devolvê-lo nas próximas chamadas — de
-qualquer comando, nesta máquina. Existe porque, antes desta tool, todo
-comando que precisava do painel perguntava de novo, mesmo quando o usuário já
-tinha informado e confirmado um na mesma máquina minutos ou dias antes.
-
-```jsonc
-// input
-{
-  "type": "object",
-  "properties": {
-    "panel_host": { "type": "string", "description": "O panel_host que cloudez_panel_info devolveu, já confirmado" }
-  },
-  "required": ["panel_host"],
-  "additionalProperties": false
-}
-```
-
-```jsonc
-// output
-{ "remembered": true, "panel_host": "cloud.configr.com" }
-```
-
-**Não é segredo, ao contrário do token — só o endereço do painel.** O arquivo
-não leva `chmod 0600`; a permissão default do diretório do usuário já basta.
-
-**Normaliza antes de gravar**, com a mesma função que `cloudez_panel_info`
-(§3.15) usa para limpar o que o usuário cola da barra de endereços — protocolo,
-caminho e maiúsculas fora. O arquivo nunca guarda o que foi colado, só o host
-limpo.
-
-**Chame só depois de `cloudez_panel_info` confirmar o `panel_host`.** Gravar o
-que o usuário digitou sem essa confirmação arriscaria persistir um endereço
-errado, e o erro se repetiria em todo comando seguinte que confiasse no valor
-lembrado — até alguém notar.
-
-**Idempotente**: gravar de novo sobrescreve, nunca acumula. Um `panel_host`
-novo (o usuário mudou de revenda, ou corrigiu o que informou antes) simplesmente
-substitui o anterior.
-
-**Não tem relação com autenticação.** O token continua exigindo o fluxo do
-`/cloudez:login` inteiro; esta tool só evita repetir a pergunta do painel.
-
----
-
-### 3.24 Fora do escopo, por enquanto
+### 3.23 Fora do escopo, por enquanto
 
 Uma tool saiu desta proposta junto com a feature correspondente do plugin. Fica
 registrada para não ser redescoberta do zero:

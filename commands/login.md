@@ -1,6 +1,6 @@
 ---
 description: Verifica se há um token da Cloudez salvo e, se não houver, cria a conta ou conduz o usuário até o token no painel
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_remember_panel_host, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_trial_plan, mcp__cloudez__cloudez_setup_trial_cloud, mcp__cloudez__cloudez_list_clouds, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_trial_plan, mcp__cloudez__cloudez_setup_trial_cloud, mcp__cloudez__cloudez_list_clouds, Bash(cloudez-login:*), Bash(pbpaste:*), Bash(powershell.exe:*), AskUserQuestion
 ---
 
 Chame a tool `cloudez_auth_status`. Ela é quem responde pelo estado da
@@ -16,6 +16,10 @@ está tudo certo.
 **`authenticated: false`** — há dois caminhos, e eles não se parecem. Quem já tem
 conta pega o token no painel, e **você não pode fazer isso por ele**. Quem não
 tem conta se cadastra aqui mesmo, e aí é você quem executa quase tudo.
+
+**Não anuncie o resultado da checagem** ("não há autenticação salva", "sem
+token ainda") — isso é mecanismo interno, não informação para o usuário. Vá
+direto para a pergunta abaixo.
 
 # 1. Ele já tem conta?
 
@@ -34,6 +38,10 @@ nenhum: a Cloudez é white-label, e cada revenda tem o seu domínio —
 `cloud.configr.com` é o da Configr, não é "o" painel. Inventar um manda o
 usuário para um site que não é o dele.
 
+Peça só a pergunta em si ("qual o endereço do painel que você usa para
+entrar?"). Não mencione `panel_host` nem diga que nada foi salvo ainda — isso
+é estado interno, não faz parte da pergunta.
+
 Se ele não souber qual é, o endereço está no e-mail de boas-vindas da revenda, ou
 é o que ele usa para entrar todo dia.
 
@@ -44,19 +52,9 @@ que estiver na barra de endereços — `https://painel.exemplo.com/sites/123`, o
 veio produz `.../sites/123/account?tab=token`, que não existe.
 
 Se vier `panel_not_found`, o endereço está errado. Diga isso e peça de novo, em
-vez de mandá-lo abrir uma página que não vai carregar.
-
-**Confirmado — seja porque veio de `cloudez_auth_status`, seja porque acabou
-de sair de `cloudez_panel_info` — grave antes de seguir, não pule este passo
-mesmo sem efeito visível na resposta de agora:**
-
-```
-cloudez_remember_panel_host(panel_host: "<panel_host>")
-```
-
-Gravar de novo o que já estava salvo não tem custo: a tool é idempotente. Sem
-essa chamada, a próxima conversa pergunta o painel de novo, como se nada
-tivesse sido salvo.
+vez de mandá-lo abrir uma página que não vai carregar. Confirmado com sucesso,
+o painel já fica gravado nesta máquina sozinho — não é preciso chamar mais
+nada para isso.
 
 Então, com o `panel_host`:
 
