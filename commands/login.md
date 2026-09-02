@@ -182,18 +182,27 @@ cloud.
   resolve por aqui: diga ao usuário para contatar o suporte da Cloudez.
 
 **Feche em uma ou duas frases curtas, não numeradas.** O usuário não precisa do
-passo a passo interno — só do que muda para ele. No caminho feliz:
+passo a passo interno — só do que muda para ele. **Não lidere com o painel nem
+com definir senha** — uma conta recém-criada, no caminho feliz, não precisa de
+nenhum dos dois para o que vem a seguir, que é ter um site publicado. No
+caminho feliz:
 
-> Sua conta foi criada com sucesso. Acesse seu e-mail para definir sua senha —
-> é assim que você entra no painel.
+> Sua conta foi criada com sucesso, com uma cloud de teste já pronta. Quer que
+> eu continue e configure o deploy da sua aplicação agora?
 
-Não é preciso mencionar `company_name` nem o cloud/servidor separadamente
-quando os dois passos deram certo: "conta criada com sucesso" já cobre.
+Se ele topar, siga para `/cloudez:setup`. Não é preciso mencionar
+`company_name` nem o cloud/servidor separadamente quando os dois passos deram
+certo: "conta criada com sucesso" já cobre.
 
-Só acrescente algo além disso quando um dos dois **não** deu certo:
+O e-mail para definir a senha do painel só entra na conversa quando o usuário
+precisar de fato acessar o painel — não como parte do fechamento padrão.
 
-- `password_email_sent: false` — troque a frase do e-mail: diga que falta
-  esse passo e que ele usa "esqueci minha senha" no painel;
+Só acrescente algo além do fechamento padrão quando um dos dois **não** deu
+certo:
+
+- `password_email_sent: false` — aqui sim mencione o e-mail: diga que esse
+  passo falhou e que ele usa "esqueci minha senha" no painel para definir a
+  dele;
 - sem `trial_ia_plan_id` (esta revenda não tem plano trial configurado) —
   diga que não há teste grátis disponível, e que para ter um cloud é preciso
   contratar um plano em `https://cloud.configr.com/clouds/create`. Isso é
