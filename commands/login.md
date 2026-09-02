@@ -140,11 +140,16 @@ Com `phone_verified: true`, a conta está ativa e o token já está salvo. Chame
 `cloudez_get_trial_plan` com `panel_host: "cloud.configr.com"` — o mesmo do
 cadastro. Sem `trial_ia_plan_id` no retorno, a Configr não tem plano trial
 configurado: **não chame `cloudez_setup_trial_cloud`**, siga direto para a
-frase de fechamento abaixo, que já cobre esse caso.
+frase de fechamento abaixo — é o caso "sem trial disponível", não "trial
+falhou".
 
 Com o `trial_ia_plan_id`, chame `cloudez_setup_trial_cloud` passando esse
-mesmo id, para contratar o cloud de teste grátis da conta — o que antes era
-"iniciar o teste" no painel.
+mesmo id, para contratar o cloud de teste grátis da conta. **A contratação do
+teste é sempre feita por esta tool — nunca é algo que o cliente faz por conta
+própria no painel.** Diferente da contratação paga (ver `/cloudez:setup`),
+que é deliberadamente manual porque envolve dinheiro e escolha de plano do
+usuário, o teste grátis não tem opção manual equivalente neste fluxo: se a
+tool não conseguir, o caminho é o suporte da Cloudez, não o painel.
 
 **Não repita a chamada se ela falhar.** Não é idempotente: se o provisionamento
 tiver ocorrido apesar do erro reportado, uma segunda chamada cria um SEGUNDO
@@ -153,8 +158,8 @@ cloud.
 - **`cloud_setup_unconfirmed`** — a chamada falhou DEPOIS de enviada (visto na
   prática: provisionar demora, e um timeout não significa que nada foi criado).
   Chame `cloudez_list_clouds` antes de dizer qualquer coisa ao usuário: se o
-  cloud já aparecer lá, trate como sucesso; só diga que falta contratar se ele
-  realmente não existir.
+  cloud já aparecer lá, trate como sucesso; se ele realmente não existir, trate
+  como o caso "trial falhou" da frase de fechamento abaixo.
 - **`trial_already_exists`** — a conta já tem um cloud. Chame `cloudez_list_clouds`
   e trate como sucesso: não é erro, é a conta já pronta para o próximo passo.
 - **`cloud_limit_reached`** — limite de clouds da conta. Não é algo que se
@@ -173,8 +178,15 @@ Só acrescente algo além disso quando um dos dois **não** deu certo:
 
 - `password_email_sent: false` — troque a frase do e-mail: diga que falta
   esse passo e que ele usa "esqueci minha senha" no painel;
-- `cloudez_setup_trial_cloud` falhou — acrescente uma frase dizendo que falta
-  contratar o teste em `https://cloud.configr.com`.
+- sem `trial_ia_plan_id` (esta revenda não tem plano trial configurado) —
+  diga que não há teste grátis disponível, e que para ter um cloud é preciso
+  contratar um plano em `https://cloud.configr.com/clouds/create`. Isso é
+  contratação paga, não o teste — a distinção importa porque é a única vez
+  neste comando em que mandar o cliente ao painel é a resposta certa;
+- `cloudez_setup_trial_cloud` falhou e `cloudez_list_clouds` confirmou que o
+  cloud não existe — diga que a conta foi criada mas o teste grátis não pôde
+  ser provisionado, e peça para ele contatar o suporte da Cloudez. **Não**
+  mande para o painel: contratar o teste não é algo que o cliente faz sozinho.
 
 # 2. Capturar o token
 
