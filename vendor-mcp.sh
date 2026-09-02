@@ -41,7 +41,11 @@ fonte="${1:-../cloudez-mcp}"
 }
 
 echo "── bundle em $fonte"
-(cd "$fonte" && npm run bundle)
+# npm_config_script_shell forca o bash deste processo a rodar os scripts do
+# package.json. Sem isso, o npm do Windows chama cmd.exe por padrao, que nao
+# entende "$npm_package_version" no banner do esbuild — o bundle sai com a
+# string literal em vez da versao, e so o test/mcp.bats pega o defeito.
+(cd "$fonte" && npm_config_script_shell="$BASH" npm run bundle)
 
 for artefato in cloudez-mcp.mjs cloudez-auth.mjs cloudez-state.mjs; do
   [ -f "$fonte/dist/$artefato" ] || {

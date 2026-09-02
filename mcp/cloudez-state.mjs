@@ -1,4 +1,4 @@
-// cloudez-mcp 0.2.18 — gerado por 'npm run bundle'. Nao edite.
+// cloudez-mcp 0.2.19 — gerado por 'npm run bundle'. Nao edite.
 
 // src/deploy-state.ts
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -8,6 +8,9 @@ import { dirname, join } from "node:path";
 // src/errors.ts
 var ToolError = class extends Error {
   body;
+  // Corpo cru do 400, só para quem lançou poder reconhecer um campo específico (ver cloud.ts).
+  // Nunca sai daqui: errorResult() só serializa `body`, então isto não vaza para o modelo.
+  rawBody;
   constructor(code, message, opts = {}) {
     super(message);
     this.name = "ToolError";
@@ -19,6 +22,7 @@ var ToolError = class extends Error {
         ...opts.hint ? { hint: opts.hint } : {}
       }
     };
+    this.rawBody = opts.rawBody;
   }
 };
 

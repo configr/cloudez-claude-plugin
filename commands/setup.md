@@ -1,7 +1,7 @@
 ---
 description: Cria o .cloudez.yaml do projeto para um domínio e environment, se ainda não existir
 argument-hint: <domain> <environment> [--database cloudez|docker]
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_remember_panel_host, mcp__cloudez__cloudez_signup, mcp__cloudez__cloudez_resend_phone_code, mcp__cloudez__cloudez_confirm_phone, mcp__cloudez__cloudez_get_site, mcp__cloudez__cloudez_list_sites, mcp__cloudez__cloudez_list_clouds, mcp__cloudez__cloudez_create_site, mcp__cloudez__cloudez_configure_site, mcp__cloudez__cloudez_authorize_ssh_key, mcp__cloudez__cloudez_find_compose, mcp__cloudez__cloudez_list_local_ssh_keys, Bash(cloudez-setup:*), Read, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -64,8 +64,9 @@ poucos, com uma opção por site, e pergunte se o site dele é algum daqueles.
 - **Escolheu um** — siga com o domínio **daquele candidato**, não com o que ele
   digitou no passo 1. Refaça o `cloudez_get_site` com o domínio escolhido para
   obter os dados completos, e siga para o passo 3.
-- **Nenhum deles** — **encerre.** Diga que o site não foi localizado na conta.
-  Não crie o arquivo e não monte um domínio a partir dos candidatos.
+- **Nenhum deles** — pergunte se ele quer criar um site novo com o domínio do
+  passo 1. Se sim, vá para "Criar o site", abaixo. Se não, **encerre**: peça o
+  domínio correto e volte ao passo 1.
 
 Todo candidato vem com `domain` — a tool descarta os que a API devolve sem esse
 dado, porque não haveria como o usuário reconhecê-los.
@@ -87,9 +88,10 @@ convergir.
 
 - **Achou o site dele na lista** — siga com aquele domínio e refaça o
   `cloudez_get_site` para obter os dados completos.
-- **Não achou, ou veio vazio** — **encerre.** Duas causas prováveis, ofereça as
-  duas: typo no domínio, ou site que ainda não existe na Cloudez, e aí ele cria
-  no painel primeiro.
+- **Não achou, ou veio vazio** — pergunte se é typo no domínio ou se o site
+  ainda não existe. No primeiro caso, peça o domínio certo e volte ao passo 1.
+  No segundo, pergunte se ele quer criar um site novo ali. Se sim, vá para
+  "Criar o site", abaixo. Se não, **encerre**.
 
 Se o retorno trouxer `truncated`, repasse: a busca veio incompleta, e um domínio
 ausente dela ainda pode existir na conta.
@@ -101,6 +103,64 @@ consulta falhou por um problema nosso. Se for API fora do ar ou timeout, diga qu
 não foi possível confirmar agora e pergunte se ele quer tentar de novo.
 
 **`not_authenticated` ou `token_invalid`** — volte ao passo 0.
+
+### Criar o site
+
+Chegou aqui porque o usuário confirmou que quer um site novo, com o domínio do
+passo 1 — não algo que ele precise fazer no painel primeiro.
+
+```
+cloudez_list_clouds()
+```
+
+- **Nenhuma cloud** — vá direto para "Contratar uma cloud nova", abaixo. Isto é
+  conta antiga sem trial nenhum contratado; não confunda com conta nova, que já
+  sai do `/cloudez:login` com uma (`cloudez_setup_trial_cloud`);
+- **Uma cloud só** — use o `id` dela direto, sem perguntar: não há entre o quê
+  escolher;
+- **Mais de uma** — pergunte qual com AskUserQuestion, mostrando `name` e
+  `fqdn` de cada uma, e acrescente "contratar uma nova" como opção — o usuário
+  pode querer uma cloud separada mesmo já tendo outras.
+
+Se ele escolher "contratar uma nova", vá para "Contratar uma cloud nova",
+abaixo. Do contrário, com o `id` escolhido:
+
+```
+cloudez_create_site(cloud: <id>, domain: "<domain do passo 1>")
+```
+
+**Não pergunte o tipo do site.** É sempre `claude` — o único que este plugin
+publica — e a tool não aceita outro.
+
+O domínio é único **por cloud**, não por conta: se vier `invalid_argument`
+dizendo que o domínio já existe, é porque já há um site com ele **naquela
+cloud especificamente**. Confirme o domínio com o usuário antes de tentar de
+novo — repetir sem mudar nada dá o mesmo erro.
+
+**`site_creation_unconfirmed`** — a chamada falhou DEPOIS de enviada (visto na
+prática: criar o site demora, e um timeout não significa que nada foi criado).
+**Não chame `cloudez_create_site` de novo agora.** Chame `cloudez_get_site`
+com o mesmo domínio primeiro: se o site já aparecer lá, trate como sucesso e
+siga para o passo 3; só repita a criação se ele realmente não existir.
+
+Com o site criado, siga para o passo 3 com o `domain` que a tool devolveu. O
+retorno de `cloudez_create_site` tem a MESMA forma do `cloudez_get_site` —
+`stack`, `ssh` ou `ssh_unavailable`, `app_root_path`, `custom_port` —, então
+onde os passos 4 a 6 disserem "o `cloudez_get_site` do passo 2", leia-se
+"a confirmação do passo 2, seja ela `cloudez_get_site` ou `cloudez_create_site`".
+Os passos 5 a 7 seguem sem alteração: o site nasceu já do tipo `claude`, então
+a checagem de tipo do passo 5 passa direto.
+
+#### Contratar uma cloud nova
+
+Siga o procedimento de `/cloudez:hire-cloud` — é o mesmo comando que atende
+quem pede para contratar uma cloud fora deste fluxo, e o procedimento não é
+duplicado aqui: ele já cuida do painel (perguntando só se ainda não houver um
+lembrado nesta máquina), do aviso de que é sempre contratação paga, e do
+antes/depois de `cloudez_list_clouds` para achar a cloud nova.
+
+Com a cloud nova identificada, volte para `cloudez_create_site`, acima, usando
+o `id` dela — sem perguntar, se veio uma só.
 
 ## 3. Environment
 
