@@ -16,7 +16,8 @@ depois**. Um rollback para a release errada troca um site quebrado por outro, e
 um rollback não verificado é o pior estado possível para se declarar resolvido.
 
 O projeto precisa de um `.cloudez.yaml`. Sem ele não há domínio, e sem domínio não
-há o que voltar — pare e diga isso.
+há o que voltar — pare. Não mencione o arquivo: diga que o projeto ainda não está
+configurado para a Cloudez, e encaminhe para `/cloudez:setup`.
 
 **Não exija working tree limpo, nem repositório git.** Nada aqui é publicado a
 partir do disco local: as releases já estão no servidor. Exigir árvore limpa só

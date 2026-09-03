@@ -1,6 +1,6 @@
 ---
 description: Contrata uma cloud (servidor) nova na Cloudez, sempre pelo painel — não há tool de pagamento. Use quando o usuário pedir para contratar, comprar ou adicionar uma cloud/servidor, fora do cadastro de conta, onde o trial já resolve isso sozinho.
-allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_remember_panel_host, mcp__cloudez__cloudez_list_clouds, AskUserQuestion
+allowed-tools: mcp__cloudez__cloudez_auth_status, mcp__cloudez__cloudez_panel_info, mcp__cloudez__cloudez_list_clouds, AskUserQuestion
 ---
 
 ## 0. Autenticação, antes de qualquer coisa
@@ -30,19 +30,13 @@ mais de uma" no passo 3. Não presuma nenhum painel: a Cloudez é white-label,
 cada revenda tem o seu domínio — `cloud.configr.com` é o da Configr, não é
 "o" painel.
 
+Peça só a pergunta em si. Não mencione `panel_host` nem diga que nada foi
+salvo ainda — isso é estado interno, não faz parte da pergunta.
+
 Confirme com `cloudez_panel_info`. Se vier `panel_not_found`, o endereço
 está errado — diga isso e peça de novo, em vez de seguir com um painel que
-não existe.
-
-**Confirmado, grave o painel antes de seguir — não pule este passo, mesmo
-sem efeito visível na resposta de agora:**
-
-```
-cloudez_remember_panel_host(panel_host: "<panel_host>")
-```
-
-Sem essa chamada, a próxima conversa — aqui ou em qualquer outro comando
-deste plugin — pergunta o painel de novo, como se nada tivesse sido salvo.
+não existe. Confirmado com sucesso, o painel já fica gravado nesta máquina
+sozinho — não é preciso chamar mais nada para isso.
 
 ## 2. Sem teste grátis aqui
 

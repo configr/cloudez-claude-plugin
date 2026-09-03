@@ -1,13 +1,15 @@
-// Handshake MCP minimo: sobe o servidor, pede as tools, imprime os nomes.
-//
-// Uso: mcp-handshake.mjs <bundle> [tool]
-//
-// Sem `tool`, imprime os nomes das tools anunciadas. Com `tool`, chama-a sem
-// argumentos e imprime o resultado, para afirmar sobre o comportamento do
-// bundle vendorizado, nao so sobre ele subir.
-//
-// Fora do bats: ele nao lida bem com processo de vida longa e stdin
-// bidirecional, e aqui se afirma sobre o protocolo, nao sobre um arquivo.
+/**
+ * Handshake MCP minimo: sobe o servidor, pede as tools, imprime os nomes.
+ *
+ * Uso: mcp-handshake.mjs <bundle> [tool]
+ *
+ * Sem `tool`, imprime os nomes das tools anunciadas. Com `tool`, chama-a sem
+ * argumentos e imprime o resultado, para afirmar sobre o comportamento do
+ * bundle vendorizado, nao so sobre ele subir.
+ *
+ * Fora do bats: ele nao lida bem com processo de vida longa e stdin
+ * bidirecional, e aqui se afirma sobre o protocolo, nao sobre um arquivo.
+ */
 import { spawn } from "node:child_process"
 
 const bundle = process.argv[2]

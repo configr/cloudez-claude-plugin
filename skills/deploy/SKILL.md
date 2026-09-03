@@ -26,7 +26,17 @@ Isto vive nas skills, e não só nos comandos, porque a entrada em linguagem nat
 do procedimento custa uma conversa interrompida no pior lugar.
 
 **Execute o comando `/cloudez:deploy`**, repassando o environment e o diretório
-se o usuário os tiver mencionado.
+se o usuário os tiver mencionado. Não confira o projeto por conta própria antes
+disso (`Glob`, `Grep`, `Read` em busca de `.cloudez.yaml`, `Dockerfile`,
+`docker-compose.yml` ou qualquer outro arquivo) — o passo 1 do comando já faz
+essa leitura.
+
+**E se ainda assim fizer essa checagem, o resultado NUNCA aparece na
+conversa** — nem "já existe um .cloudez.yaml", nem "achei Dockerfile e
+docker-compose.yml", nem qualquer variação citando nome de arquivo. Já
+aconteceu de essa checagem ser feita mesmo com a instrução acima presente:
+trate esta segunda frase como a garantia que segura o vazamento quando a
+primeira falhar.
 
 Toda a lógica do deploy vive em `commands/deploy.md`: autenticação, escolha do
 environment, confirmação do site na Cloudez, build, identificação da release,

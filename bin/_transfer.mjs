@@ -1,12 +1,14 @@
-// Transporte: tar local em stream para tar remoto, através de ssh.
-//
-// Não é rsync: rsync não existe no Windows, o diretório de release está
-// sempre vazio (nada para o delta transfer comparar), e um stream único é
-// mais rápido que os round-trips do scp.
-//
-// O pipe entre os dois processos é montado por descritor, nunca por
-// `.pipe()` do Node, que rotearia cada byte pelo event loop e degradaria a
-// vazão. Ver `esperar` para por que o pai só lê, nunca escreve.
+/**
+ * Transporte: tar local em stream para tar remoto, através de ssh.
+ *
+ * Não é rsync: rsync não existe no Windows, o diretório de release está
+ * sempre vazio (nada para o delta transfer comparar), e um stream único é
+ * mais rápido que os round-trips do scp.
+ *
+ * O pipe entre os dois processos é montado por descritor, nunca por
+ * `.pipe()` do Node, que rotearia cada byte pelo event loop e degradaria a
+ * vazão. Ver `esperar` para por que o pai só lê, nunca escreve.
+ */
 
 import { spawn } from "node:child_process"
 
@@ -20,23 +22,29 @@ import { listarPayload } from "./_payload.mjs"
  * aviso de host novo na primeira conexão, que não é falha).
  */
 export function transferir(dep, localDir) {
-  // A lista de arquivos vai por stdin, não por `--exclude`: a semântica do
-  // gitignore (âncora, negação, `**`) não tem tradução fiel para `--exclude`,
-  // e é a mesma lista que o hash percorre, então as duas nunca divergem.
+  /**
+   * A lista de arquivos vai por stdin, não por `--exclude`: a semântica do
+   * gitignore (âncora, negação, `**`) não tem tradução fiel para `--exclude`,
+   * e é a mesma lista que o hash percorre, então as duas nunca divergem.
+   */
   const { entries, ignore } = listarPayload(localDir)
 
-  // conferirDiretorio (em cloudez-sync) só olha se o diretório tem algo
-  // dentro, e um dist/ cujo .gitignore exclui tudo ainda tem o próprio
-  // .gitignore. Sem esta recusa o deploy enviaria um pacote vazio e ativaria
-  // uma release sem nenhum arquivo.
+  /**
+   * conferirDiretorio (em cloudez-sync) só olha se o diretório tem algo
+   * dentro, e um dist/ cujo .gitignore exclui tudo ainda tem o próprio
+   * .gitignore. Sem esta recusa o deploy enviaria um pacote vazio e ativaria
+   * uma release sem nenhum arquivo.
+   */
   if (entries.length === 0) {
     const e = new Error(mensagemVazio(localDir, ignore))
     e.code = "build_output_empty"
     throw e
   }
 
-  // `-C` antes de `-T`: no GNU tar `-C` é posicional, e um `-C` depois de
-  // `-T` não alcança os nomes lidos da stdin, produzindo um pacote vazio.
+  /**
+   * `-C` antes de `-T`: no GNU tar `-C` é posicional, e um `-C` depois de
+   * `-T` não alcança os nomes lidos da stdin, produzindo um pacote vazio.
+   */
   const tarArgs = ["-czf", "-", "-C", localDir, "-T", "-"]
 
   const remoto = `tar xzf - -C ${aspasParaShellRemoto(dep.ssh.path)}`
@@ -48,23 +56,29 @@ export function transferir(dep, localDir) {
     remoto,
   ]
 
-  // COPYFILE_DISABLE=1 impede o tar do macOS de empacotar os metadados
-  // AppleDouble (`._index.html` e afins). Fora do macOS a variável não
-  // existe e o tar a ignora, sem precisar de condicional por plataforma.
+  /**
+   * COPYFILE_DISABLE=1 impede o tar do macOS de empacotar os metadados
+   * AppleDouble (`._index.html` e afins). Fora do macOS a variável não
+   * existe e o tar a ignora, sem precisar de condicional por plataforma.
+   */
   const tar = spawn("tar", tarArgs, {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, COPYFILE_DISABLE: "1" },
   })
 
-  // A lista, não o conteúdo, entra pela stdin do tar; o pipe do sistema a
-  // absorve antes mesmo de o ssh estar de pé.
+  /**
+   * A lista, não o conteúdo, entra pela stdin do tar; o pipe do sistema a
+   * absorve antes mesmo de o ssh estar de pé.
+   */
   tar.stdin.on("error", () => {}) // EPIPE quando o tar morre antes de ler tudo.
   tar.stdin.end(entries.map((e) => e.rel).join("\n") + "\n")
 
-  // tar.stdout entra como stdin do ssh por descritor duplicado, sem passar
-  // pelo pai. Ler `tar.stdout` aqui também criaria um segundo leitor do
-  // mesmo pipe, dividindo os bytes entre os dois e corrompendo o pacote:
-  // o `destroy` fecha essa ponta de vez.
+  /**
+   * tar.stdout entra como stdin do ssh por descritor duplicado, sem passar
+   * pelo pai. Ler `tar.stdout` aqui também criaria um segundo leitor do
+   * mesmo pipe, dividindo os bytes entre os dois e corrompendo o pacote:
+   * o `destroy` fecha essa ponta de vez.
+   */
   const ssh = spawn("ssh", sshArgs, { stdio: [tar.stdout, "pipe", "pipe"] })
   tar.stdout.destroy()
 
@@ -78,8 +92,10 @@ export function transferir(dep, localDir) {
   return Promise.all([esperar(tar, "tar"), esperar(ssh, "ssh")]).then(([doTar, doSsh]) => {
     const logs = `${tarErr}\n${sshErr}`.trim()
 
-    // Checa o tar antes do ssh: se o tar local falhar no meio, o tar remoto
-    // ainda pode extrair o parcial e sair zero, o que reportaria sucesso.
+    /**
+     * Checa o tar antes do ssh: se o tar local falhar no meio, o tar remoto
+     * ainda pode extrair o parcial e sair zero, o que reportaria sucesso.
+     */
     if (doTar) return { stats: "", logs, erro: doTar }
     if (doSsh) return { stats: "", logs, erro: doSsh }
 
@@ -102,7 +118,7 @@ function esperar(proc, nome) {
   })
 }
 
-/** Protege o caminho para o shell remoto: o ssh junta os argumentos numa string. */
+// Protege o caminho para o shell remoto: o ssh junta os argumentos numa string.
 function aspasParaShellRemoto(s) {
   return `'${s.split("'").join(`'\\''`)}'`
 }

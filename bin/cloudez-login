@@ -1,26 +1,20 @@
 #!/usr/bin/env node
-// Uso: cloudez-login [--stdin]
-//
-//   --stdin      lê o token de um pipe, sem prompt e sem terminal:
-//                  pbpaste | cloudez-login --stdin        (macOS, token no clipboard)
-//                  echo "$CLOUDEZ_TOKEN" | ... --stdin    (CI)
-//   (sem flag)   pergunta o token e salva. Exige terminal.
-//
-// Token é a única forma de autenticar; login por senha foi descontinuado,
-// ver `docs/mcp-tool-contract.md`.
-//
-// O modo interativo exige TTY: um token digitado na conversa entraria no
-// contexto do modelo e no transcript da sessão. No Claude Code, chame com
-// `!` na frente para rodar no terminal da sessão. O --stdin existe para
-// quem não tem terminal: o segredo vai de um pipe direto ao processo, sem
-// passar pela conversa. O token não aparece em nenhuma saída deste script.
-//
-// Este script só coleta e grava. Quem responde se o usuário está
-// autenticado é a tool `cloudez_auth_status` do MCP.
-//
-// Sem extensão de propósito: `cloudez-login` é o nome que o usuário digita
-// e que o allowlist autoriza. `bin/package.json` (`{"type": "module"}`) é
-// quem informa ao Node que este arquivo é ESM.
+/**
+ * Uso: cloudez-login [--stdin]. --stdin lê o token de um pipe
+ * (pbpaste | cloudez-login --stdin), sem prompt e sem terminal. Sem a flag,
+ * pergunta o token e salva; exige TTY.
+ *
+ * Token é a única forma de autenticar; login por senha foi descontinuado,
+ * ver docs/mcp-tool-contract.md.
+ *
+ * O modo interativo exige TTY porque um token digitado na conversa entraria
+ * no contexto do modelo e no transcript da sessão. O --stdin existe para
+ * quem não tem terminal: o segredo vai do pipe direto ao processo, sem
+ * passar pela conversa.
+ *
+ * Este script só coleta e grava. Quem responde se o usuário está
+ * autenticado é a tool cloudez_auth_status do MCP.
+ */
 
 import { openSync } from "node:fs"
 import { ReadStream } from "node:tty"
@@ -29,10 +23,12 @@ import { fileURLToPath } from "node:url"
 // Envelope de saída compartilhado com cloudez-setup.
 import { die, ok } from "./_out.mjs"
 
-// Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
-// subiria um transporte stdio e penduraria este processo. Implementa a
-// mesma precedência de token, o mesmo Authorization: Token e a mesma
-// tabela de vereditos que o servidor MCP usa.
+/**
+ * Bundle de biblioteca, não o servidor: importar mcp/cloudez-mcp.mjs
+ * subiria um transporte stdio e penduraria este processo. Implementa a
+ * mesma precedência de token, o mesmo Authorization: Token e a mesma
+ * tabela de vereditos que o servidor MCP usa.
+ */
 import { resolveToken, saveToken, tokenFile, tokenSource, verifyToken } from "../mcp/cloudez-auth.mjs"
 
 async function statusJson(status, verified) {
@@ -66,9 +62,11 @@ async function gravarOuMorrer(token) {
   await statusJson("authenticated", verdict === "valid")
 }
 
-// Espaço no meio não é token: é uma linha copiada por engano, ou o
-// clipboard com outra coisa. Recusar evita uma chamada de API para
-// descobrir o óbvio.
+/**
+ * Espaço no meio não é token: é uma linha copiada por engano, ou o
+ * clipboard com outra coisa. Recusar evita uma chamada de API para
+ * descobrir o óbvio.
+ */
 function recusarSeNaoParecerToken(token, origem, hint) {
   if (/\s/.test(token)) die("invalid_token", `${origem} tem espaços, não parece um token.`, { hint })
 }
@@ -152,8 +150,10 @@ if (modo === "--stdin") {
   await gravarOuMorrer(token)
 }
 
-// Login por senha não existe mais em lugar nenhum; um erro genérico de
-// argumento desconhecido não deixaria isso claro.
+/**
+ * Login por senha não existe mais em lugar nenhum; um erro genérico de
+ * argumento desconhecido não deixaria isso claro.
+ */
 if (modo === "--password") {
   die("password_login_disabled", "Login por e-mail e senha foi descontinuado.", {
     hint: "Gere um token no painel da Cloudez e rode cloudez-login sem argumento.",
@@ -171,8 +171,7 @@ if (modo) {
 const terminal = process.stdin.isTTY ? abrirTerminal() : null
 
 if (!terminal) {
-  // Caminho absoluto porque bin/ só está no PATH da tool Bash, não no
-  // terminal do usuário.
+  // Caminho absoluto porque bin/ só está no PATH da tool Bash, não no terminal do usuário.
   const self = fileURLToPath(import.meta.url)
   die("no_tty", "cloudez-login exige um terminal interativo.", {
     claude_code_command: `! ${self}`,
@@ -195,8 +194,10 @@ process.stderr.write(
 )
 
 if (existenteValido) {
-  // Rotacionar o token no painel é rotina; sem este aviso não haveria como
-  // trocar um token válido por outro sem apagar o arquivo na mão.
+  /**
+   * Rotacionar o token no painel é rotina; sem este aviso não haveria como
+   * trocar um token válido por outro sem apagar o arquivo na mão.
+   */
   process.stderr.write("  Já existe um token válido aqui. Enter mantém o atual.\n")
 }
 process.stderr.write("  ───────────────────────────────────────────────\n\n")

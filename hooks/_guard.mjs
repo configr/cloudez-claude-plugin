@@ -1,5 +1,7 @@
-// Decisão do guard-rail de escrita, separada do processo que a aplica, para
-// poder ser testada como função em vez de exercitar o adaptador.
+/**
+ * Decisão do guard-rail de escrita, separada do processo que a aplica, para
+ * poder ser testada como função em vez de exercitar o adaptador.
+ */
 
 import { createHash } from "node:crypto"
 
@@ -32,7 +34,7 @@ function segmentos(cmd) {
   return cmd.split(/\|\||&&|[|;\n]/)
 }
 
-/** Verbo de escrita neste trecho. `-d` já é POST no curl, `-F` é upload. */
+// Verbo de escrita neste trecho. `-d` já é POST no curl, `-F` é upload.
 function escreve(t) {
   return (
     /(^|\s)-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(t) ||

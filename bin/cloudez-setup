@@ -1,22 +1,20 @@
 #!/usr/bin/env node
-// Uso: cloudez-setup <domain> <environment>
-//
-// Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
-// ainda não existe um. Não é erro rodar duas vezes: com config presente ele
-// reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os
-// outros environments, que é o dado mais destrutivo do deploy.
-//
-// Sem extensão de propósito: `cloudez-setup` é o nome que o usuário digita e
-// que o allowlist autoriza. `bin/package.json` (`{"type": "module"}`) é quem
-// informa ao Node que este arquivo é ESM.
-//
-// Não exige token nem confirma que o domínio existe na conta: quem confirma
-// é a tool `cloudez_get_site`, chamada por `/cloudez:setup` antes de chegar
-// aqui. Rodado direto, este script escreve config para qualquer FQDN bem
-// formado, exista ou não: a ordem certa é garantida por commands/setup.md.
-//
-// Continua fora do MCP porque escreve no projeto do usuário; ler a máquina
-// local não é motivo para isso, mas gravar nela é decisão de outra ordem.
+/**
+ * Uso: cloudez-setup <domain> <environment>
+ *
+ * Cria o .cloudez.yaml do projeto, com o bloco do environment pedido, quando
+ * ainda não existe um. Não é erro rodar duas vezes: com config presente ele
+ * reporta e sai sem tocar no arquivo. Sobrescrever apagaria o root e os
+ * outros environments, que é o dado mais destrutivo do deploy.
+ *
+ * Não exige token nem confirma que o domínio existe na conta: quem confirma
+ * é a tool cloudez_get_site, chamada por /cloudez:setup antes de chegar
+ * aqui. Rodado direto, este script escreve config para qualquer FQDN bem
+ * formado, exista ou não: a ordem certa é garantida por commands/setup.md.
+ *
+ * Continua fora do MCP porque escreve no projeto do usuário; ler a máquina
+ * local não é motivo para isso, mas gravar nela é decisão de outra ordem.
+ */
 
 import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
@@ -62,8 +60,7 @@ function resolveConfig() {
 function gravarDatabase(caminho, environment, valor) {
   const linhas = readFileSync(caminho, "utf8").split("\n")
 
-  // Indentação do arquivo, não a que este programa gera: reindentar
-  // reescreveria o que não foi pedido.
+  // Indentação do arquivo, não a que este programa gera: reindentar reescreveria o que não foi pedido.
   const iEnv = linhas.findIndex((l) => new RegExp(`^\\s+${environment}:\\s*$`).test(l))
   if (iEnv === -1) {
     die("environment_not_found", `O environment '${environment}' nao esta em ${caminho}.`, {
@@ -82,9 +79,11 @@ function gravarDatabase(caminho, environment, valor) {
 
   const iDb = linhas.slice(iEnv + 1, fim).findIndex((l) => /^\s+database:/.test(l))
 
-  // Recuo dos irmãos, não `recuo + 2`: um arquivo com quatro espaços
-  // receberia a chave com seis. O fallback só vale sem nenhum filho, que o
-  // setup nunca gera.
+  /**
+   * Recuo dos irmãos, não `recuo + 2`: um arquivo com quatro espaços
+   * receberia a chave com seis. O fallback só vale sem nenhum filho, que o
+   * setup nunca gera.
+   */
   const irmao = linhas.slice(iEnv + 1, fim).find((l) => l.trim() !== "")
   const recuoFilho = irmao ? /^(\s*)/.exec(irmao)[1] : `${recuo}  `
 
@@ -163,9 +162,11 @@ if (!bruto) {
   })
 }
 
-// DNS não diferencia maiúscula, mas o caminho no servidor diferencia: o domínio
-// vira `~/<domain>/www/claude`, então normalizar aqui evita dois diretórios para
-// o mesmo site.
+/**
+ * DNS não diferencia maiúscula, mas o caminho no servidor diferencia: o
+ * domínio vira `~/<domain>/www/claude`, então normalizar aqui evita dois
+ * diretórios para o mesmo site.
+ */
 const domain = bruto.toLowerCase()
 
 if (!isFqdn(domain)) {
@@ -180,9 +181,11 @@ if (!environment) {
   })
 }
 
-// O environment vira chave YAML e é interpolado no template. Restringir o
-// formato aqui é o que impede um nome com espaço ou dois-pontos de gerar um
-// arquivo quebrado que o usuário não escreveu.
+/**
+ * O environment vira chave YAML e é interpolado no template. Restringir o
+ * formato aqui é o que impede um nome com espaço ou dois-pontos de gerar um
+ * arquivo quebrado que o usuário não escreveu.
+ */
 if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(environment)) {
   die("invalid_environment", `Nome de environment invalido: '${environment}'.`, {
     hint: "Use letras, numeros, hifen ou underscore. Ex.: default, staging, production.",
@@ -192,27 +195,33 @@ if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(environment)) {
 const target = resolveConfig()
 
 if (existsSync(target)) {
-  // Sem `--database`, nada muda: sobrescrever apagaria o root e os outros
-  // environments. Com ele, mexe-se numa chave só.
+  /**
+   * Sem `--database`, nada muda: sobrescrever apagaria o root e os outros
+   * environments. Com ele, mexe-se numa chave só.
+   */
   if (database === undefined) ok({ status: "exists", path: target, domain, environment })
   ok({ ...gravarDatabase(target, environment, database), path: target, domain, environment, database })
 }
 
-// Só o domínio e o database: root e ssh são deriváveis pelas tools a cada
-// deploy, e cópia de dado derivável num arquivo versionado envelhece (a
-// Cloudez renomeia o diretório quando o domínio muda). Config antiga que já
-// tem `root` segue valendo, e vence o derivado.
-//
-// O arquivo gerado não leva comentário: é config de projeto lida por quem já
-// sabe o que está fazendo, e o /cloudez:setup explica o resto na conversa.
+/**
+ * Só o domínio e o database: root e ssh são deriváveis pelas tools a cada
+ * deploy, e cópia de dado derivável num arquivo versionado envelhece (a
+ * Cloudez renomeia o diretório quando o domínio muda). Config antiga que já
+ * tem `root` segue valendo, e vence o derivado.
+ *
+ * O arquivo gerado não leva comentário: é config de projeto lida por quem já
+ * sabe o que está fazendo, e o /cloudez:setup explica o resto na conversa.
+ */
 const linhaDb = database ? `    database: ${database}\n` : ""
 writeFileSync(
   target,
   `cloudez:\n  ${environment}:\n    domain: ${domain}\n${linhaDb}`,
 )
 
-// Sem `todo`: não sobra nada para o usuário preencher. O destino ssh vem do
-// cloudez_get_site, e o root já sai escrito.
+/**
+ * Sem `todo`: não sobra nada para o usuário preencher. O destino ssh vem do
+ * cloudez_get_site, e o root já sai escrito.
+ */
 ok({
   status: "created",
   path: target,

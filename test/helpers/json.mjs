@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// Extrai um campo de um JSON, no formato do `jq -r`. JSON pelo stdin,
-// caminho no argumento. Existe para tirar o `jq` da suíte.
-//
-// Não é uma reimplementação do jq, e não deve virar uma: aceita caminho com
-// ponto e índice de array, que é tudo o que a suíte usa. Além disso é sinal
-// de que o teste quer afirmar algo mais complicado do que deveria.
-//
-// Saída no formato do `-r`: string crua, sem aspas; null e campo ausente
-// saem como `null`.
+/**
+ * Extrai um campo de um JSON, no formato do `jq -r`. JSON pelo stdin,
+ * caminho no argumento. Existe para tirar o `jq` da suíte.
+ *
+ * Não é uma reimplementação do jq, e não deve virar uma: aceita caminho com
+ * ponto e índice de array, que é tudo o que a suíte usa. Além disso é sinal
+ * de que o teste quer afirmar algo mais complicado do que deveria.
+ *
+ * Saída no formato do `-r`: string crua, sem aspas; null e campo ausente
+ * saem como `null`.
+ */
 
 const caminho = process.argv[2] ?? "."
 
@@ -18,8 +20,10 @@ let valor
 try {
   valor = JSON.parse(Buffer.concat(pedacos).toString("utf8"))
 } catch (e) {
-  // Como o jq: erro de parse não vira `null` em stdout. Um teste que compara com
-  // "null" tem de falhar aqui, e não passar por acidente.
+  /**
+   * Como o jq: erro de parse não vira `null` em stdout. Um teste que compara com
+   * "null" tem de falhar aqui, e não passar por acidente.
+   */
   process.stderr.write(`json.mjs: entrada não é JSON válido: ${e.message}\n`)
   process.exit(1)
 }
